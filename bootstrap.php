@@ -10,6 +10,7 @@ require_once $root . '/src/Env.php';
 require_once $root . '/src/Format.php';
 require_once $root . '/src/FragmentClient.php';
 require_once $root . '/src/TonClient.php';
+require_once $root . '/src/WalletClient.php';
 require_once $root . '/src/Render.php';
 require_once $root . '/src/TelegramApi.php';
 require_once $root . '/src/UpdateHandler.php';

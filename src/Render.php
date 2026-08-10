@@ -53,4 +53,18 @@ final class Render
 
         return implode("\n", $lines);
     }
+
+    public static function wallet(array $data): string
+    {
+        $lines = ['👛 موجودی ولت', "آدرس: {$data['address']}", ''];
+        $lines[] = sprintf('موجودی: %.4f TON', $data['balance_ton']);
+
+        if ($data['toman'] !== null) {
+            $lines[] = sprintf('معادل: %s تومان', number_format((int) round($data['toman'])));
+        } else {
+            $lines[] = 'معادل تومان در دسترس نبود (نرخ لحظه‌ای دریافت نشد).';
+        }
+
+        return implode("\n", $lines);
+    }
 }

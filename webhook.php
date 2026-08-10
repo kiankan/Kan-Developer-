@@ -12,10 +12,14 @@ $update = json_decode((string) $raw, true);
 
 http_response_code(200);
 
-if (is_array($update) && isset($update['message'])) {
+if (is_array($update)) {
     $api = new TelegramApi($token);
     try {
-        UpdateHandler::handle($api, $update['message'], $adminId);
+        if (isset($update['message'])) {
+            UpdateHandler::handle($api, $update['message'], $adminId);
+        } elseif (isset($update['callback_query'])) {
+            UpdateHandler::handleCallback($api, $update['callback_query'], $adminId);
+        }
     } catch (Throwable $e) {
         error_log('kan_checker webhook error: ' . $e->getMessage());
     }

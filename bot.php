@@ -31,13 +31,14 @@ while (true) {
 
     foreach ($updates as $update) {
         $offset = $update['update_id'] + 1;
-        if (!isset($update['message'])) {
-            continue;
-        }
         try {
-            UpdateHandler::handle($api, $update['message'], $adminId);
+            if (isset($update['message'])) {
+                UpdateHandler::handle($api, $update['message'], $adminId);
+            } elseif (isset($update['callback_query'])) {
+                UpdateHandler::handleCallback($api, $update['callback_query'], $adminId);
+            }
         } catch (Throwable $e) {
-            fwrite(STDERR, 'خطا در پردازش پیام: ' . $e->getMessage() . "\n");
+            fwrite(STDERR, 'خطا در پردازش آپدیت: ' . $e->getMessage() . "\n");
         }
     }
 }

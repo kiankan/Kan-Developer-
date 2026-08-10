@@ -102,6 +102,8 @@ write_systemd_unit() {
 Description=kan_checker Telegram bot
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -118,9 +120,17 @@ EOF
 }
 
 self_link() {
+  # نکته‌ی مهم: هرگز مستقیم روی $BIN_PATH بازنویسی نکن — وقتی این اسکریپت با
+  # اجرای مستقیم «kancheckerctl ...» (یعنی از همین فایل) صدا زده می‌شه، بازنویسی
+  # درجای فایلی که در حال اجراست باعث می‌شه bash در وسط خوندن اسکریپت به محتوای
+  # جدید بپره و با خطای syntax error از کار بیفته. به‌جاش یک فایل موقت نوشته و
+  # با mv (که atomic هست و اینود قدیمی رو دست‌نخورده نگه می‌داره) جایگزینش می‌کنیم.
   if [ -f "$INSTALL_DIR/kancheckerctl" ]; then
-    cp "$INSTALL_DIR/kancheckerctl" "$BIN_PATH"
-    chmod +x "$BIN_PATH"
+    local tmp
+    tmp=$(mktemp "${BIN_PATH}.XXXXXX")
+    cp "$INSTALL_DIR/kancheckerctl" "$tmp"
+    chmod +x "$tmp"
+    mv -f "$tmp" "$BIN_PATH"
   fi
 }
 

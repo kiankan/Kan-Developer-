@@ -39,13 +39,30 @@ final class TelegramApi
         return $this->call('getUpdates', [
             'offset' => $offset,
             'timeout' => $timeout,
-            'allowed_updates' => json_encode(['message']),
+            'allowed_updates' => json_encode(['message', 'callback_query']),
         ], $timeout + 10);
     }
 
-    public function sendMessage(int $chatId, string $text): void
+    public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null): void
     {
-        $this->call('sendMessage', ['chat_id' => $chatId, 'text' => $text]);
+        $params = ['chat_id' => $chatId, 'text' => $text];
+        if ($replyMarkup !== null) {
+            $params['reply_markup'] = json_encode($replyMarkup);
+        }
+        $this->call('sendMessage', $params);
+    }
+
+    public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
+    {
+        try {
+            $params = ['callback_query_id' => $callbackQueryId];
+            if ($text !== null) {
+                $params['text'] = $text;
+            }
+            $this->call('answerCallbackQuery', $params);
+        } catch (Throwable) {
+            // بی‌اهمیت، فقط برای پاک‌شدن حالت لودینگ دکمه است
+        }
     }
 
     public function sendChatAction(int $chatId, string $action = 'typing'): void

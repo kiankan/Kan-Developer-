@@ -7,8 +7,11 @@ final class UpdateHandler
     private const HELP_TEXT = "سلام! هر وقت خواستید یکی از این دستورها رو بفرستید تا همون لحظه جواب بگیرید:\n\n"
         . "/auction <یوزرنیم یا لینک> — زمان باقی‌مانده و وضعیت مزایده Fragment\n"
         . "/tx <هش تراکنش> — وضعیت یک تراکنش TON\n"
+        . "/wallet <آدرس ولت> — موجودی ولت به TON و تومان\n"
         . "/check <یوزرنیم یا لینک یا هش> — تشخیص خودکار نوع ورودی\n\n"
         . "می‌تونید لینک fragment.com، لینک والت (مثل Tonkeeper) یا فقط یوزرنیم رو بفرستید.";
+
+    private const STATUS_TEXT = '🟢 ربات فعال است و آماده‌ی پاسخگویی.';
 
     public static function handle(TelegramApi $api, array $message, ?int $adminId): void
     {
@@ -17,6 +20,13 @@ final class UpdateHandler
         $text = trim($message['text'] ?? '');
 
         if ($chatId === null || $text === '') {
+            return;
+        }
+
+        // این دستور برای همه در دسترسه، حتی اگه ADMIN_ID تنظیم شده باشه.
+        if (self::isCommand($text, '/status')) {
+            $api->sendMessage($chatId, self::STATUS_TEXT);
+
             return;
         }
 
@@ -30,10 +40,16 @@ final class UpdateHandler
             return;
         }
 
+        if (self::isCommand($text, '/admin')) {
+            self::sendAdminPanel($api, $chatId);
+
+            return;
+        }
+
         if (self::isCommand($text, '/auction')) {
             $query = self::commandArg($text);
             if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم یا لینک رو هم بفرستید. مثال:\n/auction esalatjonob");
+                $api->sendMessage($chatId, "لطفاً یوزرنیم یا لینک رو هم بفرستید. مثال:\n/auction durov");
 
                 return;
             }
@@ -42,7 +58,7 @@ final class UpdateHandler
             return;
         }
 
-        if (self::isCommand($text, '/tx')) {
+        if (self::isCommand($text, '/tx') || self::isCommand($text, '/hash')) {
             $query = self::commandArg($text);
             if ($query === null) {
                 $api->sendMessage($chatId, "لطفاً هش تراکنش رو هم بفرستید. مثال:\n/tx <hash>");
@@ -54,10 +70,22 @@ final class UpdateHandler
             return;
         }
 
+        if (self::isCommand($text, '/wallet')) {
+            $query = self::commandArg($text);
+            if ($query === null) {
+                $api->sendMessage($chatId, "لطفاً آدرس ولت رو هم بفرستید. مثال:\n/wallet <آدرس ولت TON>");
+
+                return;
+            }
+            self::replyWallet($api, $chatId, $query);
+
+            return;
+        }
+
         if (self::isCommand($text, '/check')) {
             $query = self::commandArg($text);
             if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک یا هش تراکنش رو بفرستید. مثال:\n/check esalatjonob");
+                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک یا هش تراکنش رو بفرستید. مثال:\n/check durov");
 
                 return;
             }
@@ -71,6 +99,56 @@ final class UpdateHandler
         }
 
         self::dispatch($api, $chatId, $text);
+    }
+
+    public static function handleCallback(TelegramApi $api, array $callbackQuery, ?int $adminId): void
+    {
+        $callbackId = $callbackQuery['id'] ?? null;
+        $data = $callbackQuery['data'] ?? '';
+        $fromId = $callbackQuery['from']['id'] ?? null;
+        $chatId = $callbackQuery['message']['chat']['id'] ?? null;
+
+        if ($callbackId !== null) {
+            $api->answerCallbackQuery($callbackId);
+        }
+        if ($chatId === null) {
+            return;
+        }
+
+        if ($data === 'status') {
+            $api->sendMessage($chatId, self::STATUS_TEXT);
+
+            return;
+        }
+
+        if ($adminId !== null && $fromId !== $adminId) {
+            return;
+        }
+
+        $hints = [
+            'auction' => "برای بررسی مزایده دستور زیر رو بفرستید:\n/auction <یوزرنیم یا لینک>",
+            'tx' => "برای بررسی هش تراکنش دستور زیر رو بفرستید:\n/tx <هش تراکنش>",
+            'wallet' => "برای بررسی موجودی ولت دستور زیر رو بفرستید:\n/wallet <آدرس ولت TON>",
+        ];
+
+        if (isset($hints[$data])) {
+            $api->sendMessage($chatId, $hints[$data]);
+        }
+    }
+
+    private static function sendAdminPanel(TelegramApi $api, int $chatId): void
+    {
+        $keyboard = [
+            'inline_keyboard' => [
+                [['text' => '🟢 وضعیت ربات', 'callback_data' => 'status']],
+                [
+                    ['text' => '🎯 چکر مزایده Fragment', 'callback_data' => 'auction'],
+                    ['text' => '🔗 چکر هش تراکنش', 'callback_data' => 'tx'],
+                ],
+                [['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet']],
+            ],
+        ];
+        $api->sendMessage($chatId, 'پنل مدیریت kan_checker — یکی از گزینه‌ها رو انتخاب کنید:', $keyboard);
     }
 
     private static function isCommand(string $text, string $name): bool
@@ -119,5 +197,18 @@ final class UpdateHandler
             return;
         }
         $api->sendMessage($chatId, Render::tx($data));
+    }
+
+    private static function replyWallet(TelegramApi $api, int $chatId, string $address): void
+    {
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $data = WalletClient::fetchBalance($address);
+        } catch (WalletError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, Render::wallet($data));
     }
 }
