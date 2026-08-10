@@ -9,7 +9,7 @@ class WalletError extends RuntimeException
 final class WalletClient
 {
     private const TON_API_BASE = 'https://tonapi.io/v2';
-    private const NOBITEX_STATS_URL = 'https://api.nobitex.ir/market/stats';
+    private const WALLEX_MARKETS_URL = 'https://api.wallex.ir/v1/markets';
     private const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
         . '(KHTML, like Gecko) Chrome/120.0 Safari/537.36';
     private const TIMEOUT = 15;
@@ -72,7 +72,7 @@ final class WalletClient
      */
     private static function fetchRates(): array
     {
-        $ch = curl_init(self::NOBITEX_STATS_URL);
+        $ch = curl_init(self::WALLEX_MARKETS_URL);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
@@ -91,12 +91,31 @@ final class WalletClient
         }
 
         $data = json_decode((string) $body, true);
-        $rial = $data['stats']['ton-rls']['latest'] ?? null;
-        $usdt = $data['stats']['ton-usdt']['latest'] ?? null;
+        $symbols = $data['result']['symbols'] ?? [];
 
-        return [
-            'toman' => $rial !== null ? ((float) $rial) / 10 : null,
-            'usd' => $usdt !== null ? (float) $usdt : null,
-        ];
+        $toman = isset($symbols['TONTMN']['stats']) ? self::extractPrice($symbols['TONTMN']['stats']) : null;
+        $usd = isset($symbols['TONUSDT']['stats']) ? self::extractPrice($symbols['TONUSDT']['stats']) : null;
+
+        return ['toman' => $toman, 'usd' => $usd];
+    }
+
+    /**
+     * Wallex leaves lastPrice as the literal string "-" when there has been
+     * no recent trade; fall back to the bid/ask midpoint in that case.
+     */
+    private static function extractPrice(array $stats): ?float
+    {
+        $last = $stats['lastPrice'] ?? null;
+        if (is_numeric($last)) {
+            return (float) $last;
+        }
+
+        $bid = $stats['bidPrice'] ?? null;
+        $ask = $stats['askPrice'] ?? null;
+        if (is_numeric($bid) && is_numeric($ask)) {
+            return ((float) $bid + (float) $ask) / 2;
+        }
+
+        return null;
     }
 }
