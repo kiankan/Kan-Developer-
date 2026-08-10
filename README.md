@@ -1,6 +1,6 @@
 # kan_checker
 
-ربات چکر هش تراکنش TON و وضعیت/زمان باقی‌مانده مزایده‌های Fragment.com (یوزرنیم و شماره).
+ربات چکر هش تراکنش TON و وضعیت/زمان باقی‌مانده مزایده‌های Fragment.com (یوزرنیم و شماره) — نوشته‌شده با PHP، بدون هیچ وابستگی خارجی (فقط `php-cli` با پسوندهای `curl`/`dom`/`mbstring`).
 
 هیچ زمان‌بندی ثابتی نداره — فقط وقتی که پیام بفرستید (on-demand) جواب می‌ده، با شمارش‌معکوس دقیق تا ثانیه.
 
@@ -21,19 +21,9 @@
 همه‌چیز به‌صورت CLI هم در دسترسه (بدون نیاز به تلگرام):
 
 ```bash
-python cli.py auction esalatjonob
-python cli.py tx <hash>
-python cli.py check esalatjonob
-```
-
-## نصب و اجرای محلی
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # TELEGRAM_BOT_TOKEN از @BotFather و ADMIN_ID از @userinfobot
-python bot.py
+php cli.php auction esalatjonob
+php cli.php tx <hash>
+php cli.php check esalatjonob
 ```
 
 ## نصب روی سرور (VPS) — با منوی مدیریت
@@ -52,7 +42,7 @@ ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123456789 bash <(curl -Ls ht
 
 (آیدی عددی ادمین رو از @userinfobot توی تلگرام بگیرید — یوزرنیم کافی نیست.)
 
-این دستور پایتون/venv/گیت رو نصب می‌کنه، پروژه رو در `/opt/kan_checker` کلون می‌کنه، `.env` رو با توکن و آیدی ادمین می‌سازه، سرویس systemd رو می‌سازه و روشنش می‌کنه، و خودش رو به‌صورت دستور `kancheckerctl` در سیستم ثبت می‌کنه — همه‌چیز در یک اجرا، بدون مرحله‌ی دستی دیگه.
+این دستور `php-cli` و پسوندهای لازم و `git` رو نصب می‌کنه، پروژه رو در `/opt/kan_checker` کلون می‌کنه، `.env` رو با توکن و آیدی ادمین می‌سازه، سرویس systemd رو می‌سازه و روشنش می‌کنه، و خودش رو به‌صورت دستور `kancheckerctl` در سیستم ثبت می‌کنه — همه‌چیز در یک اجرا، بدون مرحله‌ی دستی دیگه.
 
 از این به بعد کافیه فقط بنویسید:
 
@@ -84,6 +74,8 @@ sudo kancheckerctl update
 
 یا: `kancheckerctl status` / `kancheckerctl logs` / `kancheckerctl restart` / `kancheckerctl set-token` / `kancheckerctl uninstall`
 
+> اگر قبلاً نسخه‌ی پایتونی این پروژه را نصب کرده بودید: کافیست `kancheckerctl update` را بزنید — نصب قدیمی را تشخیص می‌دهد، پاک می‌کند و PHP را جای آن می‌نشاند. اگر خیلی نسخه‌ی قدیمی دارید، همان دستور را یک‌بار دیگر هم بزنید تا مهاجرت کامل شود.
+
 ## نصب روی هاست (Docker) — یک دستور، هم نصب هم آپدیت
 
 روی هر هاست/سروری با SSH (Railway، Render، Fly.io، یا هر VPS):
@@ -104,6 +96,19 @@ ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123456789 bash <(curl -Ls ht
 
 لاگ زنده: `cd ~/kan_checker && docker compose logs -f`
 
+## نصب روی هاست اشتراکی/cPanel (بدون SSH پایدار، فقط PHP)
+
+اگه هاستتون فقط PHP داره و نمی‌تونید یک پروسه‌ی همیشه‌روشن (مثل بالا) اجرا کنید، از حالت **webhook** استفاده کنید — فقط یک درخواست HTTP وقتی کاربر پیام می‌ده اجرا می‌شه، دقیقا مثل هر اسکریپت PHP معمولی:
+
+1. فایل‌های پروژه رو (از جمله `.env` با `TELEGRAM_BOT_TOKEN` و `ADMIN_ID`) روی هاست آپلود کنید، طوری که `webhook.php` از یک آدرس HTTPS عمومی در دسترس باشه (مثلاً `https://example.com/kan_checker/webhook.php`).
+2. یک‌بار این دستور رو (از یک ترمینال PHP، مثلاً از طریق SSH موقت یا Terminal پنل هاست) بزنید تا تلگرام رو به اون آدرس وصل کنید:
+   ```bash
+   php cli.php webhook:set https://example.com/kan_checker/webhook.php
+   ```
+   برای قطع وبهوک: `php cli.php webhook:delete`
+
+از این به بعد تلگرام خودش هر پیام رو مستقیم به `webhook.php` می‌فرسته و نیازی به هیچ پروسه یا کرون‌جابی نیست.
+
 ## نصب دستی (اگر نخواستید از اسکریپت‌ها استفاده کنید)
 
 <details>
@@ -113,9 +118,7 @@ ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123456789 bash <(curl -Ls ht
 sudo mkdir -p /opt/kan_checker
 cd /opt/kan_checker
 sudo git clone https://github.com/kiankan/kan_checker.git .
-sudo python3 -m venv .venv
-sudo .venv/bin/pip install -r requirements.txt
-sudo cp .env.example .env   # و توکن رو داخلش بگذارید
+sudo cp .env.example .env   # و توکن و آیدی ادمین رو داخلش بگذارید
 sudo cp deploy/kan_checker-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now kan_checker-bot
@@ -127,11 +130,11 @@ sudo systemctl enable --now kan_checker-bot
 <summary>Docker دستی</summary>
 
 ```bash
-cp .env.example .env   # و توکن رو داخلش بگذارید
+cp .env.example .env   # و توکن و آیدی ادمین رو داخلش بگذارید
 docker compose up -d --build
 ```
 
-برای هاست‌هایی که از `Procfile` پشتیبانی می‌کنن (مثل Railway بدون Docker)، همون فایل `Procfile` موجود در ریشه‌ی پروژه استفاده می‌شه (`worker: python bot.py`) — کافیه متغیر محیطی `TELEGRAM_BOT_TOKEN` رو در پنل هاست تنظیم کنید.
+برای هاست‌هایی که از `Procfile` پشتیبانی می‌کنن (مثل Railway بدون Docker)، همون فایل `Procfile` موجود در ریشه‌ی پروژه استفاده می‌شه (`worker: php bot.php`) — کافیه متغیرهای محیطی `TELEGRAM_BOT_TOKEN` و `ADMIN_ID` رو در پنل هاست تنظیم کنید.
 
 </details>
 
@@ -141,3 +144,4 @@ docker compose up -d --build
 - زمان پایان مزایده از attribute استاندارد `datetime` روی تگ `<time class="tm-countdown-timer">` صفحه‌ی Fragment خونده و به ثانیه‌ی دقیق تبدیل می‌شه.
 - برای تراکنش‌های TON از API عمومی و رایگان [tonapi.io](https://tonapi.io) استفاده شده (نیازی به کلید API برای استفاده‌ی سبک نیست).
 - اگر `ADMIN_ID` در `.env` تنظیم نشده باشه، ربات به پیام هر کسی توی تلگرام پاسخ می‌ده — تمام روش‌های نصب بالا این مقدار رو ازتون می‌گیرن و تنظیمش می‌کنن.
+- پروژه هیچ وابستگی خارجی (Composer/کتابخونه) نداره؛ فقط از پسوندهای استاندارد PHP (`curl`, `dom`, `mbstring`, `json`) استفاده می‌کنه که تقریباً روی همه‌ی هاست‌ها فعاله.

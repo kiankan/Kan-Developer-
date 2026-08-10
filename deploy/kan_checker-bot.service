@@ -7,10 +7,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/kan_checker
 EnvironmentFile=/opt/kan_checker/.env
-ExecStart=/opt/kan_checker/.venv/bin/python /opt/kan_checker/bot.py
+ExecStart=/usr/bin/php /opt/kan_checker/bot.php
 Restart=on-failure
 RestartSec=5
-User=kan_checker
 
 [Install]
 WantedBy=multi-user.target

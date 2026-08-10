@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# منوی مدیریت kan_checker روی سرور (systemd)، به‌همراه دستورهای مستقیم.
+# منوی مدیریت kan_checker روی سرور (systemd، PHP)، به‌همراه دستورهای مستقیم.
 #
-# اولین بار (نصب اولیه، تعاملی — توکن و آیدی ادمین رو می‌پرسه):
+# نصب اولیه، تعاملی (توکن و آیدی ادمین رو می‌پرسه):
 #   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
 #
-# یا کاملا خودکار روی SSH بدون هیچ سوالی (فقط توکن و آیدی ادمین رو می‌دید):
+# یا کاملا خودکار روی SSH بدون هیچ سوالی:
 #   TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123456789 \
 #     bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
 #
 # بعد از نصب، از هر جای سرور کافیه بنویسید:
 #   kancheckerctl            # منو رو باز می‌کند
-#   kancheckerctl update     # آپدیت مستقیم
+#   kancheckerctl update     # آپدیت مستقیم (و در صورت نیاز مهاجرت خودکار نسخه‌ی قدیمی پایتون به PHP)
 #   kancheckerctl status     # وضعیت مستقیم
 #   و ...
 
@@ -41,20 +41,22 @@ ensure_repo() {
 install_deps_os() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
-    apt-get install -y python3 python3-venv python3-pip git
+    apt-get install -y php-cli php-curl php-xml php-mbstring git
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y python3 python3-pip git
+    dnf install -y php-cli php-curl php-xml php-mbstring git
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y python3 python3-pip git
+    yum install -y php-cli php-curl php-xml php-mbstring git
   else
-    echo "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد؛ لطفاً python3، venv، pip و git را خودتان نصب کنید."
+    echo "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد؛ لطفاً php-cli (با پسوندهای curl/xml/mbstring) و git را خودتان نصب کنید."
   fi
 }
 
-setup_venv() {
-  python3 -m venv "$INSTALL_DIR/.venv"
-  "$INSTALL_DIR/.venv/bin/pip" install --upgrade pip -q
-  "$INSTALL_DIR/.venv/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
+# اگر نصب قبلی پایتون (نسخه‌ی قدیمی این پروژه) باقی مانده باشه پاکش می‌کنه.
+cleanup_legacy_python() {
+  if [ -d "$INSTALL_DIR/.venv" ]; then
+    echo "نصب قدیمی پایتون پیدا شد؛ در حال مهاجرت به PHP ..."
+    rm -rf "$INSTALL_DIR/.venv"
+  fi
 }
 
 prompt_config() {
@@ -105,7 +107,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$ENV_FILE
-ExecStart=$INSTALL_DIR/.venv/bin/python $INSTALL_DIR/bot.py
+ExecStart=$(command -v php || echo /usr/bin/php) $INSTALL_DIR/bot.php
 Restart=on-failure
 RestartSec=5
 
@@ -124,10 +126,10 @@ self_link() {
 
 do_install() {
   need_root
-  echo "== نصب kan_checker روی سرور =="
+  echo "== نصب kan_checker روی سرور (PHP) =="
   install_deps_os
   ensure_repo
-  setup_venv
+  cleanup_legacy_python
   prompt_config
   write_systemd_unit
   self_link
@@ -137,6 +139,17 @@ do_install() {
   echo "از این به بعد کافیه بنویسید: kancheckerctl"
 }
 
+# مرحله‌ی نهایی آپدیت؛ همیشه با نسخه‌ی تازه pull‌شده‌ی خود اسکریپت اجرا می‌شه
+# (بعد از self_link)، تا مهاجرت‌هایی مثل پایتون -> PHP همیشه با آخرین منطق انجام بشه.
+do_finish_update() {
+  need_root
+  install_deps_os
+  cleanup_legacy_python
+  write_systemd_unit
+  systemctl restart "$SERVICE_NAME"
+  echo "آپدیت انجام شد و سرویس با آخرین نسخه (PHP) ری‌استارت شد."
+}
+
 do_update() {
   need_root
   if [ ! -d "$INSTALL_DIR/.git" ]; then
@@ -144,11 +157,12 @@ do_update() {
     return 1
   fi
   echo "== به‌روزرسانی kan_checker =="
-  git -C "$INSTALL_DIR" pull --ff-only
-  setup_venv
+  ensure_repo
   self_link
-  systemctl restart "$SERVICE_NAME"
-  echo "آپدیت انجام شد و سرویس ری‌استارت شد."
+  # با باینری تازه self-link‌شده ادامه می‌دیم تا همیشه آخرین منطق مهاجرت اجرا بشه.
+  # اگه از نسخه‌ی خیلی قدیمی (قبل از این قابلیت) آپدیت می‌کنید، همین دستور را
+  # یک بار دیگر هم بزنید تا مهاجرت کامل شود.
+  exec "$BIN_PATH" _finish-update
 }
 
 do_start()   { need_root; systemctl start "$SERVICE_NAME";   echo "سرویس استارت شد."; }
@@ -212,16 +226,17 @@ show_menu() {
 
 cmd="${1:-menu}"
 case "$cmd" in
-  install)            do_install ;;
-  update)              do_update ;;
-  start)               do_start ;;
-  stop)                do_stop ;;
-  restart)             do_restart ;;
-  status)               do_status ;;
-  logs)                 do_logs ;;
-  set-token|token)      do_set_token ;;
-  uninstall|remove)     do_uninstall ;;
-  menu|"")              show_menu ;;
+  install)          do_install ;;
+  update)           do_update ;;
+  _finish-update)   do_finish_update ;;
+  start)            do_start ;;
+  stop)             do_stop ;;
+  restart)          do_restart ;;
+  status)           do_status ;;
+  logs)             do_logs ;;
+  set-token|token)  do_set_token ;;
+  uninstall|remove) do_uninstall ;;
+  menu|"")          show_menu ;;
   *)
     echo "دستور نامعتبر: $cmd"
     echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, set-token, uninstall, menu"
