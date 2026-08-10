@@ -10,6 +10,8 @@ final class WalletClient
 {
     private const TON_API_BASE = 'https://tonapi.io/v2';
     private const NOBITEX_STATS_URL = 'https://api.nobitex.ir/market/stats';
+    private const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        . '(KHTML, like Gecko) Chrome/120.0 Safari/537.36';
     private const TIMEOUT = 15;
     private const RATE_TIMEOUT = 8;
     private const NANOTON = 1_000_000_000;
@@ -56,7 +58,9 @@ final class WalletClient
         $rates = self::fetchRates();
 
         return [
-            'address' => $data['address'] ?? $address,
+            // آدرسی که خود کاربر فرستاده رو برمی‌گردونیم (نه فرمت raw که TonAPI می‌ده)
+            // تا با چیزی که پیست کرده یکی باشه.
+            'address' => $address,
             'balance_ton' => $balanceTon,
             'toman' => $rates['toman'] !== null ? $balanceTon * $rates['toman'] : null,
             'usd' => $rates['usd'] !== null ? $balanceTon * $rates['usd'] : null,
@@ -71,7 +75,12 @@ final class WalletClient
         $ch = curl_init(self::NOBITEX_STATS_URL);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => self::RATE_TIMEOUT,
+            CURLOPT_HTTPHEADER => [
+                'User-Agent: ' . self::USER_AGENT,
+                'Accept: application/json',
+            ],
         ]);
         $body = curl_exec($ch);
         $ok = curl_errno($ch) === 0 && curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200;
