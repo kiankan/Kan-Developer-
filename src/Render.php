@@ -18,6 +18,13 @@ final class Render
             $lines[] = "حداقل پیشنهاد بعدی: {$data['minimum_bid']} TON";
         }
 
+        if (!empty($data['attributes'])) {
+            $lines[] = '';
+            foreach ($data['attributes'] as $label => $value) {
+                $lines[] = "🏷 {$label}: {$value}";
+            }
+        }
+
         if ($data['ends_at'] !== null) {
             $remaining = $data['remaining_seconds'];
             $lines[] = '';
@@ -54,13 +61,23 @@ final class Render
         return implode("\n", $lines);
     }
 
+    private const CHAIN_DECIMALS = [
+        'TON' => 9,
+        'BTC' => 8,
+        'ETH' => 6,
+        'TRX' => 6,
+    ];
+
     public static function wallet(array $data): string
     {
+        $chain = $data['chain'];
+        $decimals = self::CHAIN_DECIMALS[$chain] ?? 6;
+
         $lines = [];
-        $lines[] = "🪙 Wallet: {$data['address']}";
+        $lines[] = "🪙 Wallet ({$chain}): {$data['address']}";
         $lines[] = '';
         $lines[] = '💰 Balance:';
-        $lines[] = sprintf('%.9f TON', $data['balance_ton']);
+        $lines[] = sprintf("%.{$decimals}f %s", $data['balance'], $chain);
         $lines[] = '';
         $lines[] = '😌 Total Balance:';
         $lines[] = $data['toman'] !== null

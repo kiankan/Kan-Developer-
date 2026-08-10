@@ -34,6 +34,12 @@ final class FragmentClient
             return $raw;
         }
 
+        // اسلاگ گیفت‌های NFT فرگمنت مثل "durovscap-1142" (کالکشن-شماره) — یوزرنیم
+        // تلگرام هیچ‌وقت خط‌تیره نداره، پس این تشخیص با یوزرنیم تداخلی نداره.
+        if (preg_match('/^[A-Za-z0-9]+-\d+$/', $raw)) {
+            return "https://fragment.com/gift/$raw";
+        }
+
         $username = ltrim($raw, '@');
         if (!preg_match('/^[A-Za-z0-9_]{3,}$/', $username)) {
             throw new FragmentError("ورودی نامعتبر است: $raw");
@@ -109,6 +115,24 @@ final class FragmentClient
         $bidStep = $bids[1] ?? null;
         $minimumBid = $bids[2] ?? null;
 
+        // فقط توی صفحه‌ی گیفت‌های NFT وجود داره (Owner/Model/Backdrop/Symbol/Issued)؛
+        // برای یوزرنیم/شماره خالی می‌مونه و بی‌اثره.
+        $attributes = [];
+        $attrRows = $xpath->query(
+            '//*' . self::classPredicate('tm-section-auction-info') . '//table//tr'
+        );
+        foreach ($attrRows as $row) {
+            $cells = $xpath->query('.//td', $row);
+            if ($cells->length < 2) {
+                continue;
+            }
+            $label = self::textContent($cells->item(0));
+            $value = self::textContent($cells->item(1));
+            if ($label !== '' && $value !== '') {
+                $attributes[$label] = $value;
+            }
+        }
+
         $endsAt = null;
         $remainingSeconds = null;
         $timerNodes = $xpath->query('//time' . self::classPredicate('tm-countdown-timer'));
@@ -133,6 +157,7 @@ final class FragmentClient
             'highest_bid' => $highestBid,
             'bid_step' => $bidStep,
             'minimum_bid' => $minimumBid,
+            'attributes' => $attributes,
             'ends_at' => $endsAt,
             'remaining_seconds' => $remainingSeconds,
         ];
@@ -152,6 +177,6 @@ final class FragmentClient
 
     private static function textContent(DOMNode $node): string
     {
-        return trim($node->textContent);
+        return trim(preg_replace('/\s+/u', ' ', $node->textContent));
     }
 }

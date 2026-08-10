@@ -4,13 +4,6 @@ declare(strict_types=1);
 
 final class UpdateHandler
 {
-    private const HELP_TEXT = "سلام! نیازی به دستور نیست — کافیه هر وقت خواستید یکی از این‌ها رو بفرستید تا همون لحظه جواب بگیرید:\n\n"
-        . "🎯 یوزرنیم یا لینک fragment.com یا لینک والت (مثل Tonkeeper) → وضعیت مزایده و زمان باقی‌مانده\n"
-        . "🔗 هش تراکنش TON → موفق بوده یا نه\n"
-        . "👛 آدرس ولت TON → موجودی به TON، تومان و دلار\n\n"
-        . "دستورهای صریح هم هست اگه بخواید: /auction /tx /wallet /check\n"
-        . "/status برای همه بازه، /admin فقط برای ادمین.";
-
     public static function handle(TelegramApi $api, array $message, ?int $adminId): void
     {
         $chatId = $message['chat']['id'] ?? null;
@@ -32,8 +25,14 @@ final class UpdateHandler
             return;
         }
 
+        // اگه ادمین وسط ویرایش یه متنه (از پنل ادمین)، پیام بعدیش رو به‌عنوان
+        // مقدار جدید در نظر می‌گیریم، نه یک دستور معمولی.
+        if (self::handlePendingEdit($api, $chatId, $text)) {
+            return;
+        }
+
         if (self::isCommand($text, '/start') || self::isCommand($text, '/help')) {
-            $api->sendMessage($chatId, self::HELP_TEXT);
+            $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
 
             return;
         }
@@ -47,7 +46,7 @@ final class UpdateHandler
         if (self::isCommand($text, '/auction')) {
             $query = self::commandArg($text);
             if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم یا لینک رو هم بفرستید. مثال:\n/auction durov");
+                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک یا اسلاگ گیفت رو هم بفرستید. مثال:\n/auction durov");
 
                 return;
             }
@@ -71,7 +70,7 @@ final class UpdateHandler
         if (self::isCommand($text, '/wallet')) {
             $query = self::commandArg($text);
             if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً آدرس ولت رو هم بفرستید. مثال:\n/wallet <آدرس ولت TON>");
+                $api->sendMessage($chatId, "لطفاً آدرس ولت رو هم بفرستید (TON, Bitcoin, Ethereum یا Tron). مثال:\n/wallet <آدرس>");
 
                 return;
             }
@@ -96,7 +95,8 @@ final class UpdateHandler
             return;
         }
 
-        // بدون دستور: خودکار تشخیص می‌ده هش تراکنشه، آدرس ولته یا یوزرنیم/لینک Fragment.
+        // بدون دستور: خودکار تشخیص می‌ده هش تراکنشه، آدرس ولته (هر بلاکچین
+        // پشتیبانی‌شده) یا یوزرنیم/لینک/گیفت Fragment.
         self::dispatch($api, $chatId, $text);
     }
 
@@ -125,20 +125,66 @@ final class UpdateHandler
         }
 
         if ($data === 'help') {
-            $api->sendMessage($chatId, self::HELP_TEXT);
+            $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
+
+            return;
+        }
+
+        if (str_starts_with($data, 'edit:')) {
+            $key = substr($data, strlen('edit:'));
+            if (isset(TextStore::LABELS[$key])) {
+                EditState::set($key);
+                $label = TextStore::LABELS[$key];
+                $api->sendMessage($chatId, "✏️ متن جدید برای «{$label}» رو بفرستید (برای لغو: /cancel).");
+            }
 
             return;
         }
 
         $hints = [
-            'auction' => '🎯 یوزرنیم، لینک fragment.com یا لینک والت رو بفرستید (دستور لازم نیست).',
+            'auction' => '🎯 یوزرنیم، لینک fragment.com، لینک والت یا اسلاگ گیفت رو بفرستید (دستور لازم نیست).',
             'tx' => '🔗 هش تراکنش TON رو بفرستید (دستور لازم نیست).',
-            'wallet' => '👛 آدرس ولت TON رو بفرستید (دستور لازم نیست).',
+            'wallet' => '👛 آدرس ولت TON، Bitcoin، Ethereum یا Tron رو بفرستید (دستور لازم نیست).',
         ];
 
         if (isset($hints[$data])) {
             $api->sendMessage($chatId, $hints[$data]);
         }
+    }
+
+    /**
+     * اگه منتظر متن جدید برای یکی از کلیدهای قابل‌ویرایش بودیم، این پیام رو
+     * مصرف می‌کنه و true برمی‌گردونه؛ در غیر این صورت false تا پردازش عادی
+     * ادامه پیدا کنه.
+     */
+    private static function handlePendingEdit(TelegramApi $api, int $chatId, string $text): bool
+    {
+        $awaiting = EditState::get();
+        if ($awaiting === null) {
+            return false;
+        }
+
+        if ($text === '/cancel') {
+            EditState::clear();
+            $api->sendMessage($chatId, 'ویرایش لغو شد.');
+
+            return true;
+        }
+
+        if (str_starts_with($text, '/')) {
+            // ادمین یه دستور دیگه زده؛ حالت ویرایش رو بی‌سروصدا کنسل می‌کنیم
+            // و می‌ذاریم دستور جدید عادی پردازش بشه.
+            EditState::clear();
+
+            return false;
+        }
+
+        TextStore::set($awaiting, $text);
+        EditState::clear();
+        $label = TextStore::LABELS[$awaiting] ?? $awaiting;
+        $api->sendMessage($chatId, "✅ «{$label}» ذخیره شد.");
+
+        return true;
     }
 
     private static function buildStatusText(): string
@@ -156,10 +202,11 @@ final class UpdateHandler
             'inline_keyboard' => [
                 [['text' => '🟢 وضعیت ربات', 'callback_data' => 'status']],
                 [
-                    ['text' => '🎯 چکر مزایده Fragment', 'callback_data' => 'auction'],
+                    ['text' => '🎯 چکر مزایده/گیفت Fragment', 'callback_data' => 'auction'],
                     ['text' => '🔗 چکر هش تراکنش', 'callback_data' => 'tx'],
                 ],
                 [['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet']],
+                [['text' => '✏️ ویرایش پیام خوش‌آمد', 'callback_data' => 'edit:' . TextStore::KEY_WELCOME]],
                 [['text' => '❓ راهنما', 'callback_data' => 'help']],
             ],
         ];

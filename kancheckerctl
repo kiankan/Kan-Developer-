@@ -112,6 +112,9 @@ EnvironmentFile=$ENV_FILE
 ExecStart=$(command -v php || echo /usr/bin/php) $INSTALL_DIR/bot.php
 Restart=on-failure
 RestartSec=5
+Nice=10
+CPUQuota=25%
+MemoryMax=128M
 
 [Install]
 WantedBy=multi-user.target

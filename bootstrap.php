@@ -13,6 +13,8 @@ require_once $root . '/src/TonClient.php';
 require_once $root . '/src/WalletClient.php';
 require_once $root . '/src/Render.php';
 require_once $root . '/src/TelegramApi.php';
+require_once $root . '/src/TextStore.php';
+require_once $root . '/src/EditState.php';
 require_once $root . '/src/UpdateHandler.php';
 
 Env::load($root . '/.env');

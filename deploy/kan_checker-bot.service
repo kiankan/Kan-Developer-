@@ -12,6 +12,9 @@ EnvironmentFile=/opt/kan_checker/.env
 ExecStart=/usr/bin/php /opt/kan_checker/bot.php
 Restart=on-failure
 RestartSec=5
+Nice=10
+CPUQuota=25%
+MemoryMax=128M
 
 [Install]
 WantedBy=multi-user.target
