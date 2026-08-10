@@ -34,41 +34,88 @@ cp .env.example .env   # و TELEGRAM_BOT_TOKEN رو از @BotFather بگذاری
 python bot.py
 ```
 
-## دیپلوی روی سرور (VPS) با systemd
+## نصب روی سرور (VPS) — با منوی مدیریت
+
+نصب اولیه (فقط یک‌بار، به‌عنوان root یا با sudo):
+
+```bash
+sudo bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
+```
+
+این دستور پایتون/venv/گیت رو نصب می‌کنه، پروژه رو در `/opt/kan_checker` کلون می‌کنه، توکن ربات رو ازتون می‌پرسه، سرویس systemd رو می‌سازه و روشنش می‌کنه، و خودش رو به‌صورت دستور `kancheckerctl` در سیستم ثبت می‌کنه.
+
+از این به بعد کافیه فقط بنویسید:
+
+```bash
+kancheckerctl
+```
+
+و این منو باز می‌شه:
+
+```
+==== kan_checker — منوی مدیریت سرور ====
+1) نصب
+2) آپدیت
+3) شروع سرویس
+4) توقف سرویس
+5) ری‌استارت سرویس
+6) وضعیت سرویس
+7) نمایش لاگ (زنده)
+8) تنظیم/تغییر توکن ربات
+9) حذف کامل
+0) خروج
+```
+
+هر گزینه رو هم می‌شه مستقیم بدون منو صدا زد، مثلاً برای آپدیت:
+
+```bash
+sudo kancheckerctl update
+```
+
+یا: `kancheckerctl status` / `kancheckerctl logs` / `kancheckerctl restart` / `kancheckerctl set-token` / `kancheckerctl uninstall`
+
+## نصب روی هاست (Docker) — یک دستور، هم نصب هم آپدیت
+
+روی هر هاست/سروری که Docker داره (Railway، Render، Fly.io، یا هر VPS با Docker نصب‌شده):
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/install.sh)
+```
+
+بار اول توکن ربات رو ازتون می‌پرسه و کانتینر رو بالا میاره. برای **آپدیت** بعدی، کافیه دقیقاً همین دستور رو دوباره اجرا کنید — پروژه رو pull می‌کنه و کانتینر رو با تغییرات جدید rebuild و ریستارت می‌کنه.
+
+لاگ زنده: `cd ~/kan_checker && docker compose logs -f`
+
+## نصب دستی (اگر نخواستید از اسکریپت‌ها استفاده کنید)
+
+<details>
+<summary>systemd دستی</summary>
 
 ```bash
 sudo mkdir -p /opt/kan_checker
-sudo useradd -r -s /usr/sbin/nologin kan_checker  # اگر از قبل نیست
 cd /opt/kan_checker
-git clone https://github.com/kiankan/kan_checker.git .
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env   # و توکن رو داخلش بگذارید
-sudo chown -R kan_checker:kan_checker /opt/kan_checker
-
+sudo git clone https://github.com/kiankan/kan_checker.git .
+sudo python3 -m venv .venv
+sudo .venv/bin/pip install -r requirements.txt
+sudo cp .env.example .env   # و توکن رو داخلش بگذارید
 sudo cp deploy/kan_checker-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now kan_checker-bot
-sudo systemctl status kan_checker-bot
 ```
 
-لاگ‌ها: `journalctl -u kan_checker-bot -f`
+</details>
 
-## دیپلوی با Docker (روی سرور یا هر هاستِ Docker-friendly مثل Railway / Render / Fly.io)
+<details>
+<summary>Docker دستی</summary>
 
 ```bash
 cp .env.example .env   # و توکن رو داخلش بگذارید
 docker compose up -d --build
 ```
 
-یا با Dockerfile خام:
-
-```bash
-docker build -t kan_checker .
-docker run -d --restart unless-stopped --env-file .env --name kan_checker kan_checker
-```
-
 برای هاست‌هایی که از `Procfile` پشتیبانی می‌کنن (مثل Railway بدون Docker)، همون فایل `Procfile` موجود در ریشه‌ی پروژه استفاده می‌شه (`worker: python bot.py`) — کافیه متغیر محیطی `TELEGRAM_BOT_TOKEN` رو در پنل هاست تنظیم کنید.
+
+</details>
 
 ## نکات فنی
 

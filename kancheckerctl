@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# منوی مدیریت kan_checker روی سرور (systemd)، به‌همراه دستورهای مستقیم.
+#
+# اولین بار (نصب اولیه):
+#   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
+#
+# بعد از نصب، از هر جای سرور کافیه بنویسید:
+#   kancheckerctl            # منو رو باز می‌کند
+#   kancheckerctl update     # آپدیت مستقیم
+#   kancheckerctl status     # وضعیت مستقیم
+#   و ...
+
+set -uo pipefail
+
+REPO_URL="https://github.com/kiankan/kan_checker.git"
+INSTALL_DIR="/opt/kan_checker"
+SERVICE_NAME="kan_checker-bot"
+ENV_FILE="$INSTALL_DIR/.env"
+BIN_PATH="/usr/local/bin/kancheckerctl"
+
+need_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "این عملیات نیاز به دسترسی root دارد. با sudo اجرا کنید."
+    exit 1
+  fi
+}
+
+ensure_repo() {
+  if [ -d "$INSTALL_DIR/.git" ]; then
+    git -C "$INSTALL_DIR" pull --ff-only
+  else
+    mkdir -p "$INSTALL_DIR"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+}
+
+install_deps_os() {
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y
+    apt-get install -y python3 python3-venv python3-pip git
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y python3 python3-pip git
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y python3 python3-pip git
+  else
+    echo "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد؛ لطفاً python3، venv، pip و git را خودتان نصب کنید."
+  fi
+}
+
+setup_venv() {
+  python3 -m venv "$INSTALL_DIR/.venv"
+  "$INSTALL_DIR/.venv/bin/pip" install --upgrade pip -q
+  "$INSTALL_DIR/.venv/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
+}
+
+prompt_token() {
+  local current=""
+  if [ -f "$ENV_FILE" ]; then
+    current=$(grep '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+  fi
+
+  if [ -n "$current" ]; then
+    read -rp "توکن ربات از قبل تنظیم شده. برای تغییر توکن جدید را وارد کنید (برای رد شدن Enter بزنید): " token
+    [ -z "$token" ] && token="$current"
+  else
+    read -rp "توکن ربات تلگرام (از @BotFather) را وارد کنید: " token
+  fi
+  echo "TELEGRAM_BOT_TOKEN=$token" > "$ENV_FILE"
+}
+
+write_systemd_unit() {
+  cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=kan_checker Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$INSTALL_DIR/.venv/bin/python $INSTALL_DIR/bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+}
+
+self_link() {
+  if [ -f "$INSTALL_DIR/kancheckerctl" ]; then
+    cp "$INSTALL_DIR/kancheckerctl" "$BIN_PATH"
+    chmod +x "$BIN_PATH"
+  fi
+}
+
+do_install() {
+  need_root
+  echo "== نصب kan_checker روی سرور =="
+  install_deps_os
+  ensure_repo
+  setup_venv
+  prompt_token
+  write_systemd_unit
+  self_link
+  systemctl enable --now "$SERVICE_NAME"
+  echo ""
+  echo "نصب کامل شد و سرویس در حال اجراست."
+  echo "از این به بعد کافیه بنویسید: kancheckerctl"
+}
+
+do_update() {
+  need_root
+  if [ ! -d "$INSTALL_DIR/.git" ]; then
+    echo "هنوز نصب نشده. اول گزینه «نصب» را بزنید."
+    return 1
+  fi
+  echo "== به‌روزرسانی kan_checker =="
+  git -C "$INSTALL_DIR" pull --ff-only
+  setup_venv
+  self_link
+  systemctl restart "$SERVICE_NAME"
+  echo "آپدیت انجام شد و سرویس ری‌استارت شد."
+}
+
+do_start()   { need_root; systemctl start "$SERVICE_NAME";   echo "سرویس استارت شد."; }
+do_stop()    { need_root; systemctl stop "$SERVICE_NAME";    echo "سرویس متوقف شد."; }
+do_restart() { need_root; systemctl restart "$SERVICE_NAME"; echo "سرویس ری‌استارت شد."; }
+do_status()  { systemctl status "$SERVICE_NAME" --no-pager; }
+do_logs()    { journalctl -u "$SERVICE_NAME" -f -n 100; }
+
+do_set_token() {
+  need_root
+  prompt_token
+  systemctl restart "$SERVICE_NAME" 2>/dev/null
+  echo "توکن به‌روز شد و سرویس ری‌استارت شد."
+}
+
+do_uninstall() {
+  need_root
+  read -rp "مطمئنید می‌خواهید kan_checker کاملاً حذف شود؟ (y/N): " confirm
+  if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "لغو شد."
+    return
+  fi
+  systemctl disable --now "$SERVICE_NAME" 2>/dev/null
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  systemctl daemon-reload
+  rm -rf "$INSTALL_DIR"
+  rm -f "$BIN_PATH"
+  echo "حذف کامل شد."
+}
+
+show_menu() {
+  while true; do
+    echo ""
+    echo "==== kan_checker — منوی مدیریت سرور ===="
+    echo "1) نصب"
+    echo "2) آپدیت"
+    echo "3) شروع سرویس"
+    echo "4) توقف سرویس"
+    echo "5) ری‌استارت سرویس"
+    echo "6) وضعیت سرویس"
+    echo "7) نمایش لاگ (زنده، خروج با Ctrl+C)"
+    echo "8) تنظیم/تغییر توکن ربات"
+    echo "9) حذف کامل"
+    echo "0) خروج"
+    read -rp "انتخاب شما: " choice
+    case "$choice" in
+      1) do_install ;;
+      2) do_update ;;
+      3) do_start ;;
+      4) do_stop ;;
+      5) do_restart ;;
+      6) do_status ;;
+      7) do_logs ;;
+      8) do_set_token ;;
+      9) do_uninstall ;;
+      0) exit 0 ;;
+      *) echo "گزینه نامعتبر است." ;;
+    esac
+  done
+}
+
+cmd="${1:-menu}"
+case "$cmd" in
+  install)            do_install ;;
+  update)              do_update ;;
+  start)               do_start ;;
+  stop)                do_stop ;;
+  restart)             do_restart ;;
+  status)               do_status ;;
+  logs)                 do_logs ;;
+  set-token|token)      do_set_token ;;
+  uninstall|remove)     do_uninstall ;;
+  menu|"")              show_menu ;;
+  *)
+    echo "دستور نامعتبر: $cmd"
+    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, set-token, uninstall, menu"
+    exit 1
+    ;;
+esac
