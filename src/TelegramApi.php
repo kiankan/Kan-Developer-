@@ -8,7 +8,7 @@ final class TelegramApi
     {
     }
 
-    public function call(string $method, array $params = [], int $curlTimeout = 40): array
+    public function call(string $method, array $params = [], int $curlTimeout = 40): mixed
     {
         $ch = curl_init("https://api.telegram.org/bot{$this->token}/$method");
         curl_setopt_array($ch, [
@@ -36,11 +36,13 @@ final class TelegramApi
 
     public function getUpdates(int $offset, int $timeout = 30): array
     {
-        return $this->call('getUpdates', [
+        $result = $this->call('getUpdates', [
             'offset' => $offset,
             'timeout' => $timeout,
             'allowed_updates' => json_encode(['message', 'callback_query']),
         ], $timeout + 10);
+
+        return is_array($result) ? $result : [];
     }
 
     public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null): void

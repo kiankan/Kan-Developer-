@@ -156,6 +156,7 @@ do_finish_update() {
   install_deps_os
   cleanup_legacy_python
   write_systemd_unit
+  systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
   systemctl restart "$SERVICE_NAME"
   echo "آپدیت انجام شد و سرویس با آخرین نسخه (PHP) ری‌استارت شد."
 }
@@ -175,15 +176,16 @@ do_update() {
   exec "$BIN_PATH" _finish-update
 }
 
-do_start()   { need_root; systemctl start "$SERVICE_NAME";   echo "سرویس استارت شد."; }
+do_start()   { need_root; systemctl reset-failed "$SERVICE_NAME" 2>/dev/null; systemctl start "$SERVICE_NAME";   echo "سرویس استارت شد."; }
 do_stop()    { need_root; systemctl stop "$SERVICE_NAME";    echo "سرویس متوقف شد."; }
-do_restart() { need_root; systemctl restart "$SERVICE_NAME"; echo "سرویس ری‌استارت شد."; }
+do_restart() { need_root; systemctl reset-failed "$SERVICE_NAME" 2>/dev/null; systemctl restart "$SERVICE_NAME"; echo "سرویس ری‌استارت شد."; }
 do_status()  { systemctl status "$SERVICE_NAME" --no-pager; }
 do_logs()    { journalctl -u "$SERVICE_NAME" -f -n 100; }
 
 do_set_token() {
   need_root
   prompt_config
+  systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
   systemctl restart "$SERVICE_NAME" 2>/dev/null
   echo "توکن/آیدی ادمین به‌روز شد و سرویس ری‌استارت شد."
 }
