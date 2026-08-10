@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 final class UpdateHandler
 {
-    private const HELP_TEXT = "سلام! هر وقت خواستید یکی از این دستورها رو بفرستید تا همون لحظه جواب بگیرید:\n\n"
-        . "/auction <یوزرنیم یا لینک> — زمان باقی‌مانده و وضعیت مزایده Fragment\n"
-        . "/tx <هش تراکنش> — وضعیت یک تراکنش TON\n"
-        . "/wallet <آدرس ولت> — موجودی ولت به TON و تومان\n"
-        . "/check <یوزرنیم یا لینک یا هش> — تشخیص خودکار نوع ورودی\n\n"
-        . "می‌تونید لینک fragment.com، لینک والت (مثل Tonkeeper) یا فقط یوزرنیم رو بفرستید.";
-
-    private const STATUS_TEXT = '🟢 ربات فعال است و آماده‌ی پاسخگویی.';
+    private const HELP_TEXT = "سلام! نیازی به دستور نیست — کافیه هر وقت خواستید یکی از این‌ها رو بفرستید تا همون لحظه جواب بگیرید:\n\n"
+        . "🎯 یوزرنیم یا لینک fragment.com یا لینک والت (مثل Tonkeeper) → وضعیت مزایده و زمان باقی‌مانده\n"
+        . "🔗 هش تراکنش TON → موفق بوده یا نه\n"
+        . "👛 آدرس ولت TON → موجودی به TON، تومان و دلار\n\n"
+        . "دستورهای صریح هم هست اگه بخواید: /auction /tx /wallet /check\n"
+        . "/status برای همه بازه، /admin فقط برای ادمین.";
 
     public static function handle(TelegramApi $api, array $message, ?int $adminId): void
     {
@@ -25,7 +23,7 @@ final class UpdateHandler
 
         // این دستور برای همه در دسترسه، حتی اگه ADMIN_ID تنظیم شده باشه.
         if (self::isCommand($text, '/status')) {
-            $api->sendMessage($chatId, self::STATUS_TEXT);
+            $api->sendMessage($chatId, self::buildStatusText(), null, 'HTML');
 
             return;
         }
@@ -85,7 +83,7 @@ final class UpdateHandler
         if (self::isCommand($text, '/check')) {
             $query = self::commandArg($text);
             if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک یا هش تراکنش رو بفرستید. مثال:\n/check durov");
+                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک، هش یا آدرس ولت رو بفرستید. مثال:\n/check durov");
 
                 return;
             }
@@ -98,6 +96,7 @@ final class UpdateHandler
             return;
         }
 
+        // بدون دستور: خودکار تشخیص می‌ده هش تراکنشه، آدرس ولته یا یوزرنیم/لینک Fragment.
         self::dispatch($api, $chatId, $text);
     }
 
@@ -116,7 +115,7 @@ final class UpdateHandler
         }
 
         if ($data === 'status') {
-            $api->sendMessage($chatId, self::STATUS_TEXT);
+            $api->sendMessage($chatId, self::buildStatusText(), null, 'HTML');
 
             return;
         }
@@ -125,15 +124,30 @@ final class UpdateHandler
             return;
         }
 
+        if ($data === 'help') {
+            $api->sendMessage($chatId, self::HELP_TEXT);
+
+            return;
+        }
+
         $hints = [
-            'auction' => "برای بررسی مزایده دستور زیر رو بفرستید:\n/auction <یوزرنیم یا لینک>",
-            'tx' => "برای بررسی هش تراکنش دستور زیر رو بفرستید:\n/tx <هش تراکنش>",
-            'wallet' => "برای بررسی موجودی ولت دستور زیر رو بفرستید:\n/wallet <آدرس ولت TON>",
+            'auction' => '🎯 یوزرنیم، لینک fragment.com یا لینک والت رو بفرستید (دستور لازم نیست).',
+            'tx' => '🔗 هش تراکنش TON رو بفرستید (دستور لازم نیست).',
+            'wallet' => '👛 آدرس ولت TON رو بفرستید (دستور لازم نیست).',
         ];
 
         if (isset($hints[$data])) {
             $api->sendMessage($chatId, $hints[$data]);
         }
+    }
+
+    private static function buildStatusText(): string
+    {
+        $tehran = new DateTimeImmutable('now', new DateTimeZone('Asia/Tehran'));
+
+        return "🟢 <b>ربات فعال است و آماده‌ی پاسخگویی</b>\n"
+            . "🕐 ساعت تهران: {$tehran->format('H:i:s')}\n"
+            . '🐘 PHP ' . PHP_VERSION;
     }
 
     private static function sendAdminPanel(TelegramApi $api, int $chatId): void
@@ -146,9 +160,12 @@ final class UpdateHandler
                     ['text' => '🔗 چکر هش تراکنش', 'callback_data' => 'tx'],
                 ],
                 [['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet']],
+                [['text' => '❓ راهنما', 'callback_data' => 'help']],
             ],
         ];
-        $api->sendMessage($chatId, 'پنل مدیریت kan_checker — یکی از گزینه‌ها رو انتخاب کنید:', $keyboard);
+        $text = "🛠 <b>پنل مدیریت kan_checker</b>\n\n"
+            . 'یکی از گزینه‌ها رو بزنید، یا مستقیم یوزرنیم/لینک/هش/آدرس ولت رو بفرستید — خودش تشخیص می‌ده.';
+        $api->sendMessage($chatId, $text, $keyboard, 'HTML');
     }
 
     private static function isCommand(string $text, string $name): bool
@@ -168,6 +185,8 @@ final class UpdateHandler
     {
         if (TonClient::looksLikeTxHash($query)) {
             self::replyTx($api, $chatId, $query);
+        } elseif (WalletClient::looksLikeAddress($query)) {
+            self::replyWallet($api, $chatId, $query);
         } else {
             self::replyAuction($api, $chatId, $query);
         }

@@ -70,10 +70,12 @@ switch ($command) {
         try {
             if (TonClient::looksLikeTxHash($arg)) {
                 echo Render::tx(TonClient::fetchTransaction($arg)), "\n";
+            } elseif (WalletClient::looksLikeAddress($arg)) {
+                echo Render::wallet(WalletClient::fetchBalance($arg)), "\n";
             } else {
                 echo Render::auction(FragmentClient::fetchAuction($arg)), "\n";
             }
-        } catch (TonError|FragmentError $e) {
+        } catch (TonError|FragmentError|WalletError $e) {
             fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
             exit(1);
         }

@@ -45,11 +45,14 @@ final class TelegramApi
         return is_array($result) ? $result : [];
     }
 
-    public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null): void
+    public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null, ?string $parseMode = null): void
     {
         $params = ['chat_id' => $chatId, 'text' => $text];
         if ($replyMarkup !== null) {
             $params['reply_markup'] = json_encode($replyMarkup);
+        }
+        if ($parseMode !== null) {
+            $params['parse_mode'] = $parseMode;
         }
         $this->call('sendMessage', $params);
     }

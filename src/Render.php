@@ -56,14 +56,21 @@ final class Render
 
     public static function wallet(array $data): string
     {
-        $lines = ['👛 موجودی ولت', "آدرس: {$data['address']}", ''];
-        $lines[] = sprintf('موجودی: %.4f TON', $data['balance_ton']);
-
-        if ($data['toman'] !== null) {
-            $lines[] = sprintf('معادل: %s تومان', number_format((int) round($data['toman'])));
-        } else {
-            $lines[] = 'معادل تومان در دسترس نبود (نرخ لحظه‌ای دریافت نشد).';
-        }
+        $lines = [];
+        $lines[] = "🪙 Wallet: {$data['address']}";
+        $lines[] = '';
+        $lines[] = '💰 Balance:';
+        $lines[] = sprintf('%.9f TON', $data['balance_ton']);
+        $lines[] = '';
+        $lines[] = '😌 Total Balance:';
+        $lines[] = $data['toman'] !== null
+            ? '💸 ' . number_format((int) round($data['toman'])) . ' toman'
+            : '💸 toman rate unavailable';
+        $lines[] = $data['usd'] !== null
+            ? sprintf('💵 $%.4f dollar', $data['usd'])
+            : '💵 dollar rate unavailable';
+        $lines[] = '';
+        $lines[] = '📅 ' . Format::jalaliNow();
 
         return implode("\n", $lines);
     }

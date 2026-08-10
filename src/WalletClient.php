@@ -9,10 +9,18 @@ class WalletError extends RuntimeException
 final class WalletClient
 {
     private const TON_API_BASE = 'https://tonapi.io/v2';
-    private const NOBITEX_STATS_URL = 'https://api.nobitex.ir/market/stats?srcCurrency=ton&dstCurrency=rls';
+    private const NOBITEX_STATS_URL = 'https://api.nobitex.ir/market/stats';
     private const TIMEOUT = 15;
     private const RATE_TIMEOUT = 8;
     private const NANOTON = 1_000_000_000;
+
+    public static function looksLikeAddress(string $value): bool
+    {
+        $value = trim($value);
+
+        return (bool) preg_match('/^-?\d+:[0-9a-fA-F]{64}$/', $value)
+            || (bool) preg_match('/^[A-Za-z0-9_-]{48}$/', $value);
+    }
 
     public static function fetchBalance(string $address): array
     {
@@ -45,16 +53,20 @@ final class WalletClient
         }
 
         $balanceTon = ((float) $data['balance']) / self::NANOTON;
-        $toman = self::fetchTomanRate();
+        $rates = self::fetchRates();
 
         return [
             'address' => $data['address'] ?? $address,
             'balance_ton' => $balanceTon,
-            'toman' => $toman !== null ? $balanceTon * $toman : null,
+            'toman' => $rates['toman'] !== null ? $balanceTon * $rates['toman'] : null,
+            'usd' => $rates['usd'] !== null ? $balanceTon * $rates['usd'] : null,
         ];
     }
 
-    private static function fetchTomanRate(): ?float
+    /**
+     * @return array{toman: ?float, usd: ?float}
+     */
+    private static function fetchRates(): array
     {
         $ch = curl_init(self::NOBITEX_STATS_URL);
         curl_setopt_array($ch, [
@@ -66,12 +78,16 @@ final class WalletClient
         curl_close($ch);
 
         if (!$ok) {
-            return null;
+            return ['toman' => null, 'usd' => null];
         }
 
         $data = json_decode((string) $body, true);
         $rial = $data['stats']['ton-rls']['latest'] ?? null;
+        $usdt = $data['stats']['ton-usdt']['latest'] ?? null;
 
-        return $rial !== null ? ((float) $rial) / 10 : null;
+        return [
+            'toman' => $rial !== null ? ((float) $rial) / 10 : null,
+            'usd' => $usdt !== null ? (float) $usdt : null,
+        ];
     }
 }
