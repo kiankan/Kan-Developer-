@@ -215,7 +215,7 @@ final class WalletClient
     /**
      * @return array{toman: ?float, usd: ?float}
      */
-    private static function fetchRates(string $chain): array
+    public static function fetchRates(string $chain): array
     {
         $ch = curl_init(self::WALLEX_MARKETS_URL);
         curl_setopt_array($ch, [

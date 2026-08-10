@@ -91,4 +91,60 @@ final class Render
 
         return implode("\n", $lines);
     }
+
+    public static function price(array $data): string
+    {
+        $coin = $data['coin'];
+        $decimals = self::CHAIN_DECIMALS[$coin] ?? 2;
+        $amountStr = rtrim(rtrim(sprintf("%.{$decimals}f", $data['amount']), '0'), '.');
+        if ($amountStr === '') {
+            $amountStr = '0';
+        }
+
+        $lines = [];
+        $lines[] = "💱 {$amountStr} {$coin}";
+        $lines[] = '';
+        $lines[] = $data['toman'] !== null
+            ? '💸 ' . number_format((int) round($data['toman'])) . ' toman'
+            : '💸 toman rate unavailable';
+        $lines[] = $data['usd'] !== null
+            ? sprintf('💵 $%.4f dollar', $data['usd'])
+            : '💵 dollar rate unavailable';
+        $lines[] = '';
+        $lines[] = '📅 ' . Format::jalaliNow();
+
+        return implode("\n", $lines);
+    }
+
+    public static function gift(array $data): string
+    {
+        $header = str_replace('{name}', $data['name'], TextStore::get(TextStore::KEY_GIFT_HEADER));
+
+        $parts = [$header];
+
+        if ($data['prices'] === []) {
+            $parts[] = 'قیمتی برای این گیفت پیدا نشد.';
+        }
+
+        $sectionTemplate = TextStore::get(TextStore::KEY_GIFT_SECTION);
+        foreach ($data['prices'] as $group) {
+            $ton = rtrim(rtrim(sprintf('%.3f', $group['ton']), '0'), '.');
+            $parts[] = strtr($sectionTemplate, [
+                '{label}' => $group['label'],
+                '{value}' => $group['value'],
+                '{toman}' => $group['toman'] !== null ? number_format((int) round($group['toman'])) : '؟',
+                '{usd}' => $group['usd'] !== null ? number_format($group['usd'], 2) : '؟',
+                '{ton}' => $ton,
+                '{stars}' => $group['stars'] !== null ? number_format($group['stars']) : '؟',
+            ]);
+        }
+
+        $footer = strtr(TextStore::get(TextStore::KEY_GIFT_FOOTER), [
+            '{source}' => $data['source'],
+            '{date}' => Format::jalaliNow(),
+        ]);
+        $parts[] = $footer;
+
+        return implode("\n\n", $parts);
+    }
 }

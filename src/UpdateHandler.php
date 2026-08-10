@@ -46,11 +46,23 @@ final class UpdateHandler
         if (self::isCommand($text, '/auction')) {
             $query = self::commandArg($text);
             if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک یا اسلاگ گیفت رو هم بفرستید. مثال:\n/auction durov");
+                $api->sendMessage($chatId, "لطفاً یوزرنیم یا لینک رو هم بفرستید. مثال:\n/auction durov");
 
                 return;
             }
             self::replyAuction($api, $chatId, $query);
+
+            return;
+        }
+
+        if (self::isCommand($text, '/gift')) {
+            $query = self::commandArg($text);
+            if ($query === null) {
+                $api->sendMessage($chatId, "لطفاً لینک یا اسلاگ گیفت رو هم بفرستید. مثال:\n/gift durovscap-1142");
+
+                return;
+            }
+            self::replyGift($api, $chatId, $query);
 
             return;
         }
@@ -95,8 +107,8 @@ final class UpdateHandler
             return;
         }
 
-        // بدون دستور: خودکار تشخیص می‌ده هش تراکنشه، آدرس ولته (هر بلاکچین
-        // پشتیبانی‌شده) یا یوزرنیم/لینک/گیفت Fragment.
+        // بدون دستور: خودکار تشخیص می‌ده قیمت ارزه، هش تراکنشه، آدرس ولته
+        // (هر بلاکچین پشتیبانی‌شده)، گیفت NFTه یا یوزرنیم/لینک Fragment.
         self::dispatch($api, $chatId, $text);
     }
 
@@ -124,6 +136,18 @@ final class UpdateHandler
             return;
         }
 
+        if ($data === 'admin') {
+            self::sendAdminPanel($api, $chatId);
+
+            return;
+        }
+
+        if ($data === 'edit_menu') {
+            self::sendEditMenu($api, $chatId);
+
+            return;
+        }
+
         if ($data === 'help') {
             $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
 
@@ -135,16 +159,18 @@ final class UpdateHandler
             if (isset(TextStore::LABELS[$key])) {
                 EditState::set($key);
                 $label = TextStore::LABELS[$key];
-                $api->sendMessage($chatId, "✏️ متن جدید برای «{$label}» رو بفرستید (برای لغو: /cancel).");
+                $api->sendMessage($chatId, "✏️ متن جدید برای «{$label}» رو بفرستید (برای لغو: /cancel).\n\nمتن فعلی:\n" . TextStore::get($key));
             }
 
             return;
         }
 
         $hints = [
-            'auction' => '🎯 یوزرنیم، لینک fragment.com، لینک والت یا اسلاگ گیفت رو بفرستید (دستور لازم نیست).',
+            'auction' => '🎯 یوزرنیم یا لینک fragment.com رو بفرستید (دستور لازم نیست).',
+            'gift' => '🎁 لینک t.me/nft/... یا fragment.com/gift/... یا اسلاگ گیفت (مثل durovscap-1142) رو بفرستید (دستور لازم نیست).',
             'tx' => '🔗 هش تراکنش TON رو بفرستید (دستور لازم نیست).',
             'wallet' => '👛 آدرس ولت TON، Bitcoin، Ethereum یا Tron رو بفرستید (دستور لازم نیست).',
+            'price' => '💱 مقدار + اسم ارز رو بفرستید، مثلاً «1 ton» یا «5 btc» (دستور لازم نیست).',
         ];
 
         if (isset($hints[$data])) {
@@ -202,17 +228,37 @@ final class UpdateHandler
             'inline_keyboard' => [
                 [['text' => '🟢 وضعیت ربات', 'callback_data' => 'status']],
                 [
-                    ['text' => '🎯 چکر مزایده/گیفت Fragment', 'callback_data' => 'auction'],
-                    ['text' => '🔗 چکر هش تراکنش', 'callback_data' => 'tx'],
+                    ['text' => '🎯 چکر مزایده Fragment', 'callback_data' => 'auction'],
+                    ['text' => '🎁 چکر گیفت NFT', 'callback_data' => 'gift'],
                 ],
-                [['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet']],
-                [['text' => '✏️ ویرایش پیام خوش‌آمد', 'callback_data' => 'edit:' . TextStore::KEY_WELCOME]],
+                [
+                    ['text' => '🔗 چکر هش تراکنش', 'callback_data' => 'tx'],
+                    ['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet'],
+                ],
+                [['text' => '💱 چکر قیمت ارز', 'callback_data' => 'price']],
+                [['text' => '✏️ ویرایش متن‌ها و قالب‌ها', 'callback_data' => 'edit_menu']],
                 [['text' => '❓ راهنما', 'callback_data' => 'help']],
             ],
         ];
         $text = "🛠 <b>پنل مدیریت kan_checker</b>\n\n"
             . 'یکی از گزینه‌ها رو بزنید، یا مستقیم یوزرنیم/لینک/هش/آدرس ولت رو بفرستید — خودش تشخیص می‌ده.';
         $api->sendMessage($chatId, $text, $keyboard, 'HTML');
+    }
+
+    private static function sendEditMenu(TelegramApi $api, int $chatId): void
+    {
+        $rows = [];
+        foreach (TextStore::LABELS as $key => $label) {
+            $rows[] = [['text' => "✏️ $label", 'callback_data' => 'edit:' . $key]];
+        }
+        $rows[] = [['text' => '⬅️ بازگشت', 'callback_data' => 'admin']];
+
+        $text = "کدوم متن/قالب رو می‌خواید ویرایش کنید؟\n\n"
+            . 'توی قالب‌های گیفت می‌تونید از تگ‌های HTML تلگرام مثل '
+            . '<code>&lt;b&gt;بولد&lt;/b&gt;</code> و <code>&lt;blockquote&gt;نقل‌قول&lt;/blockquote&gt;</code> استفاده کنید، '
+            . 'و از جاهای خالی مثل <code>{name}</code>, <code>{label}</code>, <code>{value}</code>, <code>{toman}</code>, '
+            . '<code>{usd}</code>, <code>{ton}</code>, <code>{stars}</code>, <code>{source}</code>, <code>{date}</code>.';
+        $api->sendMessage($chatId, $text, ['inline_keyboard' => $rows], 'HTML');
     }
 
     private static function isCommand(string $text, string $name): bool
@@ -230,6 +276,19 @@ final class UpdateHandler
 
     private static function dispatch(TelegramApi $api, int $chatId, string $query): void
     {
+        $price = CurrencyClient::parseQuery($query);
+        if ($price !== null) {
+            self::replyPrice($api, $chatId, $price['amount'], $price['coin']);
+
+            return;
+        }
+
+        if (GiftClient::extractSlug($query) !== null) {
+            self::replyGift($api, $chatId, $query);
+
+            return;
+        }
+
         if (TonClient::looksLikeTxHash($query)) {
             self::replyTx($api, $chatId, $query);
         } elseif (WalletClient::looksLikeAddress($query)) {
@@ -250,6 +309,19 @@ final class UpdateHandler
             return;
         }
         $api->sendMessage($chatId, Render::auction($data));
+    }
+
+    private static function replyGift(TelegramApi $api, int $chatId, string $query): void
+    {
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $data = GiftClient::fetchGift($query);
+        } catch (GiftError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, Render::gift($data), null, 'HTML');
     }
 
     private static function replyTx(TelegramApi $api, int $chatId, string $txHash): void
@@ -276,5 +348,12 @@ final class UpdateHandler
             return;
         }
         $api->sendMessage($chatId, Render::wallet($data));
+    }
+
+    private static function replyPrice(TelegramApi $api, int $chatId, float $amount, string $coin): void
+    {
+        $api->sendChatAction($chatId, 'typing');
+        $data = CurrencyClient::fetchValue($amount, $coin);
+        $api->sendMessage($chatId, Render::price($data));
     }
 }

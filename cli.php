@@ -10,9 +10,11 @@ function usage(): void
     fwrite(STDERR, <<<TXT
         استفاده:
           php cli.php auction <username | link>
+          php cli.php gift <t.me/nft link | fragment.com/gift link | slug>
           php cli.php tx <hash>
           php cli.php wallet <address>
-          php cli.php check <username | link | hash>
+          php cli.php price "<amount> <coin>"   (e.g. "1 ton", "5 btc")
+          php cli.php check <username | link | hash | address | gift>
           php cli.php webhook:set <url>
           php cli.php webhook:delete
 
@@ -62,20 +64,51 @@ switch ($command) {
         }
         break;
 
+    case 'gift':
+        if ($arg === null) {
+            usage();
+            exit(1);
+        }
+        try {
+            echo Render::gift(GiftClient::fetchGift($arg)), "\n";
+        } catch (GiftError $e) {
+            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
+            exit(1);
+        }
+        break;
+
+    case 'price':
+        if ($arg === null) {
+            usage();
+            exit(1);
+        }
+        $parsed = CurrencyClient::parseQuery($arg);
+        if ($parsed === null) {
+            fwrite(STDERR, "خطا: ورودی رو نفهمیدم. مثال: \"1 ton\"\n");
+            exit(1);
+        }
+        echo Render::price(CurrencyClient::fetchValue($parsed['amount'], $parsed['coin'])), "\n";
+        break;
+
     case 'check':
         if ($arg === null) {
             usage();
             exit(1);
         }
         try {
-            if (TonClient::looksLikeTxHash($arg)) {
+            $parsed = CurrencyClient::parseQuery($arg);
+            if ($parsed !== null) {
+                echo Render::price(CurrencyClient::fetchValue($parsed['amount'], $parsed['coin'])), "\n";
+            } elseif (GiftClient::extractSlug($arg) !== null) {
+                echo Render::gift(GiftClient::fetchGift($arg)), "\n";
+            } elseif (TonClient::looksLikeTxHash($arg)) {
                 echo Render::tx(TonClient::fetchTransaction($arg)), "\n";
             } elseif (WalletClient::looksLikeAddress($arg)) {
                 echo Render::wallet(WalletClient::fetchBalance($arg)), "\n";
             } else {
                 echo Render::auction(FragmentClient::fetchAuction($arg)), "\n";
             }
-        } catch (TonError|FragmentError|WalletError $e) {
+        } catch (TonError|FragmentError|WalletError|GiftError $e) {
             fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
             exit(1);
         }
