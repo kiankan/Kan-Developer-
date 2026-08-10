@@ -23,7 +23,7 @@ final class TextStore
             . "دستورهای صریح هم هست اگه بخواید: /auction /tx /wallet /check\n"
             . "/status برای همه بازه، /admin فقط برای ادمین.",
         self::KEY_GIFT_HEADER => '🎁 Gift: <b>{name}</b>',
-        self::KEY_GIFT_SECTION => "📋 <b>{label}: {value}</b>\n<blockquote>💸 {toman} toman\n💵 {usd} dollar\n🌀 {ton} ton\n⭐️ {stars} stars</blockquote>",
+        self::KEY_GIFT_SECTION => "📋 <b>{label}: {value}</b>\n\n💸 {toman} toman\n💵 {usd} dollar\n🌀 {ton} ton\n⭐️ {stars} stars",
         self::KEY_GIFT_FOOTER => "🎁 {source}\n\n📆 {date}",
         self::KEY_STARS_RATE => '0.015',
     ];

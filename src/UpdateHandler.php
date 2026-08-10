@@ -21,24 +21,33 @@ final class UpdateHandler
             return;
         }
 
-        if ($adminId !== null && $fromId !== $adminId) {
-            return;
-        }
+        $isAdmin = $adminId !== null && $fromId === $adminId;
+        // پنل ادمین/ویرایش همیشه فقط برای خود ادمینه؛ چکرها اگه «حالت عمومی»
+        // روشن باشه برای همه بازه، وگرنه فقط برای ادمین.
+        $adminOnlyBlocked = $adminId !== null && !$isAdmin;
+        $checkerBlocked = $adminOnlyBlocked && !Settings::isPublic();
 
         // اگه ادمین وسط ویرایش یه متنه (از پنل ادمین)، پیام بعدیش رو به‌عنوان
         // مقدار جدید در نظر می‌گیریم، نه یک دستور معمولی.
-        if (self::handlePendingEdit($api, $chatId, $text)) {
+        if ($isAdmin && self::handlePendingEdit($api, $chatId, $text)) {
+            return;
+        }
+
+        if (self::isCommand($text, '/admin')) {
+            if ($adminOnlyBlocked) {
+                return;
+            }
+            self::sendAdminPanel($api, $chatId);
+
+            return;
+        }
+
+        if ($checkerBlocked) {
             return;
         }
 
         if (self::isCommand($text, '/start') || self::isCommand($text, '/help')) {
             $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
-
-            return;
-        }
-
-        if (self::isCommand($text, '/admin')) {
-            self::sendAdminPanel($api, $chatId);
 
             return;
         }
@@ -148,6 +157,13 @@ final class UpdateHandler
             return;
         }
 
+        if ($data === 'toggle_public') {
+            Settings::setPublic(!Settings::isPublic());
+            self::sendAdminPanel($api, $chatId);
+
+            return;
+        }
+
         if ($data === 'help') {
             $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
 
@@ -224,6 +240,9 @@ final class UpdateHandler
 
     private static function sendAdminPanel(TelegramApi $api, int $chatId): void
     {
+        $isPublic = Settings::isPublic();
+        $toggleLabel = $isPublic ? '🌐 حالت عمومی: روشن (بزنید تا فقط ادمین بشه)' : '🔒 حالت عمومی: خاموش (بزنید تا برای همه باز بشه)';
+
         $keyboard = [
             'inline_keyboard' => [
                 [['text' => '🟢 وضعیت ربات', 'callback_data' => 'status']],
@@ -236,11 +255,16 @@ final class UpdateHandler
                     ['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet'],
                 ],
                 [['text' => '💱 چکر قیمت ارز', 'callback_data' => 'price']],
+                [['text' => $toggleLabel, 'callback_data' => 'toggle_public']],
                 [['text' => '✏️ ویرایش متن‌ها و قالب‌ها', 'callback_data' => 'edit_menu']],
                 [['text' => '❓ راهنما', 'callback_data' => 'help']],
             ],
         ];
+        $publicNote = $isPublic
+            ? 'حالت عمومی روشنه — همه می‌تونن از چکرها استفاده کنن، ولی این پنل و ویرایش‌ها هنوز فقط برای شماست.'
+            : 'حالت عمومی خاموشه — فقط شما به چکرها دسترسی دارید.';
         $text = "🛠 <b>پنل مدیریت kan_checker</b>\n\n"
+            . "$publicNote\n\n"
             . 'یکی از گزینه‌ها رو بزنید، یا مستقیم یوزرنیم/لینک/هش/آدرس ولت رو بفرستید — خودش تشخیص می‌ده.';
         $api->sendMessage($chatId, $text, $keyboard, 'HTML');
     }
