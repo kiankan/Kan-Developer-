@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # منوی مدیریت kan_checker روی سرور (systemd)، به‌همراه دستورهای مستقیم.
 #
-# اولین بار (نصب اولیه):
+# اولین بار (نصب اولیه، تعاملی — توکن و آیدی ادمین رو می‌پرسه):
 #   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
+#
+# یا کاملا خودکار روی SSH بدون هیچ سوالی (فقط توکن و آیدی ادمین رو می‌دید):
+#   TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123456789 \
+#     bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
 #
 # بعد از نصب، از هر جای سرور کافیه بنویسید:
 #   kancheckerctl            # منو رو باز می‌کند
@@ -53,19 +57,41 @@ setup_venv() {
   "$INSTALL_DIR/.venv/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
 }
 
-prompt_token() {
-  local current=""
+prompt_config() {
+  local current_token="" current_admin=""
   if [ -f "$ENV_FILE" ]; then
-    current=$(grep '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+    current_token=$(grep '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+    current_admin=$(grep '^ADMIN_ID=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
   fi
 
-  if [ -n "$current" ]; then
-    read -rp "توکن ربات از قبل تنظیم شده. برای تغییر توکن جدید را وارد کنید (برای رد شدن Enter بزنید): " token
-    [ -z "$token" ] && token="$current"
-  else
-    read -rp "توکن ربات تلگرام (از @BotFather) را وارد کنید: " token
+  # اگر از قبل به‌صورت متغیر محیطی داده شده باشن (مثلا برای نصب کاملا خودکار روی
+  # سرور از طریق SSH)، هیچ سوالی پرسیده نمی‌شه:
+  #   TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123 kancheckerctl install
+  local token="${TELEGRAM_BOT_TOKEN:-}"
+  local admin="${ADMIN_ID:-}"
+
+  if [ -z "$token" ]; then
+    if [ -n "$current_token" ]; then
+      read -rp "توکن ربات از قبل تنظیم شده. برای تغییر، توکن جدید را وارد کنید (Enter = رد شدن): " token
+      [ -z "$token" ] && token="$current_token"
+    else
+      read -rp "توکن ربات تلگرام (از @BotFather) را وارد کنید: " token
+    fi
   fi
-  echo "TELEGRAM_BOT_TOKEN=$token" > "$ENV_FILE"
+
+  if [ -z "$admin" ]; then
+    if [ -n "$current_admin" ]; then
+      read -rp "آیدی عددی ادمین از قبل تنظیم شده. برای تغییر، مقدار جدید را وارد کنید (Enter = رد شدن): " admin
+      [ -z "$admin" ] && admin="$current_admin"
+    else
+      read -rp "آیدی عددی تلگرام ادمین (از @userinfobot بگیرید، نه یوزرنیم) را وارد کنید: " admin
+    fi
+  fi
+
+  {
+    echo "TELEGRAM_BOT_TOKEN=$token"
+    echo "ADMIN_ID=$admin"
+  } > "$ENV_FILE"
 }
 
 write_systemd_unit() {
@@ -102,7 +128,7 @@ do_install() {
   install_deps_os
   ensure_repo
   setup_venv
-  prompt_token
+  prompt_config
   write_systemd_unit
   self_link
   systemctl enable --now "$SERVICE_NAME"
@@ -133,9 +159,9 @@ do_logs()    { journalctl -u "$SERVICE_NAME" -f -n 100; }
 
 do_set_token() {
   need_root
-  prompt_token
+  prompt_config
   systemctl restart "$SERVICE_NAME" 2>/dev/null
-  echo "توکن به‌روز شد و سرویس ری‌استارت شد."
+  echo "توکن/آیدی ادمین به‌روز شد و سرویس ری‌استارت شد."
 }
 
 do_uninstall() {
@@ -164,7 +190,7 @@ show_menu() {
     echo "5) ری‌استارت سرویس"
     echo "6) وضعیت سرویس"
     echo "7) نمایش لاگ (زنده، خروج با Ctrl+C)"
-    echo "8) تنظیم/تغییر توکن ربات"
+    echo "8) تنظیم/تغییر توکن و آیدی ادمین"
     echo "9) حذف کامل"
     echo "0) خروج"
     read -rp "انتخاب شما: " choice

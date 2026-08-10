@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from dotenv import load_dotenv
@@ -99,8 +99,22 @@ async def main() -> None:
     if not token:
         raise SystemExit("TELEGRAM_BOT_TOKEN تنظیم نشده است (در .env یا متغیر محیطی قرار دهید).")
 
+    admin_id_raw = os.environ.get("ADMIN_ID")
+    if admin_id_raw:
+        try:
+            admin_id = int(admin_id_raw)
+        except ValueError as exc:
+            raise SystemExit(f"ADMIN_ID باید یک عدد باشد، مقدار فعلی نامعتبر است: {admin_id_raw!r}") from exc
+        logger.info("دسترسی محدود به ADMIN_ID=%s شد.", admin_id)
+    else:
+        admin_id = None
+        logger.warning("ADMIN_ID تنظیم نشده — ربات به پیام هر کاربری در تلگرام پاسخ می‌دهد.")
+
     bot = Bot(token=token)
     dp = Dispatcher()
+
+    if admin_id is not None:
+        dp.message.filter(F.from_user.id == admin_id)
 
     dp.message.register(handle_start, CommandStart())
     dp.message.register(handle_start, Command("help"))
