@@ -129,6 +129,8 @@ final class UpdateHandler
             'ftp' => '📁 نمونه‌ها: /ftp list ، /ftp add ftpuser "رمزقوی" 500 ، /ftp del ftpuser',
             'dns' => '🧭 نمونه‌ها: /dns list example.com ، /dns add example.com www A 1.2.3.4 ، /dns del example.com 12',
             'password' => '🔑 با /password می‌تونید با یک ویزارد کوتاه رمز اکانت cPanel رو عوض کنید.',
+            'files' => '🗂 نمونه‌ها: /files list public_html ، /files view public_html/index.html ، /files write public_html/test.txt (بعدش محتوا رو در پیام بعدی بفرستید)',
+            'ssh' => '💻 نمونه: /ssh df -h  — فقط با اتصال «رمز عبور» و اگه SSH روی هاست‌تون فعال باشه.',
         ];
 
         if (isset($hints[$data])) {
@@ -185,6 +187,18 @@ final class UpdateHandler
                 return;
             case '/raw':
                 self::cmdRaw($api, $chatId, $args);
+
+                return;
+            case '/files':
+                self::cmdFiles($api, $chatId, $args);
+
+                return;
+            case '/ssh':
+                self::cmdSsh($api, $chatId, $text);
+
+                return;
+            case '/sshport':
+                self::cmdSshPort($api, $chatId, $args);
 
                 return;
             default:
@@ -249,14 +263,17 @@ final class UpdateHandler
             return true;
         }
 
-        if (str_starts_with($text, '/')) {
+        $step = $state['step'];
+        $data = $state['data'];
+
+        // برای محتوای فایل، خودِ محتوا ممکنه با "/" شروع بشه (مثلاً یک لیست
+        // مسیر یا robots.txt)؛ برخلاف بقیه‌ی مراحل نباید به‌عنوان دستور در نظر
+        // گرفته بشه.
+        if ($step !== 'files_write_content' && str_starts_with($text, '/')) {
             ConversationState::clear($chatId);
 
             return false;
         }
-
-        $step = $state['step'];
-        $data = $state['data'];
 
         switch ($step) {
             case 'connect_host':
@@ -374,9 +391,29 @@ final class UpdateHandler
                 ConversationState::clear($chatId);
 
                 return true;
+
+            case 'files_write_content':
+                ConversationState::clear($chatId);
+                self::finishFileWrite($api, $chatId, (string) $data['path'], $text);
+
+                return true;
         }
 
         return false;
+    }
+
+    private static function finishFileWrite(TelegramApi $api, int $chatId, string $path, string $content): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        [$dir, $file] = self::splitPath($path);
+        self::runUapi($api, $chatId, $client, 'Fileman', 'save_file_content', [
+            'dir' => $dir,
+            'file' => $file,
+            'content' => $content,
+        ], "✅ «{$path}» ذخیره شد.");
     }
 
     private static function finishPasswordChange(TelegramApi $api, int $chatId, string $oldPass, string $newPass): void
@@ -873,6 +910,162 @@ final class UpdateHandler
         $api->sendMessage($chatId, Render::raw($data), null, 'HTML');
     }
 
+    private static function cmdFiles(TelegramApi $api, int $chatId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $sub = strtolower($args[0] ?? '');
+
+        if ($sub === 'list' || $sub === '') {
+            $dir = $args[1] ?? '.';
+            $api->sendChatAction($chatId, 'typing');
+            try {
+                $data = $client->uapi('Fileman', 'list_files', ['dir' => $dir]);
+            } catch (CpanelError $e) {
+                $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+                return;
+            }
+            $api->sendMessage($chatId, Render::fileList($data, $dir), null, 'HTML');
+
+            return;
+        }
+
+        if ($sub === 'view') {
+            $path = $args[1] ?? null;
+            if ($path === null) {
+                $api->sendMessage($chatId, "استفاده:\n/files view <مسیر>\nمثال: /files view public_html/index.html");
+
+                return;
+            }
+            [$dir, $file] = self::splitPath($path);
+            $api->sendChatAction($chatId, 'typing');
+            try {
+                $data = $client->uapi('Fileman', 'get_file_content', ['dir' => $dir, 'file' => $file]);
+            } catch (CpanelError $e) {
+                $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+                return;
+            }
+            $api->sendMessage($chatId, Render::fileContent($data, $path), null, 'HTML');
+
+            return;
+        }
+
+        if ($sub === 'write') {
+            $path = $args[1] ?? null;
+            if ($path === null) {
+                $api->sendMessage($chatId, "استفاده:\n/files write <مسیر>\nبعدش محتوای کامل فایل رو در پیام بعدی بفرستید (کل فایل جایگزین می‌شه). برای لغو: /cancel");
+
+                return;
+            }
+            ConversationState::set($chatId, 'files_write_content', ['path' => $path]);
+            $api->sendMessage($chatId, "📝 محتوای کامل جدید برای «{$path}» رو در یک پیام بفرستید (محتوای فعلی فایل بازنویسی می‌شه). برای لغو: /cancel");
+
+            return;
+        }
+
+        if ($sub === 'mkdir') {
+            $path = $args[1] ?? null;
+            $name = $args[2] ?? null;
+            if ($path === null || $name === null) {
+                $api->sendMessage($chatId, "استفاده:\n/files mkdir <مسیر-والد> <نام-پوشه>\nمثال: /files mkdir public_html backups");
+
+                return;
+            }
+            self::runApi2($api, $chatId, $client, 'Fileman', 'mkdir', ['path' => $path, 'name' => $name], "✅ پوشه‌ی {$name} ساخته شد.");
+
+            return;
+        }
+
+        if ($sub === 'del' || $sub === 'delete') {
+            $path = $args[1] ?? null;
+            if ($path === null) {
+                $api->sendMessage($chatId, "استفاده:\n/files del <مسیر>\n⚠️ این عملیات قابل بازگشت نیست.");
+
+                return;
+            }
+            self::runApi2($api, $chatId, $client, 'Fileman', 'fileop', ['op' => 'unlink', 'sourcefiles' => $path], "✅ {$path} حذف شد.");
+
+            return;
+        }
+
+        if ($sub === 'rename' || $sub === 'move') {
+            $from = $args[1] ?? null;
+            $to = $args[2] ?? null;
+            if ($from === null || $to === null) {
+                $api->sendMessage($chatId, "استفاده:\n/files rename <مسیر-قبلی> <مسیر-جدید>");
+
+                return;
+            }
+            self::runApi2($api, $chatId, $client, 'Fileman', 'fileop', ['op' => 'rename', 'sourcefiles' => $from, 'destfiles' => $to], "✅ به {$to} تغییر نام یافت.");
+
+            return;
+        }
+
+        if ($sub === 'copy') {
+            $from = $args[1] ?? null;
+            $to = $args[2] ?? null;
+            if ($from === null || $to === null) {
+                $api->sendMessage($chatId, "استفاده:\n/files copy <مبدأ> <مقصد>");
+
+                return;
+            }
+            self::runApi2($api, $chatId, $client, 'Fileman', 'fileop', ['op' => 'copy', 'sourcefiles' => $from, 'destfiles' => $to], "✅ در {$to} کپی شد.");
+
+            return;
+        }
+
+        $api->sendMessage($chatId, "استفاده:\n/files list [مسیر]\n/files view <مسیر>\n/files write <مسیر>\n/files mkdir <مسیر-والد> <نام>\n/files rename <قبلی> <جدید>\n/files copy <مبدأ> <مقصد>\n/files del <مسیر>");
+    }
+
+    private static function cmdSshPort(TelegramApi $api, int $chatId, array $args): void
+    {
+        $profile = self::requireProfile($api, $chatId);
+        if ($profile === null) {
+            return;
+        }
+        $portArg = $args[0] ?? null;
+        if ($portArg === null || !ctype_digit($portArg) || (int) $portArg < 1 || (int) $portArg > 65535) {
+            $api->sendMessage($chatId, "استفاده:\n/sshport <پورت>\nمثال: /sshport 22\n(پیش‌فرض 22 هست؛ فقط اگه هاست‌تون پورت SSH غیراستاندارد داره لازمه عوضش کنید.)");
+
+            return;
+        }
+        HostStore::save($chatId, $profile['host'], $profile['port'], $profile['username'], $profile['auth_type'], $profile['secret'], (int) $portArg);
+        $api->sendMessage($chatId, "✅ پورت SSH روی {$portArg} تنظیم شد.");
+    }
+
+    private static function cmdSsh(TelegramApi $api, int $chatId, string $fullText): void
+    {
+        $profile = self::requireProfile($api, $chatId);
+        if ($profile === null) {
+            return;
+        }
+        if ($profile['auth_type'] !== 'password') {
+            $api->sendMessage($chatId, "❗️ /ssh فقط با اتصال «رمز عبور» کار می‌کنه (API Token برای ورود SSH معتبر نیست). با /connect دوباره با رمز عبور وصل شید.");
+
+            return;
+        }
+        $command = self::rawArgAfter($fullText);
+        if ($command === '') {
+            $api->sendMessage($chatId, "استفاده:\n/ssh <دستور>\nمثال: /ssh df -h\n\n⚠️ این یعنی اجرای واقعی دستور شل روی سرورتون — دقت کنید چی می‌فرستید. نیاز به فعال‌بودن SSH روی هاست داره.");
+
+            return;
+        }
+        $api->sendChatAction($chatId, 'typing');
+        $ssh = new SshClient($profile['host'], $profile['ssh_port'], $profile['username'], $profile['secret']);
+        try {
+            $result = $ssh->exec($command);
+        } catch (SshError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, Render::sshResult($result, $command), null, 'HTML');
+    }
+
     // ---------------------------------------------------------------
     // ابزارهای کمکی
     // ---------------------------------------------------------------
@@ -959,6 +1152,32 @@ final class UpdateHandler
         return self::tokenize($rest);
     }
 
+    /**
+     * برخلاف argsAfter، اینجا بقیه‌ی پیام رو دست‌نخورده (بدون توکنایز/کوت‌زدایی)
+     * برمی‌گردونه — برای /ssh لازمه چون دستور شل ممکنه quote، pipe، redirect
+     * و... داشته باشه که نباید توسط پارسر ما دست‌کاری بشه.
+     */
+    private static function rawArgAfter(string $text): string
+    {
+        $pos = strpos($text, ' ');
+
+        return $pos === false ? '' : trim(substr($text, $pos + 1));
+    }
+
+    /**
+     * برای Fileman::get_file_content که dir و file رو جدا می‌خواد.
+     *
+     * @return array{0:string,1:string} [dir, file]
+     */
+    private static function splitPath(string $path): array
+    {
+        $path = trim($path, '/');
+        $dir = dirname($path);
+        $file = basename($path);
+
+        return [$dir === '' ? '.' : $dir, $file];
+    }
+
     private static function handlePendingEdit(TelegramApi $api, int $chatId, string $text): bool
     {
         $awaiting = EditState::get();
@@ -1004,6 +1223,7 @@ final class UpdateHandler
                 [['text' => '🌐 دامنه‌ها', 'callback_data' => 'domains'], ['text' => '📧 ایمیل', 'callback_data' => 'email']],
                 [['text' => '🗄 دیتابیس', 'callback_data' => 'db'], ['text' => '📁 FTP', 'callback_data' => 'ftp']],
                 [['text' => '🧭 DNS', 'callback_data' => 'dns'], ['text' => '🔑 تغییر رمز', 'callback_data' => 'password']],
+                [['text' => '🗂 فایل‌منیجر', 'callback_data' => 'files'], ['text' => '💻 ترمینال SSH', 'callback_data' => 'ssh']],
             ],
         ];
         $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME), $keyboard);

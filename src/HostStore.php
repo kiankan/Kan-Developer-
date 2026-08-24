@@ -28,18 +28,26 @@ final class HostStore
             'username' => (string) $entry['username'],
             'auth_type' => (string) $entry['auth_type'],
             'secret' => $secret,
+            // پورت cPanel (UAPI) و پورت SSH لزوماً یکی نیستن؛ پیش‌فرض SSH همون
+            // 22 استانداردـه، مگه اینکه با /sshport عوض شده باشه.
+            'ssh_port' => (int) ($entry['ssh_port'] ?? 22),
         ];
     }
 
-    public static function save(int $chatId, string $host, int $port, string $username, string $authType, string $secret): void
+    /**
+     * @param int|null $sshPort اگر null باشه، مقدار قبلی (یا پیش‌فرض 22) حفظ می‌شه.
+     */
+    public static function save(int $chatId, string $host, int $port, string $username, string $authType, string $secret, ?int $sshPort = null): void
     {
         $all = self::load();
+        $existing = $all[(string) $chatId] ?? null;
         $all[(string) $chatId] = [
             'host' => $host,
             'port' => $port,
             'username' => $username,
             'auth_type' => $authType,
             'secret_enc' => Crypto::encrypt($secret),
+            'ssh_port' => $sshPort ?? (int) (is_array($existing) ? ($existing['ssh_port'] ?? 22) : 22),
             'connected_at' => gmdate('c'),
         ];
         self::save_($all);

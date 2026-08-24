@@ -41,13 +41,31 @@ ensure_repo() {
 install_deps_os() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
-    apt-get install -y php-cli php-curl php-xml php-mbstring git
+    apt-get install -y php-cli php-curl php-xml php-mbstring git unzip
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y php-cli php-curl php-xml php-mbstring git
+    dnf install -y php-cli php-curl php-xml php-mbstring git unzip
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y php-cli php-curl php-xml php-mbstring git
+    yum install -y php-cli php-curl php-xml php-mbstring git unzip
   else
     echo "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد؛ لطفاً php-cli (با پسوندهای curl/xml/mbstring) و git را خودتان نصب کنید."
+  fi
+  install_composer
+}
+
+# برای دستور /ssh (phpseclib). اگه composer نصب نباشه دانلودش می‌کنه؛ خود
+# ربات هم بدون این کتابخانه کار می‌کنه، فقط /ssh با یک خطای روشن جواب می‌ده.
+install_composer() {
+  if command -v composer >/dev/null 2>&1; then
+    return
+  fi
+  curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+}
+
+install_php_deps() {
+  if command -v composer >/dev/null 2>&1; then
+    (cd "$INSTALL_DIR" && composer install --no-dev --no-interaction --optimize-autoloader)
+  else
+    echo "composer پیدا/نصب نشد؛ دستور /ssh (ترمینال) کار نمی‌کنه، بقیه‌ی ربات مشکلی نداره."
   fi
 }
 
@@ -142,6 +160,7 @@ do_install() {
   echo "== نصب kan_checker روی سرور (PHP) =="
   install_deps_os
   ensure_repo
+  install_php_deps
   cleanup_legacy_python
   prompt_config
   write_systemd_unit
@@ -157,6 +176,7 @@ do_install() {
 do_finish_update() {
   need_root
   install_deps_os
+  install_php_deps
   cleanup_legacy_python
   write_systemd_unit
   systemctl reset-failed "$SERVICE_NAME" 2>/dev/null

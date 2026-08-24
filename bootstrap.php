@@ -6,12 +6,20 @@ date_default_timezone_set('UTC');
 
 $root = __DIR__;
 
+// اختیاریه: فقط برای دستور /ssh لازمه (phpseclib). اگه «composer install»
+// اجرا نشده باشه، بقیه‌ی ربات بدون مشکل کار می‌کنه و فقط /ssh خطای روشن
+// می‌ده (SshClient::isAvailable()).
+if (is_file($root . '/vendor/autoload.php')) {
+    require_once $root . '/vendor/autoload.php';
+}
+
 require_once $root . '/src/Env.php';
 require_once $root . '/src/Format.php';
 require_once $root . '/src/Crypto.php';
 require_once $root . '/src/CpanelClient.php';
 require_once $root . '/src/HostStore.php';
 require_once $root . '/src/ConversationState.php';
+require_once $root . '/src/SshClient.php';
 require_once $root . '/src/Render.php';
 require_once $root . '/src/TelegramApi.php';
 require_once $root . '/src/TextStore.php';

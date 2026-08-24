@@ -199,6 +199,82 @@ final class Render
         return "📦 خروجی خام:\n<pre>" . htmlspecialchars(Format::prettyJson($data), ENT_QUOTES) . '</pre>';
     }
 
+    public static function fileList(array $entries, string $dir): string
+    {
+        if ($entries === []) {
+            return "📂 <b>" . htmlspecialchars($dir, ENT_QUOTES) . "</b>\n\nپوشه خالیه یا پیدا نشد.";
+        }
+
+        $lines = ['📂 <b>' . htmlspecialchars($dir, ENT_QUOTES) . '</b>', ''];
+        foreach ($entries as $item) {
+            if (!is_array($item)) {
+                $lines[] = '  • ' . (string) $item;
+
+                continue;
+            }
+            $name = self::pick($item, ['file', 'name']);
+            $type = self::pick($item, ['type']);
+            $size = self::pick($item, ['size']);
+            $isDir = $type === 'dir' || (bool) self::pick($item, ['isdir', 'is_dir']);
+            $icon = $isDir ? '📁' : '📄';
+            $sizeText = ($size !== null && !$isDir) ? ' — ' . Format::megabytes((float) $size / 1024 / 1024) : '';
+            $lines[] = "  {$icon} {$name}{$sizeText}";
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public static function fileContent(array $data, string $path): string
+    {
+        $content = self::pick($data, ['content']);
+        if ($content === null) {
+            return "📄 <b>" . htmlspecialchars($path, ENT_QUOTES) . "</b>\n\nمحتوا قابل تشخیص نبود:\n" . Format::prettyJson($data, 1500);
+        }
+        $content = (string) $content;
+        $truncated = false;
+        if (mb_strlen($content) > 3500) {
+            $content = mb_substr($content, 0, 3500);
+            $truncated = true;
+        }
+        $lines = ['📄 <b>' . htmlspecialchars($path, ENT_QUOTES) . '</b>', '', '<pre>' . htmlspecialchars($content, ENT_QUOTES) . '</pre>'];
+        if ($truncated) {
+            $lines[] = '⚠️ فایل بزرگ‌تر از این بود؛ فقط بخش ابتدایی نشون داده شد.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public static function sshResult(array $result, string $command): string
+    {
+        $lines = ['💻 <b>' . htmlspecialchars($command, ENT_QUOTES) . '</b>', ''];
+        $stdout = trim((string) ($result['stdout'] ?? ''));
+        $stderr = trim((string) ($result['stderr'] ?? ''));
+        $combined = $stdout;
+        if ($stderr !== '') {
+            $combined .= ($combined !== '' ? "\n\n[stderr]\n" : "[stderr]\n") . $stderr;
+        }
+        if ($combined === '') {
+            $combined = '(خروجی‌ای نداشت)';
+        }
+        $truncated = false;
+        if (mb_strlen($combined) > 3500) {
+            $combined = mb_substr($combined, 0, 3500);
+            $truncated = true;
+        }
+        $lines[] = '<pre>' . htmlspecialchars($combined, ENT_QUOTES) . '</pre>';
+        if ($truncated) {
+            $lines[] = '⚠️ خروجی بزرگ‌تر از این بود؛ فقط بخش ابتدایی نشون داده شد.';
+        }
+        if (($result['exit_status'] ?? null) !== null) {
+            $lines[] = 'کد خروج: ' . $result['exit_status'];
+        }
+        if (!empty($result['timed_out'])) {
+            $lines[] = '⏱ دستور به timeout خورد (ممکنه هنوز روی سرور در حال اجرا باشه).';
+        }
+
+        return implode("\n", $lines);
+    }
+
     private static function pick(array $data, array $keys): mixed
     {
         foreach ($keys as $key) {
