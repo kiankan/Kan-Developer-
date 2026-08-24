@@ -79,6 +79,15 @@ final class TelegramApi
         }
     }
 
+    public function deleteMessage(int $chatId, int $messageId): void
+    {
+        try {
+            $this->call('deleteMessage', ['chat_id' => $chatId, 'message_id' => $messageId]);
+        } catch (Throwable) {
+            // ممکنه پیام قابل حذف نباشه (مثلاً قدیمی‌تر از محدودیت تلگرام)؛ بی‌اهمیته.
+        }
+    }
+
     public function deleteWebhook(): void
     {
         $this->call('deleteWebhook', ['drop_pending_updates' => 'true']);

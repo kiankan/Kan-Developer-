@@ -9,123 +9,48 @@ function usage(): void
 {
     fwrite(STDERR, <<<TXT
         استفاده:
-          php cli.php auction <username | link>
-          php cli.php gift <t.me/nft link | fragment.com/gift link | slug>
-          php cli.php tx <hash>
-          php cli.php wallet <address>
-          php cli.php price "<amount> <coin>"   (e.g. "1 ton", "5 btc")
-          php cli.php check <username | link | hash | address | gift>
           php cli.php webhook:set <url>
           php cli.php webhook:delete
+          php cli.php test <host> <port> <username> <password|token> <password|token>
+
+        دستور test بدون نیاز به تلگرام، اتصال مستقیم به یک هاست cPanel رو تست می‌کنه.
+        آرگومان آخر نوع احراز هویت رو مشخص می‌کنه: password یا token.
 
         TXT);
 }
 
 $command = $argv[1] ?? null;
-$arg = $argv[2] ?? null;
 
 switch ($command) {
-    case 'auction':
-        if ($arg === null) {
-            usage();
-            exit(1);
-        }
-        try {
-            echo Render::auction(FragmentClient::fetchAuction($arg)), "\n";
-        } catch (FragmentError $e) {
-            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
-            exit(1);
-        }
-        break;
-
-    case 'tx':
-        if ($arg === null) {
-            usage();
-            exit(1);
-        }
-        try {
-            echo Render::tx(TonClient::fetchTransaction($arg)), "\n";
-        } catch (TonError $e) {
-            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
-            exit(1);
-        }
-        break;
-
-    case 'wallet':
-        if ($arg === null) {
-            usage();
-            exit(1);
-        }
-        try {
-            echo Render::wallet(WalletClient::fetchBalance($arg)), "\n";
-        } catch (WalletError $e) {
-            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
-            exit(1);
-        }
-        break;
-
-    case 'gift':
-        if ($arg === null) {
-            usage();
-            exit(1);
-        }
-        try {
-            echo Render::gift(GiftClient::fetchGift($arg)), "\n";
-        } catch (GiftError $e) {
-            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
-            exit(1);
-        }
-        break;
-
-    case 'price':
-        if ($arg === null) {
-            usage();
-            exit(1);
-        }
-        $parsed = CurrencyClient::parseQuery($arg);
-        if ($parsed === null) {
-            fwrite(STDERR, "خطا: ورودی رو نفهمیدم. مثال: \"1 ton\"\n");
-            exit(1);
-        }
-        echo Render::price(CurrencyClient::fetchValue($parsed['amount'], $parsed['coin'])), "\n";
-        break;
-
-    case 'check':
-        if ($arg === null) {
-            usage();
-            exit(1);
-        }
-        try {
-            $parsed = CurrencyClient::parseQuery($arg);
-            if ($parsed !== null) {
-                echo Render::price(CurrencyClient::fetchValue($parsed['amount'], $parsed['coin'])), "\n";
-            } elseif (GiftClient::extractSlug($arg) !== null) {
-                echo Render::gift(GiftClient::fetchGift($arg)), "\n";
-            } elseif (TonClient::looksLikeTxHash($arg)) {
-                echo Render::tx(TonClient::fetchTransaction($arg)), "\n";
-            } elseif (WalletClient::looksLikeAddress($arg)) {
-                echo Render::wallet(WalletClient::fetchBalance($arg)), "\n";
-            } else {
-                echo Render::auction(FragmentClient::fetchAuction($arg)), "\n";
-            }
-        } catch (TonError|FragmentError|WalletError|GiftError $e) {
-            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
-            exit(1);
-        }
-        break;
-
     case 'webhook:set':
-        if ($arg === null) {
+        $url = $argv[2] ?? null;
+        if ($url === null) {
             usage();
             exit(1);
         }
-        (new TelegramApi(kanchecker_bot_token()))->setWebhook($arg);
-        echo "وبهوک تنظیم شد: $arg\n";
+        (new TelegramApi(kanchecker_bot_token()))->setWebhook($url);
+        echo "وبهوک تنظیم شد: $url\n";
         break;
 
     case 'webhook:delete':
         (new TelegramApi(kanchecker_bot_token()))->deleteWebhook();
         echo "وبهوک حذف شد.\n";
+        break;
+
+    case 'test':
+        [$host, $port, $username, $secret, $authType] = [$argv[2] ?? null, $argv[3] ?? null, $argv[4] ?? null, $argv[5] ?? null, $argv[6] ?? 'password'];
+        if ($host === null || $port === null || $username === null || $secret === null) {
+            usage();
+            exit(1);
+        }
+        $client = new CpanelClient($host, (int) $port, $username, $secret, $authType === 'token' ? 'token' : 'password');
+        try {
+            $data = $client->uapi('DomainInfo', 'domains_data');
+            echo "اتصال موفق بود.\n" . Format::prettyJson($data) . "\n";
+        } catch (CpanelError $e) {
+            fwrite(STDERR, 'خطا: ' . $e->getMessage() . "\n");
+            exit(1);
+        }
         break;
 
     default:

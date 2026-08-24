@@ -4,37 +4,6 @@ declare(strict_types=1);
 
 final class Format
 {
-    public static function humanizeDuration(int $totalSeconds): string
-    {
-        $totalSeconds = max(0, $totalSeconds);
-        $days = intdiv($totalSeconds, 86400);
-        $rem = $totalSeconds % 86400;
-        $hours = intdiv($rem, 3600);
-        $rem %= 3600;
-        $minutes = intdiv($rem, 60);
-        $seconds = $rem % 60;
-
-        $parts = [];
-        if ($days > 0) {
-            $parts[] = "$days روز";
-        }
-        $parts[] = sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
-
-        return implode(' ', $parts);
-    }
-
-    public static function formatUtc(DateTimeImmutable $dt): string
-    {
-        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C');
-    }
-
-    public static function secondsUntil(DateTimeImmutable $dt): int
-    {
-        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-
-        return $dt->getTimestamp() - $now->getTimestamp();
-    }
-
     public static function jalaliNow(): string
     {
         $now = new DateTimeImmutable('now', new DateTimeZone('Asia/Tehran'));
@@ -43,9 +12,40 @@ final class Format
         return sprintf('%04d/%02d/%02d | %s', $jy, $jm, $jd, $now->format('H:i:s'));
     }
 
+    public static function megabytes(mixed $value): string
+    {
+        if (!is_numeric($value)) {
+            return 'نامشخص';
+        }
+        $mb = (float) $value;
+        if ($mb <= 0) {
+            return '0 مگابایت';
+        }
+        if ($mb >= 1024) {
+            return sprintf('%.2f گیگابایت', $mb / 1024);
+        }
+
+        return sprintf('%.1f مگابایت', $mb);
+    }
+
     /**
-     * @return array{0: int, 1: int, 2: int} [year, month, day]
+     * برای مواردی که شکل دقیق پاسخ cPanel رو نمی‌شناسیم/مطمئن نیستیم، خروجی
+     * خام JSON رو (کوتاه‌شده تا زیر سقف پیام تلگرام) نمایش می‌دیم تا چیزی
+     * گم یا اشتباه‌قالب‌بندی‌شده مخفی نمونه.
      */
+    public static function prettyJson(mixed $data, int $maxLength = 3500): string
+    {
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        if ($json === false) {
+            return '(قابل نمایش نیست)';
+        }
+        if (mb_strlen($json) > $maxLength) {
+            $json = mb_substr($json, 0, $maxLength) . "\n… (بریده شد)";
+        }
+
+        return $json;
+    }
+
     private static function gregorianToJalali(int $gy, int $gm, int $gd): array
     {
         $gDaysInMonth = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];

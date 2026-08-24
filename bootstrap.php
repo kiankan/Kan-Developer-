@@ -8,11 +8,10 @@ $root = __DIR__;
 
 require_once $root . '/src/Env.php';
 require_once $root . '/src/Format.php';
-require_once $root . '/src/FragmentClient.php';
-require_once $root . '/src/GiftClient.php';
-require_once $root . '/src/TonClient.php';
-require_once $root . '/src/WalletClient.php';
-require_once $root . '/src/CurrencyClient.php';
+require_once $root . '/src/Crypto.php';
+require_once $root . '/src/CpanelClient.php';
+require_once $root . '/src/HostStore.php';
+require_once $root . '/src/ConversationState.php';
 require_once $root . '/src/Render.php';
 require_once $root . '/src/TelegramApi.php';
 require_once $root . '/src/TextStore.php';

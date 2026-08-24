@@ -8,6 +8,7 @@ final class UpdateHandler
     {
         $chatId = $message['chat']['id'] ?? null;
         $fromId = $message['from']['id'] ?? null;
+        $messageId = $message['message_id'] ?? null;
         $text = trim($message['text'] ?? '');
 
         if ($chatId === null || $text === '') {
@@ -22,14 +23,16 @@ final class UpdateHandler
         }
 
         $isAdmin = $adminId !== null && $fromId === $adminId;
-        // پنل ادمین/ویرایش همیشه فقط برای خود ادمینه؛ چکرها اگه «حالت عمومی»
-        // روشن باشه برای همه بازه، وگرنه فقط برای ادمین.
+        // پنل ادمین/ویرایش همیشه فقط برای خود ادمینه؛ بقیه‌ی دستورها اگه
+        // «حالت عمومی» روشن باشه برای همه بازه، وگرنه فقط برای ادمین.
         $adminOnlyBlocked = $adminId !== null && !$isAdmin;
-        $checkerBlocked = $adminOnlyBlocked && !Settings::isPublic();
+        $featuresBlocked = $adminOnlyBlocked && !Settings::isPublic();
 
-        // اگه ادمین وسط ویرایش یه متنه (از پنل ادمین)، پیام بعدیش رو به‌عنوان
-        // مقدار جدید در نظر می‌گیریم، نه یک دستور معمولی.
         if ($isAdmin && self::handlePendingEdit($api, $chatId, $text)) {
+            return;
+        }
+
+        if (self::handlePendingConversation($api, $chatId, $messageId, $text)) {
             return;
         }
 
@@ -42,83 +45,23 @@ final class UpdateHandler
             return;
         }
 
-        if ($checkerBlocked) {
+        if ($featuresBlocked) {
             return;
         }
 
         if (self::isCommand($text, '/start') || self::isCommand($text, '/help')) {
-            $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
+            self::sendMainMenu($api, $chatId);
 
             return;
         }
 
-        if (self::isCommand($text, '/auction')) {
-            $query = self::commandArg($text);
-            if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم یا لینک رو هم بفرستید. مثال:\n/auction durov");
-
-                return;
-            }
-            self::replyAuction($api, $chatId, $query);
+        if (self::isCommand($text, '/cancel')) {
+            $api->sendMessage($chatId, 'چیزی برای لغو کردن نیست.');
 
             return;
         }
 
-        if (self::isCommand($text, '/gift')) {
-            $query = self::commandArg($text);
-            if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً لینک یا اسلاگ گیفت رو هم بفرستید. مثال:\n/gift durovscap-1142");
-
-                return;
-            }
-            self::replyGift($api, $chatId, $query);
-
-            return;
-        }
-
-        if (self::isCommand($text, '/tx') || self::isCommand($text, '/hash')) {
-            $query = self::commandArg($text);
-            if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً هش تراکنش رو هم بفرستید. مثال:\n/tx <hash>");
-
-                return;
-            }
-            self::replyTx($api, $chatId, $query);
-
-            return;
-        }
-
-        if (self::isCommand($text, '/wallet')) {
-            $query = self::commandArg($text);
-            if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً آدرس ولت رو هم بفرستید (TON, Bitcoin, Ethereum یا Tron). مثال:\n/wallet <آدرس>");
-
-                return;
-            }
-            self::replyWallet($api, $chatId, $query);
-
-            return;
-        }
-
-        if (self::isCommand($text, '/check')) {
-            $query = self::commandArg($text);
-            if ($query === null) {
-                $api->sendMessage($chatId, "لطفاً یوزرنیم، لینک، هش یا آدرس ولت رو بفرستید. مثال:\n/check durov");
-
-                return;
-            }
-            self::dispatch($api, $chatId, $query);
-
-            return;
-        }
-
-        if (str_starts_with($text, '/')) {
-            return;
-        }
-
-        // بدون دستور: خودکار تشخیص می‌ده قیمت ارزه، هش تراکنشه، آدرس ولته
-        // (هر بلاکچین پشتیبانی‌شده)، گیفت NFTه یا یوزرنیم/لینک Fragment.
-        self::dispatch($api, $chatId, $text);
+        self::routeCommand($api, $chatId, $messageId, $text);
     }
 
     public static function handleCallback(TelegramApi $api, array $callbackQuery, ?int $adminId): void
@@ -151,12 +94,6 @@ final class UpdateHandler
             return;
         }
 
-        if ($data === 'edit_menu') {
-            self::sendEditMenu($api, $chatId);
-
-            return;
-        }
-
         if ($data === 'toggle_public') {
             Settings::setPublic(!Settings::isPublic());
             self::sendAdminPanel($api, $chatId);
@@ -164,29 +101,34 @@ final class UpdateHandler
             return;
         }
 
-        if ($data === 'help') {
-            $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME));
+        if ($data === 'edit_welcome') {
+            EditState::set(TextStore::KEY_WELCOME);
+            $api->sendMessage($chatId, "✏️ متن جدید برای «پیام خوش‌آمد/راهنما» رو بفرستید (برای لغو: /cancel).\n\nمتن فعلی:\n" . TextStore::get(TextStore::KEY_WELCOME));
 
             return;
         }
 
-        if (str_starts_with($data, 'edit:')) {
-            $key = substr($data, strlen('edit:'));
-            if (isset(TextStore::LABELS[$key])) {
-                EditState::set($key);
-                $label = TextStore::LABELS[$key];
-                $api->sendMessage($chatId, "✏️ متن جدید برای «{$label}» رو بفرستید (برای لغو: /cancel).\n\nمتن فعلی:\n" . TextStore::get($key));
-            }
+        if ($data === 'help') {
+            self::sendMainMenu($api, $chatId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'connect_auth:')) {
+            $authType = substr($data, strlen('connect_auth:'));
+            self::advanceConnectAuth($api, $chatId, $authType);
 
             return;
         }
 
         $hints = [
-            'auction' => '🎯 یوزرنیم یا لینک fragment.com رو بفرستید (دستور لازم نیست).',
-            'gift' => '🎁 لینک t.me/nft/... یا fragment.com/gift/... یا اسلاگ گیفت (مثل durovscap-1142) رو بفرستید (دستور لازم نیست).',
-            'tx' => '🔗 هش تراکنش TON رو بفرستید (دستور لازم نیست).',
-            'wallet' => '👛 آدرس ولت TON، Bitcoin، Ethereum یا Tron رو بفرستید (دستور لازم نیست).',
-            'price' => '💱 مقدار + اسم ارز رو بفرستید، مثلاً «1 ton» یا «5 btc» (دستور لازم نیست).',
+            'connect' => '🔌 با /connect می‌تونید هاست، یوزرنیم و رمز/توکن cPanel رو مرحله‌به‌مرحله به ربات بدید.',
+            'domains' => '🌐 بعد از اتصال، با /domains لیست دامنه/زیردامنه/addon/parked رو می‌بینید.',
+            'email' => '📧 نمونه‌ها: /email list ، /email add foo@example.com "رمزقوی" 250 ، /email del foo@example.com',
+            'db' => '🗄 نمونه‌ها: /db list ، /db create shopdb ، /db user add shopuser "رمزقوی" ، /db grant shopuser shopdb',
+            'ftp' => '📁 نمونه‌ها: /ftp list ، /ftp add ftpuser "رمزقوی" 500 ، /ftp del ftpuser',
+            'dns' => '🧭 نمونه‌ها: /dns list example.com ، /dns add example.com www A 1.2.3.4 ، /dns del example.com 12',
+            'password' => '🔑 با /password می‌تونید با یک ویزارد کوتاه رمز اکانت cPanel رو عوض کنید.',
         ];
 
         if (isset($hints[$data])) {
@@ -194,11 +136,819 @@ final class UpdateHandler
         }
     }
 
+    private static function routeCommand(TelegramApi $api, int $chatId, ?int $messageId, string $text): void
+    {
+        $cmd = strtolower(explode('@', strtok($text, " \t") ?: '')[0]);
+        $args = self::argsAfter($text);
+
+        switch ($cmd) {
+            case '/connect':
+                self::startConnectWizard($api, $chatId);
+
+                return;
+            case '/disconnect':
+                self::cmdDisconnect($api, $chatId);
+
+                return;
+            case '/info':
+            case '/accountinfo':
+                self::cmdInfo($api, $chatId);
+
+                return;
+            case '/domains':
+                self::cmdDomains($api, $chatId);
+
+                return;
+            case '/subdomain':
+                self::cmdSubdomain($api, $chatId, $args);
+
+                return;
+            case '/email':
+                self::cmdEmail($api, $chatId, $messageId, $args);
+
+                return;
+            case '/db':
+                self::cmdDb($api, $chatId, $messageId, $args);
+
+                return;
+            case '/ftp':
+                self::cmdFtp($api, $chatId, $messageId, $args);
+
+                return;
+            case '/dns':
+                self::cmdDns($api, $chatId, $args);
+
+                return;
+            case '/password':
+                self::startPasswordWizard($api, $chatId);
+
+                return;
+            case '/raw':
+                self::cmdRaw($api, $chatId, $args);
+
+                return;
+            default:
+                if (str_starts_with($text, '/')) {
+                    return;
+                }
+                self::sendMainMenu($api, $chatId);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // ویزارد /connect
+    // ---------------------------------------------------------------
+
+    private static function startConnectWizard(TelegramApi $api, int $chatId): void
+    {
+        ConversationState::set($chatId, 'connect_host', []);
+        $api->sendMessage($chatId, "🔌 اتصال هاست جدید (اگه قبلاً وصل بودید، جایگزین می‌شه).\n\nآدرس هاست یا IP رو بفرستید (مثلاً example.com یا 123.45.67.89). برای لغو: /cancel");
+    }
+
+    private static function startPasswordWizard(TelegramApi $api, int $chatId): void
+    {
+        if (HostStore::get($chatId) === null) {
+            $api->sendMessage($chatId, '❗️ ابتدا با /connect هاست‌تون رو وصل کنید.');
+
+            return;
+        }
+        ConversationState::set($chatId, 'password_current', []);
+        $api->sendMessage($chatId, '🔑 برای تغییر رمز اکانت cPanel، اول رمز فعلی رو بفرستید (بلافاصله از چت پاک می‌شه). برای لغو: /cancel');
+    }
+
+    private static function advanceConnectAuth(TelegramApi $api, int $chatId, string $authType): void
+    {
+        $state = ConversationState::get($chatId);
+        if ($state === null || $state['step'] !== 'connect_authtype_wait') {
+            return;
+        }
+        if (!in_array($authType, ['password', 'token'], true)) {
+            return;
+        }
+        $data = $state['data'];
+        $data['auth_type'] = $authType;
+        ConversationState::set($chatId, 'connect_secret', $data);
+        $label = $authType === 'token' ? 'API Token' : 'رمز عبور';
+        $api->sendMessage($chatId, "🔐 حالا {$label} رو بفرستید (بلافاصله از چت پاک می‌شه تا جایی ذخیره نمونه).");
+    }
+
     /**
-     * اگه منتظر متن جدید برای یکی از کلیدهای قابل‌ویرایش بودیم، این پیام رو
-     * مصرف می‌کنه و true برمی‌گردونه؛ در غیر این صورت false تا پردازش عادی
-     * ادامه پیدا کنه.
+     * @return bool اگه پیام مصرف شد (بخشی از یک ویزارد بود) true برمی‌گردونه.
      */
+    private static function handlePendingConversation(TelegramApi $api, int $chatId, ?int $messageId, string $text): bool
+    {
+        $state = ConversationState::get($chatId);
+        if ($state === null) {
+            return false;
+        }
+
+        if ($text === '/cancel') {
+            ConversationState::clear($chatId);
+            $api->sendMessage($chatId, 'لغو شد.');
+
+            return true;
+        }
+
+        if (str_starts_with($text, '/')) {
+            ConversationState::clear($chatId);
+
+            return false;
+        }
+
+        $step = $state['step'];
+        $data = $state['data'];
+
+        switch ($step) {
+            case 'connect_host':
+                $host = preg_replace('#^https?://#i', '', trim($text));
+                $host = rtrim((string) $host, '/');
+                if ($host === '') {
+                    $api->sendMessage($chatId, 'آدرس هاست نمی‌تونه خالی باشه. دوباره بفرستید:');
+
+                    return true;
+                }
+                $data['host'] = $host;
+                ConversationState::set($chatId, 'connect_port', $data);
+                $api->sendMessage($chatId, 'پورت cPanel رو بفرستید (پیش‌فرض معمول: 2083). اگه مطمئن نیستید همین "-" رو بفرستید تا 2083 در نظر گرفته بشه.');
+
+                return true;
+
+            case 'connect_port':
+                $trimmed = trim($text);
+                if ($trimmed === '' || $trimmed === '-' || $trimmed === 'default') {
+                    $port = 2083;
+                } elseif (ctype_digit($trimmed) && (int) $trimmed >= 1 && (int) $trimmed <= 65535) {
+                    $port = (int) $trimmed;
+                } else {
+                    $api->sendMessage($chatId, 'پورت باید یک عدد بین 1 تا 65535 باشه (یا "-" برای پیش‌فرض). دوباره بفرستید:');
+
+                    return true;
+                }
+                $data['port'] = $port;
+                ConversationState::set($chatId, 'connect_username', $data);
+                $api->sendMessage($chatId, 'یوزرنیم اکانت cPanel رو بفرستید:');
+
+                return true;
+
+            case 'connect_username':
+                $username = trim($text);
+                if ($username === '') {
+                    $api->sendMessage($chatId, 'یوزرنیم نمی‌تونه خالی باشه. دوباره بفرستید:');
+
+                    return true;
+                }
+                $data['username'] = $username;
+                ConversationState::set($chatId, 'connect_authtype_wait', $data);
+                $api->sendMessage($chatId, 'روش احراز هویت رو انتخاب کنید:', [
+                    'inline_keyboard' => [
+                        [['text' => '🔑 رمز عبور cPanel', 'callback_data' => 'connect_auth:password']],
+                        [['text' => '🪪 API Token', 'callback_data' => 'connect_auth:token']],
+                    ],
+                ]);
+
+                return true;
+
+            case 'connect_authtype_wait':
+                $normalized = mb_strtolower(trim($text));
+                if (in_array($normalized, ['password', 'رمز', 'رمز عبور'], true)) {
+                    self::advanceConnectAuth($api, $chatId, 'password');
+                } elseif (in_array($normalized, ['token', 'توکن'], true)) {
+                    self::advanceConnectAuth($api, $chatId, 'token');
+                } else {
+                    $api->sendMessage($chatId, 'لطفاً از دکمه‌های بالا یکی رو انتخاب کنید (یا بنویسید password یا token).');
+                }
+
+                return true;
+
+            case 'connect_secret':
+                if ($messageId !== null) {
+                    $api->deleteMessage($chatId, $messageId);
+                }
+                $secret = trim($text);
+                if ($secret === '') {
+                    $api->sendMessage($chatId, 'مقدار خالی بود؛ دوباره رمز/توکن رو بفرستید:');
+
+                    return true;
+                }
+                $api->sendChatAction($chatId, 'typing');
+                $client = new CpanelClient((string) $data['host'], (int) $data['port'], (string) $data['username'], $secret, (string) $data['auth_type']);
+                try {
+                    $domainsData = $client->uapi('DomainInfo', 'domains_data');
+                } catch (CpanelError $e) {
+                    ConversationState::clear($chatId);
+                    $api->sendMessage($chatId, "⚠️ اتصال ناموفق بود: {$e->getMessage()}\n\nدوباره با /connect تلاش کنید.");
+
+                    return true;
+                }
+                HostStore::save($chatId, (string) $data['host'], (int) $data['port'], (string) $data['username'], (string) $data['auth_type'], $secret);
+                ConversationState::clear($chatId);
+                $api->sendMessage($chatId, Render::connected((string) $data['host'], (int) $data['port'], (string) $data['username'], $domainsData), null, 'HTML');
+
+                return true;
+
+            case 'password_current':
+                if ($messageId !== null) {
+                    $api->deleteMessage($chatId, $messageId);
+                }
+                $data['current'] = $text;
+                ConversationState::set($chatId, 'password_new', $data);
+                $api->sendMessage($chatId, 'رمز جدید رو بفرستید (بلافاصله از چت پاک می‌شه):');
+
+                return true;
+
+            case 'password_new':
+                if ($messageId !== null) {
+                    $api->deleteMessage($chatId, $messageId);
+                }
+                self::finishPasswordChange($api, $chatId, (string) $data['current'], $text);
+                ConversationState::clear($chatId);
+
+                return true;
+        }
+
+        return false;
+    }
+
+    private static function finishPasswordChange(TelegramApi $api, int $chatId, string $oldPass, string $newPass): void
+    {
+        $profile = HostStore::get($chatId);
+        if ($profile === null) {
+            $api->sendMessage($chatId, '❗️ هاست وصل‌شده‌ای پیدا نشد.');
+
+            return;
+        }
+        $client = CpanelClient::fromProfile($profile);
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $client->api2('Passwd', 'change_password', [
+                'user' => $profile['username'],
+                'oldpass' => $oldPass,
+                'newpass' => $newPass,
+            ]);
+        } catch (CpanelError $e) {
+            $api->sendMessage($chatId, '⚠️ تغییر رمز ناموفق بود: ' . $e->getMessage());
+
+            return;
+        }
+        if ($profile['auth_type'] === 'password') {
+            HostStore::save($chatId, $profile['host'], $profile['port'], $profile['username'], 'password', $newPass);
+        }
+        $api->sendMessage($chatId, '✅ رمز اکانت cPanel با موفقیت عوض شد.');
+    }
+
+    // ---------------------------------------------------------------
+    // دستورهای مدیریت هاست
+    // ---------------------------------------------------------------
+
+    private static function cmdDisconnect(TelegramApi $api, int $chatId): void
+    {
+        if (HostStore::get($chatId) === null) {
+            $api->sendMessage($chatId, 'در حال حاضر به هیچ هاستی وصل نیستید.');
+
+            return;
+        }
+        HostStore::remove($chatId);
+        $api->sendMessage($chatId, '🔌 اتصال قطع شد و اطلاعات هاست از ربات پاک شد.');
+    }
+
+    private static function cmdInfo(TelegramApi $api, int $chatId): void
+    {
+        $profile = self::requireProfile($api, $chatId);
+        if ($profile === null) {
+            return;
+        }
+        $client = CpanelClient::fromProfile($profile);
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $quota = $client->uapi('Quota', 'get_quota_info');
+            $domainsData = $client->uapi('DomainInfo', 'domains_data');
+        } catch (CpanelError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage(
+            $chatId,
+            Render::accountInfo($profile['host'], $profile['port'], $profile['username'], $profile['auth_type'], $quota, $domainsData),
+            null,
+            'HTML',
+        );
+    }
+
+    private static function cmdDomains(TelegramApi $api, int $chatId): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $data = $client->uapi('DomainInfo', 'domains_data');
+        } catch (CpanelError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, Render::domains($data), null, 'HTML');
+    }
+
+    private static function cmdSubdomain(TelegramApi $api, int $chatId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $sub = strtolower($args[0] ?? '');
+
+        if ($sub === 'add') {
+            $name = $args[1] ?? null;
+            $domain = $args[2] ?? null;
+            $dir = $args[3] ?? null;
+            if ($name === null || $domain === null) {
+                $api->sendMessage($chatId, "استفاده:\n/subdomain add <نام> <دامنه> [مسیر]\nمثال: /subdomain add blog example.com");
+
+                return;
+            }
+            $params = ['domain' => $name, 'rootdomain' => $domain];
+            if ($dir !== null) {
+                $params['dir'] = $dir;
+            }
+            self::runApi2($api, $chatId, $client, 'SubDomain', 'addsubdomain', $params, "✅ زیردامنه {$name}.{$domain} ساخته شد.");
+
+            return;
+        }
+
+        if ($sub === 'del' || $sub === 'delete') {
+            $full = $args[1] ?? null;
+            if ($full === null) {
+                $api->sendMessage($chatId, "استفاده:\n/subdomain del <زیردامنه‌کامل>\nمثال: /subdomain del blog.example.com");
+
+                return;
+            }
+            self::runApi2($api, $chatId, $client, 'SubDomain', 'delsubdomain', ['domain' => $full], "✅ زیردامنه {$full} حذف شد.");
+
+            return;
+        }
+
+        $api->sendMessage($chatId, "استفاده:\n/subdomain add <نام> <دامنه> [مسیر]\n/subdomain del <زیردامنه‌کامل>");
+    }
+
+    private static function cmdEmail(TelegramApi $api, int $chatId, ?int $messageId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $sub = strtolower($args[0] ?? 'list');
+
+        if ($sub === 'list') {
+            $domain = $args[1] ?? null;
+            $api->sendChatAction($chatId, 'typing');
+            try {
+                $data = $client->uapi('Email', 'list_pops', $domain !== null ? ['domain' => $domain] : []);
+            } catch (CpanelError $e) {
+                $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+                return;
+            }
+            $api->sendMessage($chatId, Render::emailList($data, $domain), null, 'HTML');
+
+            return;
+        }
+
+        if ($sub === 'add') {
+            if ($messageId !== null) {
+                $api->deleteMessage($chatId, $messageId);
+            }
+            $email = $args[1] ?? null;
+            $password = $args[2] ?? null;
+            $quota = $args[3] ?? '250';
+            $split = $email !== null ? self::splitEmail($email) : null;
+            if ($split === null || $password === null) {
+                $api->sendMessage($chatId, "استفاده:\n/email add <ایمیل> <رمز> [حجم‌مگابایت]\nمثال: /email add info@example.com \"رمزقوی\" 250");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Email', 'add_pop', [
+                'domain' => $split[1],
+                'email' => $split[0],
+                'password' => $password,
+                'quota' => $quota,
+            ], "✅ ایمیل {$email} ساخته شد.");
+
+            return;
+        }
+
+        if ($sub === 'passwd') {
+            if ($messageId !== null) {
+                $api->deleteMessage($chatId, $messageId);
+            }
+            $email = $args[1] ?? null;
+            $password = $args[2] ?? null;
+            $split = $email !== null ? self::splitEmail($email) : null;
+            if ($split === null || $password === null) {
+                $api->sendMessage($chatId, "استفاده:\n/email passwd <ایمیل> <رمزجدید>");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Email', 'passwd_pop', [
+                'domain' => $split[1],
+                'email' => $split[0],
+                'password' => $password,
+            ], "✅ رمز ایمیل {$email} عوض شد.");
+
+            return;
+        }
+
+        if ($sub === 'del' || $sub === 'delete') {
+            $email = $args[1] ?? null;
+            $split = $email !== null ? self::splitEmail($email) : null;
+            if ($split === null) {
+                $api->sendMessage($chatId, "استفاده:\n/email del <ایمیل>");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Email', 'delete_pop', [
+                'domain' => $split[1],
+                'email' => $split[0],
+            ], "✅ ایمیل {$email} حذف شد.");
+
+            return;
+        }
+
+        $api->sendMessage($chatId, "استفاده:\n/email list [دامنه]\n/email add <ایمیل> <رمز> [حجم‌مگابایت]\n/email passwd <ایمیل> <رمزجدید>\n/email del <ایمیل>");
+    }
+
+    private static function cmdDb(TelegramApi $api, int $chatId, ?int $messageId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $sub = strtolower($args[0] ?? 'list');
+
+        if ($sub === 'list') {
+            $api->sendChatAction($chatId, 'typing');
+            try {
+                $databases = $client->uapi('Mysql', 'list_databases');
+                $users = $client->uapi('Mysql', 'list_users');
+            } catch (CpanelError $e) {
+                $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+                return;
+            }
+            $api->sendMessage($chatId, Render::dbOverview($databases, $users), null, 'HTML');
+
+            return;
+        }
+
+        if ($sub === 'create') {
+            $name = $args[1] ?? null;
+            if ($name === null) {
+                $api->sendMessage($chatId, "استفاده:\n/db create <نام>");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Mysql', 'create_database', ['name' => $name], "✅ دیتابیس {$name} ساخته شد.");
+
+            return;
+        }
+
+        if ($sub === 'delete') {
+            $name = $args[1] ?? null;
+            if ($name === null) {
+                $api->sendMessage($chatId, "استفاده:\n/db delete <نام>");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Mysql', 'delete_database', ['name' => $name], "✅ دیتابیس {$name} حذف شد.");
+
+            return;
+        }
+
+        if ($sub === 'user') {
+            $action = strtolower($args[1] ?? '');
+            if ($action === 'add') {
+                if ($messageId !== null) {
+                    $api->deleteMessage($chatId, $messageId);
+                }
+                $user = $args[2] ?? null;
+                $pass = $args[3] ?? null;
+                if ($user === null || $pass === null) {
+                    $api->sendMessage($chatId, "استفاده:\n/db user add <یوزر> <رمز>");
+
+                    return;
+                }
+                self::runUapi($api, $chatId, $client, 'Mysql', 'create_user', ['name' => $user, 'password' => $pass], "✅ یوزر {$user} ساخته شد.");
+
+                return;
+            }
+            if ($action === 'del' || $action === 'delete') {
+                $user = $args[2] ?? null;
+                if ($user === null) {
+                    $api->sendMessage($chatId, "استفاده:\n/db user del <یوزر>");
+
+                    return;
+                }
+                self::runUapi($api, $chatId, $client, 'Mysql', 'delete_user', ['name' => $user], "✅ یوزر {$user} حذف شد.");
+
+                return;
+            }
+            $api->sendMessage($chatId, "استفاده:\n/db user add <یوزر> <رمز>\n/db user del <یوزر>");
+
+            return;
+        }
+
+        if ($sub === 'grant') {
+            $user = $args[1] ?? null;
+            $db = $args[2] ?? null;
+            $privileges = $args[3] ?? 'ALL PRIVILEGES';
+            if ($user === null || $db === null) {
+                $api->sendMessage($chatId, "استفاده:\n/db grant <یوزر> <دیتابیس> [دسترسی]\nمثال: /db grant shopuser shopdb");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Mysql', 'set_privileges_on_database', [
+                'user' => $user,
+                'database' => $db,
+                'privileges' => $privileges,
+            ], "✅ دسترسی «{$privileges}» برای {$user} روی {$db} ثبت شد.");
+
+            return;
+        }
+
+        $api->sendMessage($chatId, "استفاده:\n/db list\n/db create <نام>\n/db delete <نام>\n/db user add <یوزر> <رمز>\n/db user del <یوزر>\n/db grant <یوزر> <دیتابیس> [دسترسی]");
+    }
+
+    private static function cmdFtp(TelegramApi $api, int $chatId, ?int $messageId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $sub = strtolower($args[0] ?? 'list');
+
+        if ($sub === 'list') {
+            $api->sendChatAction($chatId, 'typing');
+            try {
+                $data = $client->uapi('Ftp', 'list_ftp');
+            } catch (CpanelError $e) {
+                $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+                return;
+            }
+            $api->sendMessage($chatId, Render::ftpList($data), null, 'HTML');
+
+            return;
+        }
+
+        if ($sub === 'add') {
+            if ($messageId !== null) {
+                $api->deleteMessage($chatId, $messageId);
+            }
+            $user = $args[1] ?? null;
+            $pass = $args[2] ?? null;
+            $quota = $args[3] ?? '0';
+            if ($user === null || $pass === null) {
+                $api->sendMessage($chatId, "استفاده:\n/ftp add <یوزر> <رمز> [حجم‌مگابایت=0 یعنی نامحدود]");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Ftp', 'add_ftp', [
+                'user' => $user,
+                'pass' => $pass,
+                'quota' => $quota,
+            ], "✅ اکانت FTP {$user} ساخته شد.");
+
+            return;
+        }
+
+        if ($sub === 'del' || $sub === 'delete') {
+            $user = $args[1] ?? null;
+            if ($user === null) {
+                $api->sendMessage($chatId, "استفاده:\n/ftp del <یوزر>");
+
+                return;
+            }
+            self::runUapi($api, $chatId, $client, 'Ftp', 'delete_ftp', ['user' => $user], "✅ اکانت FTP {$user} حذف شد.");
+
+            return;
+        }
+
+        $api->sendMessage($chatId, "استفاده:\n/ftp list\n/ftp add <یوزر> <رمز> [حجم‌مگابایت]\n/ftp del <یوزر>");
+    }
+
+    private static function cmdDns(TelegramApi $api, int $chatId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $sub = strtolower($args[0] ?? '');
+
+        if ($sub === 'list') {
+            $domain = $args[1] ?? null;
+            if ($domain === null) {
+                $api->sendMessage($chatId, "استفاده:\n/dns list <دامنه>");
+
+                return;
+            }
+            $api->sendChatAction($chatId, 'typing');
+            try {
+                $data = $client->api2('ZoneEdit', 'fetchzone', ['domain' => $domain]);
+            } catch (CpanelError $e) {
+                $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+                return;
+            }
+            $records = $data[0]['record'] ?? $data;
+            $api->sendMessage($chatId, Render::dnsZone(is_array($records) ? $records : [], $domain), null, 'HTML');
+
+            return;
+        }
+
+        if ($sub === 'add') {
+            $domain = $args[1] ?? null;
+            $name = $args[2] ?? null;
+            $type = strtoupper($args[3] ?? '');
+            $value = $args[4] ?? null;
+            $ttl = $args[5] ?? '14400';
+            if ($domain === null || $name === null || $type === '' || $value === null) {
+                $api->sendMessage($chatId, "استفاده:\n/dns add <دامنه> <نام> <نوع> <مقدار> [ttl]\nمثال: /dns add example.com www A 1.2.3.4\nبرای MX: /dns add example.com @ MX \"10 mail.example.com\" 14400");
+
+                return;
+            }
+            $params = ['domain' => $domain, 'name' => $name, 'type' => $type, 'ttl' => $ttl];
+            switch ($type) {
+                case 'A':
+                case 'AAAA':
+                    $params['address'] = $value;
+
+                    break;
+                case 'CNAME':
+                    $params['cname'] = $value;
+
+                    break;
+                case 'TXT':
+                    $params['txtdata'] = $value;
+
+                    break;
+                case 'NS':
+                    $params['nsdname'] = $value;
+
+                    break;
+                case 'MX':
+                    $parts = preg_split('/\s+/', trim($value), 2);
+                    $params['preference'] = $parts[0] ?? '10';
+                    $params['exchange'] = $parts[1] ?? $value;
+
+                    break;
+                default:
+                    $params['value'] = $value;
+            }
+            self::runApi2($api, $chatId, $client, 'ZoneEdit', 'add_zone_record', $params, "✅ رکورد {$type} برای {$name}.{$domain} اضافه شد.");
+
+            return;
+        }
+
+        if ($sub === 'del' || $sub === 'delete') {
+            $domain = $args[1] ?? null;
+            $line = $args[2] ?? null;
+            if ($domain === null || $line === null) {
+                $api->sendMessage($chatId, "استفاده:\n/dns del <دامنه> <شماره‌خط>\n(شماره‌خط رو از /dns list ببینید)");
+
+                return;
+            }
+            self::runApi2($api, $chatId, $client, 'ZoneEdit', 'remove_zone_record', ['domain' => $domain, 'line' => $line], '✅ رکورد حذف شد.');
+
+            return;
+        }
+
+        $api->sendMessage($chatId, "استفاده:\n/dns list <دامنه>\n/dns add <دامنه> <نام> <نوع> <مقدار> [ttl]\n/dns del <دامنه> <شماره‌خط>");
+    }
+
+    private static function cmdRaw(TelegramApi $api, int $chatId, array $args): void
+    {
+        $client = self::requireClient($api, $chatId);
+        if ($client === null) {
+            return;
+        }
+        $module = $args[0] ?? null;
+        $function = $args[1] ?? null;
+        if ($module === null || $function === null) {
+            $api->sendMessage($chatId, "استفاده (پیشرفته):\n/raw <ماژول> <تابع> [کلید=مقدار ...]\nمثال: /raw Mysql list_databases\nبرای cPanel API 2 قدیمی: /raw api2:ZoneEdit fetchzone domain=example.com");
+
+            return;
+        }
+        $params = [];
+        foreach (array_slice($args, 2) as $pair) {
+            if (str_contains($pair, '=')) {
+                [$key, $value] = explode('=', $pair, 2);
+                $params[$key] = $value;
+            }
+        }
+
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            if (str_starts_with($module, 'api2:')) {
+                $data = $client->api2(substr($module, strlen('api2:')), $function, $params);
+            } else {
+                $data = $client->uapi($module, $function, $params);
+            }
+        } catch (CpanelError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, Render::raw($data), null, 'HTML');
+    }
+
+    // ---------------------------------------------------------------
+    // ابزارهای کمکی
+    // ---------------------------------------------------------------
+
+    private static function runUapi(TelegramApi $api, int $chatId, CpanelClient $client, string $module, string $function, array $params, string $successMessage): void
+    {
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $client->uapi($module, $function, $params);
+        } catch (CpanelError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, $successMessage);
+    }
+
+    private static function runApi2(TelegramApi $api, int $chatId, CpanelClient $client, string $module, string $function, array $params, string $successMessage): void
+    {
+        $api->sendChatAction($chatId, 'typing');
+        try {
+            $client->api2($module, $function, $params);
+        } catch (CpanelError $e) {
+            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
+
+            return;
+        }
+        $api->sendMessage($chatId, $successMessage);
+    }
+
+    /**
+     * @return array{host:string,port:int,username:string,auth_type:string,secret:string}|null
+     */
+    private static function requireProfile(TelegramApi $api, int $chatId): ?array
+    {
+        $profile = HostStore::get($chatId);
+        if ($profile === null) {
+            $api->sendMessage($chatId, "❗️ ابتدا با /connect هاست‌تون رو وصل کنید.");
+
+            return null;
+        }
+
+        return $profile;
+    }
+
+    private static function requireClient(TelegramApi $api, int $chatId): ?CpanelClient
+    {
+        $profile = self::requireProfile($api, $chatId);
+
+        return $profile === null ? null : CpanelClient::fromProfile($profile);
+    }
+
+    /**
+     * @return array{0:string,1:string}|null [local-part, domain]
+     */
+    private static function splitEmail(string $email): ?array
+    {
+        if (!str_contains($email, '@')) {
+            return null;
+        }
+        [$local, $domain] = explode('@', $email, 2);
+        if ($local === '' || $domain === '') {
+            return null;
+        }
+
+        return [$local, $domain];
+    }
+
+    private static function tokenize(string $text): array
+    {
+        if (trim($text) === '') {
+            return [];
+        }
+        $parts = str_getcsv(trim($text), ' ', '"', '\\');
+
+        return array_values(array_filter($parts, static fn ($p) => $p !== null && $p !== ''));
+    }
+
+    private static function argsAfter(string $text): array
+    {
+        $pos = strpos($text, ' ');
+        $rest = $pos === false ? '' : trim(substr($text, $pos + 1));
+
+        return self::tokenize($rest);
+    }
+
     private static function handlePendingEdit(TelegramApi $api, int $chatId, string $text): bool
     {
         $awaiting = EditState::get();
@@ -214,8 +964,6 @@ final class UpdateHandler
         }
 
         if (str_starts_with($text, '/')) {
-            // ادمین یه دستور دیگه زده؛ حالت ویرایش رو بی‌سروصدا کنسل می‌کنیم
-            // و می‌ذاریم دستور جدید عادی پردازش بشه.
             EditState::clear();
 
             return false;
@@ -238,6 +986,19 @@ final class UpdateHandler
             . '🐘 PHP ' . PHP_VERSION;
     }
 
+    private static function sendMainMenu(TelegramApi $api, int $chatId): void
+    {
+        $keyboard = [
+            'inline_keyboard' => [
+                [['text' => '🔌 اتصال هاست', 'callback_data' => 'connect'], ['text' => '🟢 وضعیت ربات', 'callback_data' => 'status']],
+                [['text' => '🌐 دامنه‌ها', 'callback_data' => 'domains'], ['text' => '📧 ایمیل', 'callback_data' => 'email']],
+                [['text' => '🗄 دیتابیس', 'callback_data' => 'db'], ['text' => '📁 FTP', 'callback_data' => 'ftp']],
+                [['text' => '🧭 DNS', 'callback_data' => 'dns'], ['text' => '🔑 تغییر رمز', 'callback_data' => 'password']],
+            ],
+        ];
+        $api->sendMessage($chatId, TextStore::get(TextStore::KEY_WELCOME), $keyboard);
+    }
+
     private static function sendAdminPanel(TelegramApi $api, int $chatId): void
     {
         $isPublic = Settings::isPublic();
@@ -246,138 +1007,22 @@ final class UpdateHandler
         $keyboard = [
             'inline_keyboard' => [
                 [['text' => '🟢 وضعیت ربات', 'callback_data' => 'status']],
-                [
-                    ['text' => '🎯 چکر مزایده Fragment', 'callback_data' => 'auction'],
-                    ['text' => '🎁 چکر گیفت NFT', 'callback_data' => 'gift'],
-                ],
-                [
-                    ['text' => '🔗 چکر هش تراکنش', 'callback_data' => 'tx'],
-                    ['text' => '👛 چکر موجودی ولت', 'callback_data' => 'wallet'],
-                ],
-                [['text' => '💱 چکر قیمت ارز', 'callback_data' => 'price']],
                 [['text' => $toggleLabel, 'callback_data' => 'toggle_public']],
-                [['text' => '✏️ ویرایش متن‌ها و قالب‌ها', 'callback_data' => 'edit_menu']],
+                [['text' => '✏️ ویرایش پیام خوش‌آمد', 'callback_data' => 'edit_welcome']],
                 [['text' => '❓ راهنما', 'callback_data' => 'help']],
             ],
         ];
         $publicNote = $isPublic
-            ? 'حالت عمومی روشنه — همه می‌تونن از چکرها استفاده کنن، ولی این پنل و ویرایش‌ها هنوز فقط برای شماست.'
-            : 'حالت عمومی خاموشه — فقط شما به چکرها دسترسی دارید.';
-        $text = "🛠 <b>پنل مدیریت kan_checker</b>\n\n"
+            ? 'حالت عمومی روشنه — همه می‌تونن هاست خودشون رو وصل کنن و مدیریت کنن.'
+            : 'حالت عمومی خاموشه — فقط شما به قابلیت‌های ربات دسترسی دارید.';
+        $text = "🛠 <b>پنل مدیریت ربات</b>\n\n"
             . "$publicNote\n\n"
-            . 'یکی از گزینه‌ها رو بزنید، یا مستقیم یوزرنیم/لینک/هش/آدرس ولت رو بفرستید — خودش تشخیص می‌ده.';
+            . 'برای مدیریت هاست خودتون کافیه /connect بزنید.';
         $api->sendMessage($chatId, $text, $keyboard, 'HTML');
-    }
-
-    private static function sendEditMenu(TelegramApi $api, int $chatId): void
-    {
-        $rows = [];
-        foreach (TextStore::LABELS as $key => $label) {
-            $rows[] = [['text' => "✏️ $label", 'callback_data' => 'edit:' . $key]];
-        }
-        $rows[] = [['text' => '⬅️ بازگشت', 'callback_data' => 'admin']];
-
-        $text = "کدوم متن/قالب رو می‌خواید ویرایش کنید؟\n\n"
-            . 'توی قالب‌های گیفت می‌تونید از تگ‌های HTML تلگرام مثل '
-            . '<code>&lt;b&gt;بولد&lt;/b&gt;</code> و <code>&lt;blockquote&gt;نقل‌قول&lt;/blockquote&gt;</code> استفاده کنید، '
-            . 'و از جاهای خالی مثل <code>{name}</code>, <code>{label}</code>, <code>{value}</code>, <code>{toman}</code>, '
-            . '<code>{usd}</code>, <code>{ton}</code>, <code>{stars}</code>, <code>{source}</code>, <code>{date}</code>.';
-        $api->sendMessage($chatId, $text, ['inline_keyboard' => $rows], 'HTML');
     }
 
     private static function isCommand(string $text, string $name): bool
     {
         return $text === $name || str_starts_with($text, $name . ' ') || str_starts_with($text, $name . '@');
-    }
-
-    private static function commandArg(string $text): ?string
-    {
-        $parts = preg_split('/\s+/', $text, 2);
-        $arg = isset($parts[1]) ? trim($parts[1]) : '';
-
-        return $arg !== '' ? $arg : null;
-    }
-
-    private static function dispatch(TelegramApi $api, int $chatId, string $query): void
-    {
-        $price = CurrencyClient::parseQuery($query);
-        if ($price !== null) {
-            self::replyPrice($api, $chatId, $price['amount'], $price['coin']);
-
-            return;
-        }
-
-        if (GiftClient::extractSlug($query) !== null) {
-            self::replyGift($api, $chatId, $query);
-
-            return;
-        }
-
-        if (TonClient::looksLikeTxHash($query)) {
-            self::replyTx($api, $chatId, $query);
-        } elseif (WalletClient::looksLikeAddress($query)) {
-            self::replyWallet($api, $chatId, $query);
-        } else {
-            self::replyAuction($api, $chatId, $query);
-        }
-    }
-
-    private static function replyAuction(TelegramApi $api, int $chatId, string $query): void
-    {
-        $api->sendChatAction($chatId, 'typing');
-        try {
-            $data = FragmentClient::fetchAuction($query);
-        } catch (FragmentError $e) {
-            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
-
-            return;
-        }
-        $api->sendMessage($chatId, Render::auction($data));
-    }
-
-    private static function replyGift(TelegramApi $api, int $chatId, string $query): void
-    {
-        $api->sendChatAction($chatId, 'typing');
-        try {
-            $data = GiftClient::fetchGift($query);
-        } catch (GiftError $e) {
-            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
-
-            return;
-        }
-        $api->sendMessage($chatId, Render::gift($data), null, 'HTML');
-    }
-
-    private static function replyTx(TelegramApi $api, int $chatId, string $txHash): void
-    {
-        $api->sendChatAction($chatId, 'typing');
-        try {
-            $data = TonClient::fetchTransaction($txHash);
-        } catch (TonError $e) {
-            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
-
-            return;
-        }
-        $api->sendMessage($chatId, Render::tx($data));
-    }
-
-    private static function replyWallet(TelegramApi $api, int $chatId, string $address): void
-    {
-        $api->sendChatAction($chatId, 'typing');
-        try {
-            $data = WalletClient::fetchBalance($address);
-        } catch (WalletError $e) {
-            $api->sendMessage($chatId, '⚠️ ' . $e->getMessage());
-
-            return;
-        }
-        $api->sendMessage($chatId, Render::wallet($data));
-    }
-
-    private static function replyPrice(TelegramApi $api, int $chatId, float $amount, string $coin): void
-    {
-        $api->sendChatAction($chatId, 'typing');
-        $data = CurrencyClient::fetchValue($amount, $coin);
-        $api->sendMessage($chatId, Render::price($data));
     }
 }
