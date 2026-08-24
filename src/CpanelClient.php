@@ -2,7 +2,29 @@
 
 declare(strict_types=1);
 
-final class CpanelError extends RuntimeException
+/**
+ * خطای پایه: هر مشکلی که از سمت cPanel یا شبکه پیش بیاد. اگه دقیقاً از
+ * زیرکلاس‌های CpanelConnectionError یا CpanelAuthError نباشه، یعنی درخواست
+ * واقعاً به cPanel رسیده و با موفقیت احراز هویت شده، ولی خودِ آن تابع/ماژول
+ * خاص رد شده (مثلاً چون یوزرنیم/توکن به یک ویژگی محدود شده — مثل توکنی که
+ * فقط دسترسی Zone Edit داره). چنین خطایی نشونه‌ی نامعتبربودن اتصال نیست.
+ */
+class CpanelError extends RuntimeException
+{
+}
+
+/**
+ * اتصال به هاست برقرار نشد (شبکه/DNS/پورت اشتباه/پاسخ غیرمنتظره) — نه
+ * مشکل نام‌کاربری/رمز.
+ */
+final class CpanelConnectionError extends CpanelError
+{
+}
+
+/**
+ * نام‌کاربری/رمز/توکن رد شد (HTTP 401/403).
+ */
+final class CpanelAuthError extends CpanelError
 {
 }
 
@@ -122,21 +144,21 @@ final class CpanelClient
         if ($body === false) {
             $error = curl_error($ch);
             curl_close($ch);
-            throw new CpanelError("اتصال به هاست برقرار نشد: $error");
+            throw new CpanelConnectionError("اتصال به هاست برقرار نشد: $error");
         }
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($httpCode === 401 || $httpCode === 403) {
-            throw new CpanelError("نام‌کاربری یا رمز/توکن اشتباه است (HTTP $httpCode).");
+            throw new CpanelAuthError("نام‌کاربری یا رمز/توکن اشتباه است (HTTP $httpCode).");
         }
         if ($httpCode >= 500) {
-            throw new CpanelError("خطای سمت هاست (HTTP $httpCode).");
+            throw new CpanelConnectionError("خطای سمت هاست (HTTP $httpCode).");
         }
 
         $decoded = json_decode((string) $body, true);
         if (!is_array($decoded)) {
-            throw new CpanelError("پاسخ غیرمنتظره از هاست دریافت شد (HTTP $httpCode). آیا آدرس/پورت درست است؟");
+            throw new CpanelConnectionError("پاسخ غیرمنتظره از هاست دریافت شد (HTTP $httpCode). آیا آدرس/پورت درست است؟");
         }
 
         return $decoded;

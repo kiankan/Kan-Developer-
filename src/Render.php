@@ -11,7 +11,7 @@ declare(strict_types=1);
  */
 final class Render
 {
-    public static function connected(string $host, int $port, string $username, array $domainsData): string
+    public static function connected(string $host, int $port, string $username, array $domainsData, ?string $warning = null): string
     {
         $main = self::pick($domainsData, ['main_domain']);
         $lines = [
@@ -21,6 +21,11 @@ final class Render
         ];
         if ($main !== null) {
             $lines[] = "🌐 دامنه اصلی: {$main}";
+        }
+        if ($warning !== null) {
+            $lines[] = '';
+            $lines[] = "⚠️ دسترسی به اطلاعات دامنه محدود بود: {$warning}";
+            $lines[] = 'این معمولاً یعنی یوزرنیم/توکن فقط به یک ویژگی خاص (مثلاً فقط Zone Edit/DNS) محدود شده. اتصال ذخیره شد؛ دستورهای مربوط به همون ویژگی باید کار کنن، ولی بقیه (مثل /info یا /email) ممکنه با خطای دسترسی مواجه بشن.';
         }
         $lines[] = '';
         $lines[] = 'حالا می‌تونید با /info، /domains، /email، /db، /ftp، /dns و ... هاست رو مدیریت کنید. برای راهنما: /help';

@@ -332,17 +332,27 @@ final class UpdateHandler
                 }
                 $api->sendChatAction($chatId, 'typing');
                 $client = new CpanelClient((string) $data['host'], (int) $data['port'], (string) $data['username'], $secret, (string) $data['auth_type']);
+                $domainsData = [];
+                $warning = null;
                 try {
                     $domainsData = $client->uapi('DomainInfo', 'domains_data');
-                } catch (CpanelError $e) {
+                } catch (CpanelConnectionError|CpanelAuthError $e) {
+                    // این دو تا یعنی واقعاً اتصال/احراز هویت شکست خورده (هاست در
+                    // دسترس نیست، یا یوزرنیم/رمز/توکن غلطه) — نباید ذخیره بشه.
                     ConversationState::clear($chatId);
                     $api->sendMessage($chatId, "⚠️ اتصال ناموفق بود: {$e->getMessage()}\n\nدوباره با /connect تلاش کنید.");
 
                     return true;
+                } catch (CpanelError $e) {
+                    // احراز هویت انجام شده (خودِ هاست به درخواست جواب داده)، ولی
+                    // این تابع مشخص رد شده — مثلاً چون API Token فقط به یک ویژگی
+                    // خاص (مثل Zone Edit / DNS) محدود شده. اتصال رو معتبر در نظر
+                    // می‌گیریم، فقط هشدار می‌دیم که بعضی دستورها ممکنه کار نکنن.
+                    $warning = $e->getMessage();
                 }
                 HostStore::save($chatId, (string) $data['host'], (int) $data['port'], (string) $data['username'], (string) $data['auth_type'], $secret);
                 ConversationState::clear($chatId);
-                $api->sendMessage($chatId, Render::connected((string) $data['host'], (int) $data['port'], (string) $data['username'], $domainsData), null, 'HTML');
+                $api->sendMessage($chatId, Render::connected((string) $data['host'], (int) $data['port'], (string) $data['username'], $domainsData, $warning), null, 'HTML');
 
                 return true;
 
