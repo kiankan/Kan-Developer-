@@ -323,14 +323,23 @@ final class CpanelClient
 
     private function baseUrl(): string
     {
-        $host = preg_replace('#^https?://#i', '', $this->host()) ?? $this->host();
-        $host = rtrim(trim($host), '/');
-        $port = (int) ($this->server['port'] ?? 0);
+        // پورت می‌تواند هم جدا ذخیره شده باشد و هم به خود آدرس چسبیده باشد
+        // (مثل server.example.com:2096)؛ اگر به آدرس چسبیده، همان اولویت دارد.
+        $parsed = Address::parse($this->host());
+        $port = $parsed['port'] ?? (int) ($this->server['port'] ?? 0);
         if ($port <= 0) {
-            $port = $this->isWhm() ? 2087 : 2083;
+            $port = Address::defaultPort($this->type());
         }
 
-        return "https://$host:$port";
+        return "https://{$parsed['host']}:{$port}";
+    }
+
+    /**
+     * آدرسی که واقعاً به آن وصل می‌شویم — برای نمایش در تست اتصال.
+     */
+    public function endpoint(): string
+    {
+        return $this->baseUrl();
     }
 
     private function verifySsl(): bool

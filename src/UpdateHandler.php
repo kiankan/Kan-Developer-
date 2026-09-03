@@ -24,21 +24,31 @@ final class UpdateHandler
      * scope: account = نیازمند حساب cPanel (روی WHM باید کاربر مقصد ست باشد)،
      *        whm = فقط روی سرور WHM، local = بدون تماس با سرور.
      */
+    /** گزینه‌های آماده‌ی سهمیه (مگابایت؛ صفر یعنی نامحدود). */
+    private const QUOTA_CHOICES = [
+        ['♾ نامحدود', '0'],
+        ['250 مگابایت', '250'],
+        ['500 مگابایت', '500'],
+        ['1 گیگابایت', '1024'],
+        ['5 گیگابایت', '5120'],
+    ];
+
     private const FLOWS = [
         'email_add' => [
             'title' => '✉️ افزودن حساب ایمیل',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'email', 'prompt' => 'آدرس کامل ایمیل جدید را بفرستید (مثل <code>info@example.com</code>):'],
+                ['key' => 'domain', 'prompt' => 'ایمیل روی کدام دامنه ساخته شود؟', 'picker' => 'domains'],
+                ['key' => 'local', 'prompt' => 'بخش قبل از @ را بفرستید (مثل <code>info</code>):'],
                 ['key' => 'password', 'prompt' => 'رمز عبور را بفرستید (یا <code>/gen</code> برای ساخت رمز قوی):', 'secret' => true],
-                ['key' => 'quota', 'prompt' => 'سهمیه به مگابایت (<code>0</code> = نامحدود):', 'optional' => true, 'default' => '0'],
+                ['key' => 'quota', 'prompt' => 'سهمیه‌ی صندوق ایمیل:', 'optional' => true, 'default' => '0', 'choices' => self::QUOTA_CHOICES],
             ],
         ],
         'email_passwd' => [
             'title' => '🔑 تغییر رمز ایمیل',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'email', 'prompt' => 'آدرس کامل ایمیل را بفرستید:'],
+                ['key' => 'email', 'prompt' => 'کدام حساب ایمیل؟', 'picker' => 'emails'],
                 ['key' => 'password', 'prompt' => 'رمز جدید را بفرستید (یا <code>/gen</code>):', 'secret' => true],
             ],
         ],
@@ -46,8 +56,8 @@ final class UpdateHandler
             'title' => '📦 تغییر سهمیه‌ی ایمیل',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'email', 'prompt' => 'آدرس کامل ایمیل را بفرستید:'],
-                ['key' => 'quota', 'prompt' => 'سهمیه‌ی جدید به مگابایت (<code>0</code> = نامحدود):'],
+                ['key' => 'email', 'prompt' => 'کدام حساب ایمیل؟', 'picker' => 'emails'],
+                ['key' => 'quota', 'prompt' => 'سهمیه‌ی جدید:', 'choices' => self::QUOTA_CHOICES],
             ],
         ],
         'email_del' => [
@@ -55,7 +65,7 @@ final class UpdateHandler
             'scope' => 'account',
             'confirm' => '⚠️ حساب <code>{email}</code> و همه‌ی پیام‌هایش برای همیشه حذف می‌شود.',
             'steps' => [
-                ['key' => 'email', 'prompt' => 'آدرس کامل ایمیلی که باید حذف شود را بفرستید:'],
+                ['key' => 'email', 'prompt' => 'کدام حساب ایمیل حذف شود؟', 'picker' => 'emails'],
             ],
         ],
         'db_add' => [
@@ -70,7 +80,7 @@ final class UpdateHandler
             'scope' => 'account',
             'confirm' => '⚠️ دیتابیس <code>{name}</code> و تمام داده‌هایش برای همیشه حذف می‌شود.',
             'steps' => [
-                ['key' => 'name', 'prompt' => 'نام کامل دیتابیس را بفرستید:'],
+                ['key' => 'name', 'prompt' => 'کدام دیتابیس حذف شود؟', 'picker' => 'databases'],
             ],
         ],
         'dbuser_add' => [
@@ -86,24 +96,28 @@ final class UpdateHandler
             'scope' => 'account',
             'confirm' => '⚠️ کاربر <code>{name}</code> حذف می‌شود و دسترسی‌هایش از بین می‌رود.',
             'steps' => [
-                ['key' => 'name', 'prompt' => 'نام کامل کاربر دیتابیس را بفرستید:'],
+                ['key' => 'name', 'prompt' => 'کدام کاربر دیتابیس حذف شود؟', 'picker' => 'dbusers'],
             ],
         ],
         'db_grant' => [
             'title' => '🔗 دادن دسترسی کاربر به دیتابیس',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربر دیتابیس را بفرستید:'],
-                ['key' => 'database', 'prompt' => 'نام دیتابیس را بفرستید:'],
-                ['key' => 'privileges', 'prompt' => 'سطح دسترسی (پیش‌فرض <code>ALL PRIVILEGES</code>):', 'optional' => true, 'default' => 'ALL PRIVILEGES'],
+                ['key' => 'user', 'prompt' => 'کدام کاربر دیتابیس؟', 'picker' => 'dbusers'],
+                ['key' => 'database', 'prompt' => 'روی کدام دیتابیس؟', 'picker' => 'databases'],
+                ['key' => 'privileges', 'prompt' => 'چه سطحی از دسترسی؟', 'optional' => true, 'default' => 'ALL PRIVILEGES', 'choices' => [
+                    ['🔓 همه‌ی دسترسی‌ها', 'ALL PRIVILEGES'],
+                    ['📖 فقط خواندن (SELECT)', 'SELECT'],
+                    ['✏️ خواندن و نوشتن', 'SELECT,INSERT,UPDATE,DELETE'],
+                ]],
             ],
         ],
         'sub_add' => [
             'title' => '➕ افزودن ساب‌دامنه',
             'scope' => 'account',
             'steps' => [
+                ['key' => 'rootdomain', 'prompt' => 'روی کدام دامنه؟', 'picker' => 'zones'],
                 ['key' => 'subdomain', 'prompt' => 'فقط بخش ساب‌دامنه را بفرستید (مثل <code>shop</code>):'],
-                ['key' => 'rootdomain', 'prompt' => 'دامنه‌ی اصلی را بفرستید (مثل <code>example.com</code>):'],
                 ['key' => 'dir', 'prompt' => 'مسیر پوشه (اختیاری، خالی = پیش‌فرض cPanel):', 'optional' => true, 'default' => ''],
             ],
         ],
@@ -112,7 +126,7 @@ final class UpdateHandler
             'scope' => 'account',
             'confirm' => '⚠️ ساب‌دامنه‌ی <code>{domain}</code> حذف می‌شود (فایل‌های پوشه‌اش باقی می‌مانند).',
             'steps' => [
-                ['key' => 'domain', 'prompt' => 'ساب‌دامنه‌ی کامل را بفرستید (مثل <code>shop.example.com</code>):'],
+                ['key' => 'domain', 'prompt' => 'کدام ساب‌دامنه حذف شود؟', 'picker' => 'subdomains'],
             ],
         ],
         'ftp_add' => [
@@ -122,7 +136,7 @@ final class UpdateHandler
                 ['key' => 'user', 'prompt' => 'نام کاربری FTP را بفرستید (مثل <code>deploy@example.com</code> یا فقط <code>deploy</code>):'],
                 ['key' => 'password', 'prompt' => 'رمز عبور را بفرستید (یا <code>/gen</code>):', 'secret' => true],
                 ['key' => 'dir', 'prompt' => 'مسیر پوشه (اختیاری):', 'optional' => true, 'default' => ''],
-                ['key' => 'quota', 'prompt' => 'سهمیه به مگابایت (<code>0</code> = نامحدود):', 'optional' => true, 'default' => '0'],
+                ['key' => 'quota', 'prompt' => 'سهمیه‌ی فضا:', 'optional' => true, 'default' => '0', 'choices' => self::QUOTA_CHOICES],
             ],
         ],
         'ftp_del' => [
@@ -130,41 +144,54 @@ final class UpdateHandler
             'scope' => 'account',
             'confirm' => '⚠️ حساب FTP <code>{user}</code> حذف می‌شود (فایل‌ها پاک نمی‌شوند).',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری FTP را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب FTP حذف شود؟', 'picker' => 'ftp'],
             ],
         ],
         'cron_add' => [
             'title' => '⏰ افزودن کران‌جاب',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'schedule', 'prompt' => "زمان‌بندی را با ۵ فیلد استاندارد کران بفرستید.\n\nمثال هر ساعت: <code>0 * * * *</code>\nمثال هر ۵ دقیقه: <code>*/5 * * * *</code>"],
+                ['key' => 'schedule', 'prompt' => "هر چند وقت یک‌بار اجرا شود؟\n\nمی‌توانید زمان‌بندی دلخواه را هم با ۵ فیلد استاندارد کران بفرستید، مثل <code>*/10 * * * *</code>.", 'choices' => [
+                    ['هر دقیقه', '* * * * *'],
+                    ['هر ۵ دقیقه', '*/5 * * * *'],
+                    ['هر ۱۵ دقیقه', '*/15 * * * *'],
+                    ['هر ساعت', '0 * * * *'],
+                    ['هر ۶ ساعت', '0 */6 * * *'],
+                    ['هر شب ساعت ۰۰:۰۰', '0 0 * * *'],
+                    ['هر هفته (شنبه ۰۰:۰۰)', '0 0 * * 6'],
+                ]],
                 ['key' => 'command', 'prompt' => 'دستوری که باید اجرا شود را بفرستید:'],
             ],
         ],
         'cron_del' => [
             'title' => '🗑 حذف کران‌جاب',
             'scope' => 'account',
-            'confirm' => '⚠️ کران‌جاب با کلید <code>{key}</code> حذف می‌شود.',
+            'confirm' => '⚠️ کران‌جاب انتخاب‌شده حذف می‌شود.',
             'steps' => [
-                ['key' => 'key', 'prompt' => "کلید (🔑) کران‌جاب را از خروجی «لیست کران‌جاب‌ها» بفرستید:"],
+                ['key' => 'key', 'prompt' => 'کدام کران‌جاب حذف شود؟', 'picker' => 'cron'],
             ],
         ],
         'dns_list' => [
             'title' => '🧭 نمایش رکوردهای DNS',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'zone', 'prompt' => 'نام زون (دامنه) را بفرستید، مثل <code>example.com</code>:'],
+                ['key' => 'zone', 'prompt' => 'رکوردهای کدام دامنه؟', 'picker' => 'zones'],
             ],
         ],
         'dns_add' => [
             'title' => '➕ افزودن رکورد DNS',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'zone', 'prompt' => 'نام زون (دامنه) را بفرستید:'],
+                ['key' => 'zone', 'prompt' => 'روی کدام دامنه؟', 'picker' => 'zones'],
+                ['key' => 'type', 'prompt' => 'نوع رکورد؟', 'picker' => 'record_types'],
                 ['key' => 'name', 'prompt' => "نام رکورد را بفرستید (مثل <code>www</code> یا <code>@</code> برای خود دامنه):"],
-                ['key' => 'type', 'prompt' => 'نوع رکورد: <code>A</code>، <code>AAAA</code>، <code>CNAME</code>، <code>TXT</code>، <code>MX</code>، <code>NS</code>'],
                 ['key' => 'value', 'prompt' => "مقدار رکورد را بفرستید.\n\nبرای MX اول اولویت و بعد میزبان، مثل: <code>10 mail.example.com.</code>"],
-                ['key' => 'ttl', 'prompt' => 'TTL (اختیاری، پیش‌فرض <code>14400</code>):', 'optional' => true, 'default' => '14400'],
+                ['key' => 'ttl', 'prompt' => 'TTL چقدر باشد؟', 'optional' => true, 'default' => '14400', 'choices' => [
+                    ['۵ دقیقه (300)', '300'],
+                    ['۱ ساعت (3600)', '3600'],
+                    ['۴ ساعت (14400)', '14400'],
+                    ['۲۴ ساعت (86400)', '86400'],
+                ]],
             ],
         ],
         'dns_del' => [
@@ -172,16 +199,16 @@ final class UpdateHandler
             'scope' => 'account',
             'confirm' => '⚠️ رکورد شماره‌ی <code>{line}</code> از زون <code>{zone}</code> حذف می‌شود.',
             'steps' => [
-                ['key' => 'zone', 'prompt' => 'نام زون (دامنه) را بفرستید:'],
-                ['key' => 'line', 'prompt' => 'شماره‌ی خط رکورد را بفرستید (همان عدد داخل [] در لیست رکوردها):'],
+                ['key' => 'zone', 'prompt' => 'از کدام دامنه؟', 'picker' => 'zones'],
+                ['key' => 'line', 'prompt' => 'کدام رکورد حذف شود؟', 'picker' => 'dns_records'],
             ],
         ],
         'php_set' => [
             'title' => '🐘 تغییر نسخه‌ی PHP دامنه',
             'scope' => 'account',
             'steps' => [
-                ['key' => 'vhost', 'prompt' => 'دامنه (vhost) را بفرستید:'],
-                ['key' => 'version', 'prompt' => 'نسخه را بفرستید، مثل <code>ea-php82</code> یا <code>inherit</code>:'],
+                ['key' => 'vhost', 'prompt' => 'کدام دامنه؟', 'picker' => 'vhosts'],
+                ['key' => 'version', 'prompt' => 'کدام نسخه‌ی PHP؟', 'picker' => 'php_versions'],
             ],
         ],
         'backup_run' => [
@@ -196,14 +223,14 @@ final class UpdateHandler
             'title' => '🎯 انتخاب کاربر مقصد',
             'scope' => 'local',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حسابی که می‌خواهید مدیریت کنید را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب را مدیریت می‌کنید؟', 'picker' => 'whm_accounts'],
             ],
         ],
         'whm_summary' => [
             'title' => '🔍 جزئیات حساب',
             'scope' => 'whm',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حساب را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب؟', 'picker' => 'whm_accounts'],
             ],
         ],
         'whm_suspend' => [
@@ -211,7 +238,7 @@ final class UpdateHandler
             'scope' => 'whm',
             'confirm' => '⚠️ حساب <code>{user}</code> معلق می‌شود؛ سایت‌ها و ایمیل‌هایش از کار می‌افتند.',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حساب را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب معلق شود؟', 'picker' => 'whm_accounts'],
                 ['key' => 'reason', 'prompt' => 'دلیل تعلیق (اختیاری):', 'optional' => true, 'default' => ''],
             ],
         ],
@@ -219,7 +246,7 @@ final class UpdateHandler
             'title' => '✅ رفع تعلیق حساب',
             'scope' => 'whm',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حساب را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب از تعلیق دربیاید؟', 'picker' => 'whm_accounts'],
             ],
         ],
         'whm_passwd' => [
@@ -227,7 +254,7 @@ final class UpdateHandler
             'scope' => 'whm',
             'confirm' => '⚠️ رمز حساب <code>{user}</code> عوض می‌شود (رمز دیتابیس‌ها و FTP همان حساب هم می‌تواند تغییر کند).',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حساب را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب؟', 'picker' => 'whm_accounts'],
                 ['key' => 'password', 'prompt' => 'رمز جدید را بفرستید (یا <code>/gen</code>):', 'secret' => true],
             ],
         ],
@@ -235,7 +262,7 @@ final class UpdateHandler
             'title' => '🔐 لینک ورود یک‌بارمصرف',
             'scope' => 'whm',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حساب را بفرستید:'],
+                ['key' => 'user', 'prompt' => 'برای کدام حساب لینک ساخته شود؟', 'picker' => 'whm_accounts'],
             ],
         ],
         'whm_create' => [
@@ -246,7 +273,7 @@ final class UpdateHandler
                 ['key' => 'username', 'prompt' => 'نام کاربری حساب جدید:'],
                 ['key' => 'domain', 'prompt' => 'دامنه‌ی اصلی حساب:'],
                 ['key' => 'password', 'prompt' => 'رمز عبور (یا <code>/gen</code>):', 'secret' => true],
-                ['key' => 'plan', 'prompt' => 'نام پلن (اختیاری، خالی = پیش‌فرض):', 'optional' => true, 'default' => ''],
+                ['key' => 'plan', 'prompt' => 'کدام پلن؟ (اختیاری، خالی = پیش‌فرض)', 'optional' => true, 'default' => '', 'picker' => 'whm_plans'],
             ],
         ],
         'whm_terminate' => [
@@ -254,8 +281,22 @@ final class UpdateHandler
             'scope' => 'whm',
             'confirm' => '⚠️ حساب <code>{user}</code> با تمام سایت‌ها، ایمیل‌ها و دیتابیس‌هایش برای همیشه حذف می‌شود. این کار برگشت‌پذیر نیست.',
             'steps' => [
-                ['key' => 'user', 'prompt' => 'نام کاربری حسابی که باید حذف شود:'],
-                ['key' => 'confirm_user', 'prompt' => 'برای اطمینان، دقیقاً همان نام کاربری را دوباره بفرستید:'],
+                ['key' => 'user', 'prompt' => 'کدام حساب حذف شود؟', 'picker' => 'whm_accounts'],
+                ['key' => 'confirm_user', 'prompt' => 'برای اطمینان، دقیقاً همان نام کاربری را تایپ کنید:'],
+            ],
+        ],
+        'selfhost_cron' => [
+            'title' => '🧩 اجرای ربات با کران روی همین هاست',
+            'scope' => 'account',
+            'confirm' => '⚠️ یک کران‌جاب هر دقیقه‌ای روی این حساب ساخته می‌شود که <code>{path}/poll.php</code> را اجرا کند.',
+            'steps' => [
+                ['key' => 'php_bin', 'prompt' => "مسیر PHP روی آن هاست کدام است؟", 'choices' => [
+                    ['/usr/local/bin/php (رایج در cPanel)', '/usr/local/bin/php'],
+                    ['/usr/bin/php', '/usr/bin/php'],
+                    ['/usr/local/bin/ea-php82', '/usr/local/bin/ea-php82'],
+                    ['/usr/local/bin/ea-php83', '/usr/local/bin/ea-php83'],
+                ]],
+                ['key' => 'path', 'prompt' => "پوشه‌ی پروژه روی آن هاست کجاست؟ (مثل <code>/home/user/kan_checker</code>)"],
             ],
         ],
         'srv_add' => [
@@ -263,9 +304,18 @@ final class UpdateHandler
             'scope' => 'local',
             'steps' => [
                 ['key' => 'label', 'prompt' => 'یک اسم دلخواه برای این سرور بفرستید (مثل <code>هاست اصلی</code>):'],
-                ['key' => 'type', 'prompt' => "نوع اتصال را بفرستید:\n<code>cpanel</code> = توکن یک حساب cPanel\n<code>whm</code> = توکن root/ریسلر روی WHM"],
-                ['key' => 'host', 'prompt' => 'هاست یا آی‌پی سرور را بفرستید (مثل <code>server.example.com</code>):'],
-                ['key' => 'port', 'prompt' => 'پورت (اختیاری، پیش‌فرض 2083 برای cPanel و 2087 برای WHM):', 'optional' => true, 'default' => ''],
+                ['key' => 'type', 'prompt' => 'توکن از کجاست؟', 'choices' => [
+                    ['🏠 cPanel (یک حساب هاست)', 'cpanel'],
+                    ['🖥 WHM (کل سرور / ریسلر)', 'whm'],
+                ]],
+                ['key' => 'host', 'prompt' => "آدرس سرور را بفرستید.\n\nمی‌توانید همان چیزی را بفرستید که در مرورگر می‌بینید — پورتش هم اگر داخل آدرس باشد خودکار برداشته می‌شود:\n<code>server.example.com</code>\n<code>server.example.com:2083</code>\n<code>https://cp.example.com:2096/</code>"],
+                ['key' => 'port', 'prompt' => "پورت پنل؟ اگر داخل آدرس نوشتید، «همان داخل آدرس» را بزنید.", 'optional' => true, 'default' => '', 'choices' => [
+                    ['↩️ همان داخل آدرس / پیش‌فرض', ''],
+                    ['2083 (cPanel)', '2083'],
+                    ['2087 (WHM)', '2087'],
+                    ['2096 (وبمیل/پروکسی)', '2096'],
+                    ['443 (پشت ریورس‌پراکسی)', '443'],
+                ]],
                 ['key' => 'user', 'prompt' => 'نام کاربری (برای WHM معمولاً <code>root</code>):'],
                 ['key' => 'token', 'prompt' => "API Token را بفرستید.\n\ncPanel: Security → Manage API Tokens\nWHM: Development → Manage API Tokens", 'secret' => true],
             ],
@@ -274,7 +324,7 @@ final class UpdateHandler
             'title' => '🔀 انتخاب سرور فعال',
             'scope' => 'local',
             'steps' => [
-                ['key' => 'id', 'prompt' => 'شناسه‌ی (🆔) سرور موردنظر را از لیست سرورها بفرستید:'],
+                ['key' => 'id', 'prompt' => 'کدام سرور فعال شود؟', 'picker' => 'servers'],
             ],
         ],
         'srv_del' => [
@@ -282,7 +332,7 @@ final class UpdateHandler
             'scope' => 'local',
             'confirm' => '⚠️ سرور <code>{id}</code> از فهرست حذف می‌شود (روی خود سرور چیزی تغییر نمی‌کند).',
             'steps' => [
-                ['key' => 'id', 'prompt' => 'شناسه‌ی (🆔) سروری که باید حذف شود را بفرستید:'],
+                ['key' => 'id', 'prompt' => 'کدام سرور از فهرست حذف شود؟', 'picker' => 'removable_servers'],
             ],
         ],
     ];
@@ -362,6 +412,35 @@ final class UpdateHandler
             }
             State::clear($chatId);
             self::execute($api, $chatId, $state['flow'], $state['data']);
+
+            return;
+        }
+
+        if ($data === 'noop') {
+            return;
+        }
+
+        // انتخاب یکی از دکمه‌های یک مرحله، صفحه‌ی بعدی فهرست، یا رد کردن مرحله
+        if (str_starts_with($data, 'c:')) {
+            self::chooseOption($api, $chatId, (int) substr($data, 2));
+
+            return;
+        }
+
+        if (str_starts_with($data, 'pg:')) {
+            self::changePage($api, $chatId, (int) substr($data, 3));
+
+            return;
+        }
+
+        if ($data === 'skip') {
+            $state = State::get($chatId);
+            if ($state === null || $state['step'] < 0) {
+                $api->sendHtml($chatId, 'چیزی برای رد کردن در جریان نیست.', self::mainKeyboard());
+
+                return;
+            }
+            self::continueFlow($api, $chatId, $state, '/skip', null);
 
             return;
         }
@@ -564,6 +643,7 @@ final class UpdateHandler
                 self::serverPickerRows(),
                 [
                     [self::btn('➕ افزودن سرور', 'f:srv_add'), self::btn('🗑 حذف سرور', 'f:srv_del')],
+                    [self::btn('🧩 اجرای ربات با کران روی هاست', 'f:selfhost_cron')],
                     [self::btn('⬅️ بازگشت', 'menu')],
                 ],
             )],
@@ -711,21 +791,272 @@ final class UpdateHandler
             return;
         }
 
-        State::set($chatId, $flow, 0, []);
-        self::askStep($api, $chatId, $flow, 0);
+        self::askStep($api, $chatId, $flow, 0, []);
     }
 
-    private static function askStep(TelegramApi $api, int $chatId, string $flow, int $step): void
+    /**
+     * پرسیدن یک مرحله. هرجا بشود، به‌جای «تایپ کن»، دکمه‌ی شیشه‌ای می‌سازیم:
+     * گزینه‌های ثابت (choices) یا فهرست زنده‌ای که همان لحظه از خود سرور
+     * گرفته می‌شود (picker) — مثل فهرست ایمیل‌ها برای حذف.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function askStep(TelegramApi $api, int $chatId, string $flow, int $step, array $data, int $page = 0): void
     {
         $definition = self::FLOWS[$flow];
         $stepDefinition = $definition['steps'][$step];
         $optional = ($stepDefinition['optional'] ?? false) === true;
 
+        [$options, $optionsError] = self::stepOptions($stepDefinition, $data);
+
         $text = '<b>' . $definition['title'] . '</b>  (مرحله ' . ($step + 1) . ' از ' . count($definition['steps']) . ")\n\n"
             . $stepDefinition['prompt'];
-        $text .= $optional ? "\n\nبرای رد شدن <code>/skip</code> و برای لغو <code>/cancel</code>." : "\n\nبرای لغو <code>/cancel</code>.";
+        if ($optionsError !== null) {
+            $text .= "\n\n⚠️ فهرست آماده را نتوانستم بگیرم، مقدار را دستی بفرستید:\n" . Format::escapeHtml($optionsError);
+        } elseif ($options !== []) {
+            $text .= "\n\nیکی از دکمه‌های زیر را بزنید، یا مقدار را دستی بفرستید.";
+        }
+        $text .= $optional ? "\n\nرد شدن: <code>/skip</code> — لغو: <code>/cancel</code>" : "\n\nلغو: <code>/cancel</code>";
 
-        $api->sendHtml($chatId, $text);
+        // گزینه‌ها را در خود وضعیت نگه می‌داریم تا callback فقط شماره بفرستد
+        // (تلگرام برای callback_data فقط ۶۴ بایت می‌دهد و ایمیل/نام دیتابیس
+        // راحت از آن بلندتر می‌شود).
+        $data['__options'] = $options;
+        $data['__page'] = $page;
+        State::set($chatId, $flow, $step, $data);
+
+        $api->sendHtml($chatId, $text, self::optionsKeyboard($options, $page, $optional));
+    }
+
+    /**
+     * @param array<int, array{label: string, value: string}> $options
+     *
+     * @return array{inline_keyboard: array<int, array<int, array<string, string>>>}|null
+     */
+    private static function optionsKeyboard(array $options, int $page, bool $optional): ?array
+    {
+        $rows = [];
+        $perPage = 8;
+        $pages = max(1, (int) ceil(count($options) / $perPage));
+        $page = max(0, min($page, $pages - 1));
+
+        foreach (array_slice($options, $page * $perPage, $perPage) as $index => $option) {
+            $rows[] = [self::btn(self::shorten($option['label']), 'c:' . ($page * $perPage + $index))];
+        }
+
+        if ($pages > 1) {
+            $nav = [];
+            if ($page > 0) {
+                $nav[] = self::btn('◀️ قبلی', 'pg:' . ($page - 1));
+            }
+            $nav[] = self::btn('صفحه ' . ($page + 1) . ' از ' . $pages, 'noop');
+            if ($page < $pages - 1) {
+                $nav[] = self::btn('بعدی ▶️', 'pg:' . ($page + 1));
+            }
+            $rows[] = $nav;
+        }
+
+        $footer = [];
+        if ($optional) {
+            $footer[] = self::btn('⏭ رد کردن', 'skip');
+        }
+        $footer[] = self::btn('❌ لغو', 'no');
+        $rows[] = $footer;
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
+     * گزینه‌های یک مرحله: یا ثابت‌اند، یا زنده از سرور گرفته می‌شوند.
+     *
+     * @param array<string, mixed> $stepDefinition
+     * @param array<string, mixed> $data
+     *
+     * @return array{0: array<int, array{label: string, value: string}>, 1: string|null}
+     */
+    private static function stepOptions(array $stepDefinition, array $data): array
+    {
+        if (isset($stepDefinition['choices'])) {
+            $options = [];
+            foreach ($stepDefinition['choices'] as $choice) {
+                $options[] = ['label' => (string) $choice[0], 'value' => (string) $choice[1]];
+            }
+
+            return [$options, null];
+        }
+
+        if (!isset($stepDefinition['picker'])) {
+            return [[], null];
+        }
+
+        try {
+            return [self::pickerOptions((string) $stepDefinition['picker'], $data), null];
+        } catch (Throwable $e) {
+            return [[], $e->getMessage()];
+        }
+    }
+
+    /**
+     * فهرست‌های زنده‌ای که از خود سرور می‌آیند.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<int, array{label: string, value: string}>
+     */
+    private static function pickerOptions(string $picker, array $data): array
+    {
+        $simple = static function (array $values): array {
+            $out = [];
+            foreach ($values as $value) {
+                $out[] = ['label' => (string) $value, 'value' => (string) $value];
+            }
+
+            return $out;
+        };
+
+        switch ($picker) {
+            case 'emails':
+                return $simple(array_column(CpanelService::emails(self::accountClient()), 'email'));
+
+            case 'databases':
+                return $simple(array_column(CpanelService::databases(self::accountClient()), 'name'));
+
+            case 'dbusers':
+                return $simple(CpanelService::databaseUsers(self::accountClient()));
+
+            case 'ftp':
+                return $simple(array_column(CpanelService::ftpAccounts(self::accountClient()), 'user'));
+
+            case 'subdomains':
+                return $simple(CpanelService::domains(self::accountClient())['sub_domains']);
+
+            case 'domains':
+                $domains = CpanelService::domains(self::accountClient());
+
+                return $simple(array_values(array_filter(array_merge(
+                    [$domains['main_domain']],
+                    $domains['addon_domains'],
+                    $domains['sub_domains'],
+                ))));
+
+            case 'zones':
+                $domains = CpanelService::domains(self::accountClient());
+
+                return $simple(array_values(array_filter(array_merge(
+                    [$domains['main_domain']],
+                    $domains['addon_domains'],
+                ))));
+
+            case 'vhosts':
+                return $simple(array_column(CpanelService::phpVersions(self::accountClient()), 'vhost'));
+
+            case 'php_versions':
+                $versions = CpanelService::installedPhpVersions(self::accountClient());
+                $versions[] = 'inherit';
+
+                return $simple($versions);
+
+            case 'cron':
+                $options = [];
+                foreach (CpanelService::cronJobs(self::accountClient()) as $job) {
+                    if ($job['key'] === '') {
+                        continue;
+                    }
+                    $options[] = ['label' => $job['schedule'] . ' — ' . $job['command'], 'value' => $job['key']];
+                }
+
+                return $options;
+
+            case 'dns_records':
+                $zone = (string) ($data['zone'] ?? '');
+                if ($zone === '') {
+                    return [];
+                }
+                $options = [];
+                foreach (CpanelService::dnsZone(self::accountClient(), $zone)['records'] as $record) {
+                    if (in_array($record['type'], ['SOA', 'NS'], true)) {
+                        // حذف SOA/NS زون را خراب می‌کند؛ اصلاً پیشنهادشان نمی‌دهیم.
+                        continue;
+                    }
+                    $options[] = [
+                        'label' => $record['type'] . ' ' . $record['name'] . ' → ' . implode(' ', $record['data']),
+                        'value' => (string) $record['line'],
+                    ];
+                }
+
+                return $options;
+
+            case 'record_types':
+                return $simple(['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'NS']);
+
+            case 'whm_accounts':
+                return $simple(array_column(CpanelService::whmAccounts(self::whmClient()), 'user'));
+
+            case 'whm_plans':
+                return $simple(CpanelService::whmPackages(self::whmClient()));
+
+            case 'servers':
+                $options = [];
+                foreach (ServerStore::all() as $id => $server) {
+                    $options[] = ['label' => $server['label'] . ' (' . $id . ')', 'value' => (string) $id];
+                }
+
+                return $options;
+
+            case 'removable_servers':
+                $options = [];
+                foreach (ServerStore::all() as $id => $server) {
+                    if (($server['source'] ?? '') === 'env') {
+                        continue;
+                    }
+                    $options[] = ['label' => $server['label'] . ' (' . $id . ')', 'value' => (string) $id];
+                }
+
+                return $options;
+
+            default:
+                return [];
+        }
+    }
+
+    private static function shorten(string $text, int $limit = 48): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+
+        return mb_strlen($text, 'UTF-8') > $limit ? mb_substr($text, 0, $limit - 1, 'UTF-8') . '…' : $text;
+    }
+
+    /**
+     * انتخاب یک گزینه از دکمه‌ها — دقیقاً مثل این است که کاربر همان مقدار را
+     * تایپ کرده باشد.
+     */
+    private static function chooseOption(TelegramApi $api, int $chatId, int $index): void
+    {
+        $state = State::get($chatId);
+        if ($state === null || $state['step'] < 0) {
+            $api->sendHtml($chatId, 'این دکمه دیگر معتبر نیست؛ از منو دوباره شروع کنید.', self::mainKeyboard());
+
+            return;
+        }
+
+        $options = $state['data']['__options'] ?? [];
+        $option = is_array($options) ? ($options[$index] ?? null) : null;
+        if (!is_array($option)) {
+            $api->sendHtml($chatId, 'این گزینه دیگر در دسترس نیست؛ مقدار را دستی بفرستید.');
+
+            return;
+        }
+
+        self::submitStep($api, $chatId, $state, (string) $option['value'], null);
+    }
+
+    private static function changePage(TelegramApi $api, int $chatId, int $page): void
+    {
+        $state = State::get($chatId);
+        if ($state === null || $state['step'] < 0) {
+            return;
+        }
+        self::askStep($api, $chatId, $state['flow'], $state['step'], $state['data'], $page);
     }
 
     /**
@@ -745,9 +1076,7 @@ final class UpdateHandler
             return;
         }
 
-        $definition = self::FLOWS[$flow];
-        $stepDefinition = $definition['steps'][$state['step']];
-        $data = $state['data'];
+        $stepDefinition = self::FLOWS[$flow]['steps'][$state['step']];
         $value = trim($text);
 
         if ($value === '/skip') {
@@ -775,6 +1104,23 @@ final class UpdateHandler
             }
         }
 
+        self::submitStep($api, $chatId, $state, $value, $messageId);
+    }
+
+    /**
+     * ثبت مقدار یک مرحله و رفتن به مرحله‌ی بعد/تأیید/اجرا — چه مقدار تایپ
+     * شده باشد چه از دکمه آمده باشد.
+     *
+     * @param array{flow: string, step: int, data: array<string, mixed>} $state
+     */
+    private static function submitStep(TelegramApi $api, int $chatId, array $state, string $value, ?int $messageId): void
+    {
+        $flow = $state['flow'];
+        $definition = self::FLOWS[$flow];
+        $stepDefinition = $definition['steps'][$state['step']];
+        $data = $state['data'];
+        unset($data['__options'], $data['__page']);
+
         if ($value === '' && ($stepDefinition['optional'] ?? false) !== true) {
             $api->sendHtml($chatId, '⚠️ مقدار خالی است، دوباره بفرستید.');
 
@@ -785,8 +1131,7 @@ final class UpdateHandler
         $nextStep = $state['step'] + 1;
 
         if ($nextStep < count($definition['steps'])) {
-            State::set($chatId, $flow, $nextStep, $data);
-            self::askStep($api, $chatId, $flow, $nextStep);
+            self::askStep($api, $chatId, $flow, $nextStep, $data);
 
             return;
         }
@@ -816,6 +1161,8 @@ final class UpdateHandler
     private static function execute(TelegramApi $api, int $chatId, string $flow, array $data): void
     {
         $api->sendChatAction($chatId);
+        // کلیدهای داخلی (فهرست دکمه‌ها و شماره‌ی صفحه) به عملیات نمی‌رسند.
+        unset($data['__options'], $data['__page']);
         $method = 'run' . str_replace(' ', '', ucwords(str_replace('_', ' ', $flow)));
 
         try {
@@ -837,9 +1184,10 @@ final class UpdateHandler
     /** @param array<string, mixed> $data */
     private static function runEmailAdd(array $data): string
     {
-        CpanelService::addEmail(self::accountClient(), (string) $data['email'], (string) $data['password'], $data['quota'] ?? 0);
+        $email = trim((string) $data['local']) . '@' . trim((string) $data['domain']);
+        CpanelService::addEmail(self::accountClient(), $email, (string) $data['password'], $data['quota'] ?? 0);
 
-        return '✅ حساب ایمیل <code>' . Format::escapeHtml((string) $data['email']) . '</code> ساخته شد.';
+        return '✅ حساب ایمیل <code>' . Format::escapeHtml($email) . '</code> ساخته شد.';
     }
 
     /** @param array<string, mixed> $data */
@@ -1098,6 +1446,23 @@ final class UpdateHandler
         CpanelService::whmTerminateAccount(self::whmClient(), (string) $data['user']);
 
         return '💀 حساب <code>' . Format::escapeHtml((string) $data['user']) . '</code> کاملاً حذف شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSelfhostCron(array $data): string
+    {
+        $path = rtrim(trim((string) $data['path']), '/');
+        $command = trim((string) $data['php_bin']) . ' ' . $path . '/poll.php >/dev/null 2>&1';
+
+        CpanelService::addCron(
+            self::accountClient(),
+            ['minute' => '*', 'hour' => '*', 'day' => '*', 'month' => '*', 'weekday' => '*'],
+            $command,
+        );
+
+        return "✅ کران ساخته شد و ربات از این به بعد روی همین هاست اجرا می‌شود:\n<code>"
+            . Format::escapeHtml($command) . "</code>\n\n"
+            . '💡 اگر ربات جای دیگری هم (به‌صورت سرویس یا وبهوک) در حال اجراست، آن یکی را خاموش کنید تا دو نسخه هم‌زمان جواب ندهند.';
     }
 
     /** @param array<string, mixed> $data */

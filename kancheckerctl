@@ -21,6 +21,8 @@ set -uo pipefail
 REPO_URL="https://github.com/kiankan/kan_checker.git"
 INSTALL_DIR="/opt/kan_checker"
 SERVICE_NAME="kan_checker-bot"
+WEB_SERVICE_NAME="kan_checker-web"
+DEFAULT_LISTEN_PORT=2000
 ENV_FILE="$INSTALL_DIR/.env"
 BIN_PATH="/usr/local/bin/kancheckerctl"
 
@@ -160,12 +162,42 @@ prompt_cpanel() {
   fi
 }
 
+# پورت خود سرویس (صفحه‌ی وضعیت/سلامت و ورودی وبهوک پشت ریورس‌پراکسی).
+# ربطی به پورت هاست‌هایی که مدیریت می‌کنیم ندارد؛ هر هاست پورت خودش را دارد.
+prompt_listen_port() {
+  local current port
+  current=$(env_get LISTEN_PORT)
+  port="${LISTEN_PORT:-}"
+
+  if [ -z "$port" ]; then
+    if [ -n "$current" ]; then
+      read -rp "پورت سرویس فعلاً $current است. برای تغییر عدد جدید را بدهید (Enter = بدون تغییر): " port
+      [ -z "$port" ] && port="$current"
+    else
+      read -rp "پورت سرویس ربات (Enter = $DEFAULT_LISTEN_PORT): " port
+    fi
+  fi
+
+  env_set LISTEN_PORT "${port:-$DEFAULT_LISTEN_PORT}"
+}
+
+listen_port() {
+  local port
+  port=$(env_get LISTEN_PORT)
+  echo "${port:-$DEFAULT_LISTEN_PORT}"
+}
+
 prompt_config() {
   prompt_telegram
   prompt_cpanel
+  prompt_listen_port
 }
 
 write_systemd_unit() {
+  local php_bin port
+  php_bin=$(command -v php || echo /usr/bin/php)
+  port=$(listen_port)
+
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=kan_checker — cPanel/WHM manager Telegram bot
@@ -178,7 +210,7 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$ENV_FILE
-ExecStart=$(command -v php || echo /usr/bin/php) $INSTALL_DIR/bot.php
+ExecStart=$php_bin $INSTALL_DIR/bot.php
 Restart=on-failure
 RestartSec=5
 Nice=10
@@ -188,6 +220,31 @@ MemoryMax=128M
 [Install]
 WantedBy=multi-user.target
 EOF
+
+  # سرویس دوم: صفحه‌ی وضعیت/سلامت روی پورت اختصاصی خود ربات.
+  cat > "/etc/systemd/system/${WEB_SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=kan_checker — status/webhook service on port $port
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$php_bin -S 0.0.0.0:$port -t $INSTALL_DIR $INSTALL_DIR/serve.php
+Restart=on-failure
+RestartSec=5
+Nice=10
+CPUQuota=15%
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
   systemctl daemon-reload
 }
 
@@ -225,8 +282,10 @@ do_install() {
   write_systemd_unit
   self_link
   systemctl enable --now "$SERVICE_NAME"
+  systemctl enable --now "$WEB_SERVICE_NAME"
   echo ""
-  echo "نصب کامل شد و سرویس در حال اجراست."
+  echo "نصب کامل شد؛ ربات در حال اجراست و صفحه‌ی وضعیت روی پورت $(listen_port) بالاست:"
+  echo "  http://$(hostname -I 2>/dev/null | awk '{print $1}'):$(listen_port)/"
   echo "برای تست اتصال به cPanel:  kancheckerctl ping"
   echo "از این به بعد کافیه بنویسید: kancheckerctl"
 }
@@ -239,9 +298,12 @@ do_finish_update() {
   cleanup_legacy_python
   secure_data_dir
   write_systemd_unit
-  systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
-  systemctl restart "$SERVICE_NAME"
-  echo "آپدیت انجام شد و سرویس با آخرین نسخه ری‌استارت شد."
+  for unit in "$SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+    systemctl reset-failed "$unit" 2>/dev/null
+    systemctl enable "$unit" >/dev/null 2>&1
+    systemctl restart "$unit"
+  done
+  echo "آپدیت انجام شد و سرویس‌ها با آخرین نسخه ری‌استارت شدند."
 }
 
 do_update() {
@@ -256,11 +318,48 @@ do_update() {
   exec "$BIN_PATH" _finish-update
 }
 
-do_start()   { need_root; systemctl reset-failed "$SERVICE_NAME" 2>/dev/null; systemctl start "$SERVICE_NAME";   echo "سرویس استارت شد."; }
-do_stop()    { need_root; systemctl stop "$SERVICE_NAME";    echo "سرویس متوقف شد."; }
-do_restart() { need_root; systemctl reset-failed "$SERVICE_NAME" 2>/dev/null; systemctl restart "$SERVICE_NAME"; echo "سرویس ری‌استارت شد."; }
-do_status()  { systemctl status "$SERVICE_NAME" --no-pager; }
-do_logs()    { journalctl -u "$SERVICE_NAME" -f -n 100; }
+do_start() {
+  need_root
+  for unit in "$SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+    systemctl reset-failed "$unit" 2>/dev/null
+    systemctl start "$unit"
+  done
+  echo "سرویس‌ها استارت شدند (ربات + وب روی پورت $(listen_port))."
+}
+
+do_stop() {
+  need_root
+  systemctl stop "$SERVICE_NAME" "$WEB_SERVICE_NAME" 2>/dev/null
+  echo "سرویس‌ها متوقف شدند."
+}
+
+do_restart() {
+  need_root
+  for unit in "$SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+    systemctl reset-failed "$unit" 2>/dev/null
+    systemctl restart "$unit"
+  done
+  echo "سرویس‌ها ری‌استارت شدند."
+}
+
+do_status() {
+  systemctl status "$SERVICE_NAME" --no-pager
+  echo ""
+  systemctl status "$WEB_SERVICE_NAME" --no-pager
+  echo ""
+  echo "وضعیت JSON: http://127.0.0.1:$(listen_port)/health"
+  curl -s --max-time 3 "http://127.0.0.1:$(listen_port)/health" 2>/dev/null && echo ""
+}
+
+do_logs() { journalctl -u "$SERVICE_NAME" -u "$WEB_SERVICE_NAME" -f -n 100; }
+
+do_set_port() {
+  need_root
+  prompt_listen_port
+  write_systemd_unit
+  systemctl restart "$WEB_SERVICE_NAME" 2>/dev/null
+  echo "پورت سرویس روی $(listen_port) تنظیم شد."
+}
 
 do_set_token() {
   need_root
@@ -299,7 +398,8 @@ do_uninstall() {
     return
   fi
   systemctl disable --now "$SERVICE_NAME" 2>/dev/null
-  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  systemctl disable --now "$WEB_SERVICE_NAME" 2>/dev/null
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/systemd/system/${WEB_SERVICE_NAME}.service"
   systemctl daemon-reload
   rm -rf "$INSTALL_DIR"
   rm -f "$BIN_PATH"
@@ -321,7 +421,8 @@ show_menu() {
     echo "9) تنظیم/تغییر اتصال cPanel یا WHM"
     echo "10) تست اتصال به cPanel"
     echo "11) لیست سرورهای تعریف‌شده"
-    echo "12) حذف کامل"
+    echo "12) تنظیم پورت سرویس (الان: $(listen_port))"
+    echo "13) حذف کامل"
     echo "0) خروج"
     read -rp "انتخاب شما: " choice
     case "$choice" in
@@ -336,7 +437,8 @@ show_menu() {
       9) do_set_cpanel ;;
       10) do_ping ;;
       11) do_servers ;;
-      12) do_uninstall ;;
+      12) do_set_port ;;
+      13) do_uninstall ;;
       0) exit 0 ;;
       *) echo "گزینه نامعتبر است." ;;
     esac
@@ -356,12 +458,13 @@ case "$cmd" in
   set-token|token)  do_set_token ;;
   cpanel|set-cpanel) do_set_cpanel ;;
   ping|test)        do_ping ;;
+  port|set-port)    do_set_port ;;
   servers)          do_servers ;;
   uninstall|remove) do_uninstall ;;
   menu|"")          show_menu ;;
   *)
     echo "دستور نامعتبر: $cmd"
-    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, set-token, cpanel, ping, servers, uninstall, menu"
+    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, set-token, cpanel, port, ping, servers, uninstall, menu"
     exit 1
     ;;
 esac

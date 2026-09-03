@@ -58,6 +58,9 @@ const USAGE = <<<TXT
       php cli.php whmapi <function> [key=value ...]
       php cli.php api2 <Module> <function> [key=value ...]
 
+    هاست اشتراکی (اجرای ربات با کران، بدون پروسه‌ی دائمی):
+      php cli.php selfhost:cron [php-binary] [project-path]
+
     متفرقه:
       php cli.php log [count]
       php cli.php webhook:set <url> | php cli.php webhook:delete
@@ -538,6 +541,20 @@ try {
             ));
             break;
 
+        // ------------------------------------------------- هاست اشتراکی
+        case 'selfhost:cron':
+            $phpBin = $positional[0] ?? '/usr/local/bin/php';
+            $projectPath = rtrim($positional[1] ?? __DIR__, '/');
+            $cronCommand = "{$phpBin} {$projectPath}/poll.php >/dev/null 2>&1";
+            CpanelService::addCron(
+                accountClient($options),
+                ['minute' => '*', 'hour' => '*', 'day' => '*', 'month' => '*', 'weekday' => '*'],
+                $cronCommand,
+            );
+            audit('selfhost:cron', ['command' => $cronCommand]);
+            show("✅ کران هر دقیقه‌ای ساخته شد:\n{$cronCommand}");
+            break;
+
         // ---------------------------------------------------------- متفرقه
         case 'log':
             $lines = AuditLog::tail((int) ($positional[0] ?? 20));
@@ -545,8 +562,12 @@ try {
             break;
 
         case 'webhook:set':
-            (new TelegramApi(kanchecker_bot_token()))->setWebhook(arg($positional, 0));
+            $secret = trim((string) (getenv('WEBHOOK_SECRET') ?: ''));
+            (new TelegramApi(kanchecker_bot_token()))->setWebhook(arg($positional, 0), $secret);
             echo "وبهوک تنظیم شد: {$positional[0]}\n";
+            echo $secret === ''
+                ? "⚠️ WEBHOOK_SECRET در .env خالی است؛ توصیه می‌شود یک رشته‌ی تصادفی بگذارید تا فقط تلگرام بتواند به این آدرس درخواست بدهد.\n"
+                : "🔐 با هدر امنیتی تنظیم شد.\n";
             break;
 
         case 'webhook:delete':

@@ -76,13 +76,16 @@ final class ServerStore
         $state = self::load();
         $id = self::uniqueId(self::str($server['label'] ?? '') ?: self::str($server['host'] ?? 'server'), $state['servers']);
 
+        $type = ($server['type'] ?? CpanelClient::TYPE_CPANEL) === CpanelClient::TYPE_WHM
+            ? CpanelClient::TYPE_WHM
+            : CpanelClient::TYPE_CPANEL;
+        $address = self::str($server['host'] ?? '');
+
         $state['servers'][$id] = [
-            'label' => self::str($server['label'] ?? '') ?: self::str($server['host'] ?? $id),
-            'type' => ($server['type'] ?? CpanelClient::TYPE_CPANEL) === CpanelClient::TYPE_WHM
-                ? CpanelClient::TYPE_WHM
-                : CpanelClient::TYPE_CPANEL,
-            'host' => self::normalizeHost(self::str($server['host'] ?? '')),
-            'port' => (int) ($server['port'] ?? 0) ?: (($server['type'] ?? '') === CpanelClient::TYPE_WHM ? 2087 : 2083),
+            'label' => self::str($server['label'] ?? '') ?: Address::host($address) ?: $id,
+            'type' => $type,
+            'host' => Address::host($address),
+            'port' => Address::resolvePort($address, $server['port'] ?? null, $type),
             'user' => self::str($server['user'] ?? ''),
             'token' => self::str($server['token'] ?? ''),
             'ssl_verify' => (bool) ($server['ssl_verify'] ?? true),
@@ -215,10 +218,10 @@ final class ServerStore
      */
     private static function fromEnv(string $prefix, string $type, string $id, int $defaultPort): ?array
     {
-        $host = self::env($prefix . '_HOST');
+        $address = self::env($prefix . '_HOST');
         $user = self::env($prefix . '_USER');
         $token = self::env($prefix . '_TOKEN');
-        if ($host === '' || $user === '' || $token === '') {
+        if ($address === '' || $user === '' || $token === '') {
             return null;
         }
 
@@ -227,10 +230,10 @@ final class ServerStore
         return [
             'id' => $id,
             'source' => 'env',
-            'label' => self::env($prefix . '_LABEL') ?: $host,
+            'label' => self::env($prefix . '_LABEL') ?: Address::host($address),
             'type' => $type,
-            'host' => self::normalizeHost($host),
-            'port' => (int) (self::env($prefix . '_PORT') ?: (string) $defaultPort),
+            'host' => Address::host($address),
+            'port' => Address::resolvePort($address, self::env($prefix . '_PORT'), $type),
             'user' => $user,
             'token' => $token,
             'ssl_verify' => !in_array(strtolower($verify), ['0', 'false', 'no', 'off'], true),
@@ -259,14 +262,12 @@ final class ServerStore
         return $candidate;
     }
 
+    /**
+     * فقط بخش هاستِ آدرس (پورت و مسیر جدا می‌شوند).
+     */
     public static function normalizeHost(string $host): string
     {
-        $host = trim($host);
-        $host = (string) preg_replace('#^https?://#i', '', $host);
-        $host = rtrim($host, '/');
-        // اگر پورت هم چسبیده باشه (example.com:2083) جدا نمی‌کنیم چون خود
-        // baseUrl پورت رو اضافه می‌کنه؛ فقط هشدارش توی UI داده می‌شه.
-        return $host;
+        return Address::host($host);
     }
 
     private static function env(string $key): string

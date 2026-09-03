@@ -254,6 +254,53 @@ check('خاموش‌کردن بررسی SSL به لایه‌ی انتقال می
     assertSame(false, $captured[0]['verify']);
 });
 
+check('آدرس هاست با پورت چسبیده درست تجزیه می‌شود', function (): void {
+    assertSame(['host' => 'server.example.com', 'port' => 2083], Address::parse('https://server.example.com:2083/cpanel'));
+    assertSame(['host' => 'server.example.com', 'port' => 2096], Address::parse('server.example.com:2096'));
+    assertSame(['host' => 'server.example.com', 'port' => null], Address::parse('server.example.com'));
+    assertSame(['host' => '1.2.3.4', 'port' => 2087], Address::parse(' 1.2.3.4:2087/ '));
+    assertSame(['host' => '[::1]', 'port' => 2083], Address::parse('[::1]:2083'));
+    assertSame(['host' => 'example.com', 'port' => null], Address::parse('example.com:99999'), 'پورت خارج از بازه نادیده گرفته شود');
+
+    // پورت صریح > پورت داخل آدرس > پیش‌فرض نوع سرور
+    assertSame(2095, Address::resolvePort('a.com:2083', 2095, CpanelClient::TYPE_CPANEL));
+    assertSame(2083, Address::resolvePort('a.com:2083', '', CpanelClient::TYPE_CPANEL));
+    assertSame(2087, Address::resolvePort('a.com', null, CpanelClient::TYPE_WHM));
+    assertSame(2083, Address::resolvePort('a.com', null, CpanelClient::TYPE_CPANEL));
+});
+
+check('هر هاست با پورت خودش کار می‌کند، هم‌زمان', function (): void {
+    // پورت هم می‌تواند جدا ذخیره شده باشد و هم به آدرس چسبیده باشد؛ هیچ‌کدام
+    // نباید باعث آدرس خراب مثل host:2083:2083 شود.
+    $onDefault = new CpanelClient(cpanelServer(['host' => 'a.example.com']));
+    $onCustom = new CpanelClient(cpanelServer(['host' => 'b.example.com:2096', 'port' => 2083]));
+    $onWhm = new CpanelClient(cpanelServer(['host' => 'c.example.com', 'type' => CpanelClient::TYPE_WHM, 'port' => 2087]));
+    $behindProxy = new CpanelClient(cpanelServer(['host' => 'https://panel.example.com:443/cpanel', 'port' => 0]));
+
+    assertSame('https://a.example.com:2083', $onDefault->endpoint());
+    assertSame('https://b.example.com:2096', $onCustom->endpoint(), 'پورت داخل آدرس باید برنده شود');
+    assertSame('https://c.example.com:2087', $onWhm->endpoint());
+    assertSame('https://panel.example.com:443', $behindProxy->endpoint());
+});
+
+check('سرورهای ذخیره‌شده پورت جداگانه‌ی خودشان را نگه می‌دارند', function (): void {
+    $a = ServerStore::add(['label' => 'A', 'type' => 'cpanel', 'host' => 'a.example.com:2083', 'user' => 'ua', 'token' => 'ta']);
+    $b = ServerStore::add(['label' => 'B', 'type' => 'cpanel', 'host' => 'https://b.example.com:2096/', 'user' => 'ub', 'token' => 'tb']);
+    $c = ServerStore::add(['label' => 'C', 'type' => 'whm', 'host' => 'c.example.com', 'user' => 'root', 'token' => 'tc']);
+
+    assertSame(2083, ServerStore::get($a)['port']);
+    assertSame('b.example.com', ServerStore::get($b)['host'], 'پروتکل و پورت نباید داخل هاست بمانند');
+    assertSame(2096, ServerStore::get($b)['port']);
+    assertSame(2087, ServerStore::get($c)['port']);
+
+    assertSame('https://b.example.com:2096', ServerStore::client($b)->endpoint());
+    assertSame('https://c.example.com:2087', ServerStore::client($c)->endpoint());
+
+    foreach ([$a, $b, $c] as $id) {
+        ServerStore::delete($id);
+    }
+});
+
 echo "\nCpanelService\n";
 
 check('جداکردن ایمیل به نام کاربری و دامنه', function (): void {
@@ -512,6 +559,88 @@ check('پیام‌های داخل جریان از دستورهای جدید تف
     assertTrue(UpdateHandler::isFlowInput('/gen'), '/gen باید ورودی جریان بماند');
     assertTrue(!UpdateHandler::isFlowInput('/panel'), 'دستور معمولی باید جریان را رها کند');
     assertTrue(!UpdateHandler::isFlowInput('/emails'), 'دستور معمولی باید جریان را رها کند');
+});
+
+check('هر picker در جدول جریان‌ها واقعاً پیاده‌سازی شده است', function (): void {
+    $source = (string) file_get_contents(__DIR__ . '/../src/UpdateHandler.php');
+    $body = substr($source, (int) strpos($source, 'private static function pickerOptions'));
+    $body = substr($body, 0, (int) strpos($body, 'private static function shorten'));
+
+    foreach (flows() as $name => $definition) {
+        foreach ($definition['steps'] as $step) {
+            if (!isset($step['picker'])) {
+                continue;
+            }
+            assertTrue(
+                str_contains($body, "case '{$step['picker']}':"),
+                "picker «{$step['picker']}» در جریان {$name} پیاده‌سازی نشده است",
+            );
+        }
+    }
+});
+
+check('گزینه‌های ثابت هر مرحله شکل درستی دارند', function (): void {
+    foreach (flows() as $name => $definition) {
+        foreach ($definition['steps'] as $step) {
+            if (!isset($step['choices'])) {
+                continue;
+            }
+            assertTrue($step['choices'] !== [], "گزینه‌های {$name} خالی است");
+            foreach ($step['choices'] as $choice) {
+                assertTrue(is_array($choice) && count($choice) === 2, "گزینه‌ی {$name} باید [برچسب، مقدار] باشد");
+                assertTrue(is_string($choice[0]) && $choice[0] !== '', "برچسب گزینه در {$name} خالی است");
+                assertTrue(is_string($choice[1]), "مقدار گزینه در {$name} باید رشته باشد");
+            }
+            // مرحله‌ای که گزینه‌ی خالی دارد باید اختیاری باشد، وگرنه کاربر با
+            // زدن آن دکمه به خطای «مقدار خالی است» می‌خورد.
+            $hasEmpty = in_array('', array_column($step['choices'], 1), true);
+            if ($hasEmpty) {
+                assertTrue(($step['optional'] ?? false) === true, "مرحله‌ی {$step['key']} در {$name} گزینه‌ی خالی دارد ولی اختیاری نیست");
+            }
+        }
+    }
+});
+
+check('کیبورد گزینه‌ها صفحه‌بندی می‌شود و callback کوتاه می‌ماند', function (): void {
+    $method = new ReflectionMethod(UpdateHandler::class, 'optionsKeyboard');
+    $options = [];
+    for ($i = 0; $i < 25; $i++) {
+        $options[] = ['label' => "خیلی-خیلی-طولانی-گزینه-شماره-{$i}@some-long-domain-example.com", 'value' => "v{$i}"];
+    }
+
+    $first = $method->invoke(null, $options, 0, false)['inline_keyboard'];
+    $middle = $method->invoke(null, $options, 1, true)['inline_keyboard'];
+
+    $flat = static function (array $rows): array {
+        $out = [];
+        foreach ($rows as $row) {
+            foreach ($row as $button) {
+                $out[] = $button;
+            }
+        }
+
+        return $out;
+    };
+
+    $firstButtons = $flat($first);
+    assertSame('c:0', $firstButtons[0]['callback_data'], 'اولین دکمه باید به گزینه‌ی صفر اشاره کند');
+    foreach ($firstButtons as $button) {
+        assertTrue(strlen($button['callback_data']) <= 64, 'callback_data از سقف ۶۴ بایت تلگرام بلندتر است');
+        assertTrue(mb_strlen($button['text']) <= 50, 'برچسب دکمه باید کوتاه شود: ' . $button['text']);
+    }
+
+    $labels = array_column($flat($middle), 'callback_data');
+    assertTrue(in_array('c:8', $labels, true), 'صفحه‌ی دوم باید از گزینه‌ی ۸ شروع شود');
+    assertTrue(in_array('pg:0', $labels, true), 'دکمه‌ی صفحه‌ی قبل باید باشد');
+    assertTrue(in_array('pg:2', $labels, true), 'دکمه‌ی صفحه‌ی بعد باید باشد');
+    assertTrue(in_array('skip', $labels, true), 'مرحله‌ی اختیاری باید دکمه‌ی رد کردن داشته باشد');
+    assertTrue(in_array('no', $labels, true), 'دکمه‌ی لغو باید همیشه باشد');
+
+    // فهرست کوتاه نباید دکمه‌ی صفحه‌بندی بگیرد.
+    $short = $flat($method->invoke(null, array_slice($options, 0, 3), 0, false)['inline_keyboard']);
+    foreach ($short as $button) {
+        assertTrue(!str_starts_with($button['callback_data'], 'pg:'), 'فهرست کوتاه نباید صفحه‌بندی داشته باشد');
+    }
 });
 
 check('همه‌ی دکمه‌ها به جریان/کار موجود وصل‌اند', function (): void {

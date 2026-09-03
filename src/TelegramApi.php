@@ -8,9 +8,21 @@ final class TelegramApi
     {
     }
 
+    /**
+     * آدرس پایه‌ی API تلگرام. روی بعضی سرورها api.telegram.org مستقیم در
+     * دسترس نیست و از یک پروکسی/آینه استفاده می‌شود؛ با TELEGRAM_API_BASE
+     * قابل تغییر است (در تست‌ها هم همین‌جا به سرور ساختگی وصل می‌شویم).
+     */
+    public static function baseUrl(): string
+    {
+        $base = trim((string) (getenv('TELEGRAM_API_BASE') ?: ''));
+
+        return rtrim($base !== '' ? $base : 'https://api.telegram.org', '/');
+    }
+
     public function call(string $method, array $params = [], int $curlTimeout = 40): mixed
     {
-        $ch = curl_init("https://api.telegram.org/bot{$this->token}/$method");
+        $ch = curl_init(self::baseUrl() . "/bot{$this->token}/$method");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
@@ -110,8 +122,14 @@ final class TelegramApi
         $this->call('deleteWebhook', ['drop_pending_updates' => 'true']);
     }
 
-    public function setWebhook(string $url): void
+    public function setWebhook(string $url, string $secretToken = ''): void
     {
-        $this->call('setWebhook', ['url' => $url]);
+        $params = ['url' => $url, 'allowed_updates' => json_encode(['message', 'callback_query'])];
+        if ($secretToken !== '') {
+            // تلگرام این مقدار را در هدر X-Telegram-Bot-Api-Secret-Token
+            // می‌فرستد تا مطمئن شویم درخواست واقعاً از تلگرام است.
+            $params['secret_token'] = $secretToken;
+        }
+        $this->call('setWebhook', $params);
     }
 }

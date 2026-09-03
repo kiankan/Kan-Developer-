@@ -28,6 +28,9 @@ fwrite(STDOUT, "Bot starting (long polling)...\n");
 
 $offset = 0;
 while (true) {
+    // نبض ربات؛ سرویس پورت اختصاصی از روی همین می‌فهمد ربات زنده است.
+    Heartbeat::touch('polling');
+
     try {
         $updates = $api->getUpdates($offset, 30);
     } catch (Throwable $e) {

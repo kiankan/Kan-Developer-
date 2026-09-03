@@ -1,0 +1,20 @@
+[Unit]
+Description=kan_checker — status/webhook service (default port 2000)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kan_checker
+EnvironmentFile=/opt/kan_checker/.env
+ExecStart=/usr/bin/php -S 0.0.0.0:2000 -t /opt/kan_checker /opt/kan_checker/serve.php
+Restart=on-failure
+RestartSec=5
+Nice=10
+CPUQuota=15%
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target
