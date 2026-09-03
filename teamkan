@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
-# KanPanel — مدیریت cPanel/WHM از تلگرام.
+# cPanel TeamKan — مدیریت cPanel/WHM از تلگرام.
 # اسکریپت نصب و مدیریت سرویس روی سرور (root + systemd).
 #
 # نصب یا آپدیت (همین یک دستور، هر دو کار را می‌کند):
-#   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kanpanel) install
+#   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/teamkan) install
 #
 # بعد از نصب، از هر جای سرور:
-#   kanpanel            منوی مدیریت
-#   kanpanel code       نمایش کد نصب (برای تحویل‌گرفتن ربات در تلگرام)
-#   kanpanel status     وضعیت سرویس‌ها
-#   kanpanel logs       لاگ زنده
+#   teamkan             منوی مدیریت
+#   teamkan code        نمایش کد نصب (برای تحویل‌گرفتن ربات در تلگرام)
+#   teamkan status      وضعیت سرویس‌ها
+#   teamkan logs        لاگ زنده
 #
 # تنها چیزی که این اسکریپت می‌پرسد توکن ربات است؛ بقیه‌ی تنظیمات
 # (سرورهای cPanel/WHM، ادمین‌ها و ...) از داخل خود ربات انجام می‌شود.
 
 set -uo pipefail
 
-REPO_URL="${KANPANEL_REPO:-https://github.com/kiankan/kan_checker.git}"
-INSTALL_DIR="/opt/kanpanel"
-SERVICE_NAME="kanpanel-bot"
-WEB_SERVICE_NAME="kanpanel-web"
+REPO_URL="${TEAMKAN_REPO:-https://github.com/kiankan/cpanel_teamkan.git}"
+INSTALL_DIR="/opt/teamkan"
+SERVICE_NAME="teamkan-bot"
+WEB_SERVICE_NAME="teamkan-web"
 DEFAULT_LISTEN_PORT=2000
 ENV_FILE="$INSTALL_DIR/.env"
-BIN_PATH="/usr/local/bin/kanpanel"
+BIN_PATH="/usr/local/bin/teamkan"
 
-# نصب‌های قدیمی با نام kan_checker
-LEGACY_DIR="/opt/kan_checker"
-LEGACY_SERVICES=("kan_checker-bot" "kan_checker-web")
-LEGACY_BIN="/usr/local/bin/kancheckerctl"
+# نصب‌های قدیمی (نام‌های قبلی پروژه)
+LEGACY_DIRS=("/opt/kanpanel" "/opt/kan_checker")
+LEGACY_SERVICES=("kanpanel-bot" "kanpanel-web" "kan_checker-bot" "kan_checker-web")
+LEGACY_BINS=("/usr/local/bin/kanpanel" "/usr/local/bin/kancheckerctl")
 
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
@@ -54,7 +54,7 @@ install_deps_os() {
 # نصب قدیمی (kan_checker) را به نام جدید منتقل می‌کند تا تنظیمات و سرورهای
 # ذخیره‌شده از دست نروند.
 migrate_legacy() {
-  local moved=0
+  local moved=0 dir
 
   for unit in "${LEGACY_SERVICES[@]}"; do
     if [ -f "/etc/systemd/system/${unit}.service" ]; then
@@ -64,25 +64,32 @@ migrate_legacy() {
     fi
   done
 
-  if [ -d "$LEGACY_DIR" ] && [ ! -d "$INSTALL_DIR" ]; then
-    echo "نصب قدیمی (kan_checker) پیدا شد؛ در حال انتقال به $INSTALL_DIR ..."
-    mv "$LEGACY_DIR" "$INSTALL_DIR"
+  for dir in "${LEGACY_DIRS[@]}"; do
+    [ -d "$dir" ] || continue
+    if [ ! -d "$INSTALL_DIR" ]; then
+      echo "نصب قدیمی در $dir پیدا شد؛ در حال انتقال به $INSTALL_DIR ..."
+      mv "$dir" "$INSTALL_DIR"
+    else
+      # نصب جدید از قبل هست: فقط تنظیمات و داده‌های قدیمی را برمی‌داریم.
+      [ -f "$dir/.env" ] && [ ! -f "$ENV_FILE" ] && cp "$dir/.env" "$ENV_FILE"
+      [ -d "$dir/data" ] && [ ! -d "$INSTALL_DIR/data" ] && cp -r "$dir/data" "$INSTALL_DIR/data"
+      rm -rf "$dir"
+    fi
     moved=1
-  elif [ -d "$LEGACY_DIR" ] && [ -d "$INSTALL_DIR" ]; then
-    # هر دو هستند: تنظیمات و داده‌های قدیمی را می‌بریم، بقیه‌اش دور ریخته می‌شود.
-    [ -f "$LEGACY_DIR/.env" ] && [ ! -f "$ENV_FILE" ] && cp "$LEGACY_DIR/.env" "$ENV_FILE"
-    [ -d "$LEGACY_DIR/data" ] && [ ! -d "$INSTALL_DIR/data" ] && cp -r "$LEGACY_DIR/data" "$INSTALL_DIR/data"
-    rm -rf "$LEGACY_DIR"
-    moved=1
-  fi
+  done
 
-  rm -f "$LEGACY_BIN"
+  for bin in "${LEGACY_BINS[@]}"; do
+    rm -f "$bin"
+  done
+
   [ "$moved" -eq 1 ] && systemctl daemon-reload
   return 0
 }
 
 ensure_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
+    # مخزن ممکن است اسمش عوض شده باشد؛ ریموت را هم‌تراز نگه می‌داریم.
+    git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" 2>/dev/null
     git -C "$INSTALL_DIR" pull --ff-only
   else
     mkdir -p "$INSTALL_DIR"
@@ -146,7 +153,7 @@ write_systemd_unit() {
 
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=KanPanel — cPanel/WHM manager Telegram bot
+Description=cPanel TeamKan — cPanel/WHM manager Telegram bot
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
@@ -169,7 +176,7 @@ EOF
 
   cat > "/etc/systemd/system/${WEB_SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=KanPanel — status page on port $port
+Description=cPanel TeamKan — status page on port $port
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
@@ -197,10 +204,10 @@ self_link() {
   # هرگز مستقیم روی $BIN_PATH بازنویسی نکن: اگر همین فایل در حال اجرا باشد،
   # bash وسط خواندنش به محتوای جدید می‌پرد و با syntax error می‌افتد. فایل موقت
   # + mv (اتمیک) اینود قدیمی را دست‌نخورده نگه می‌دارد.
-  if [ -f "$INSTALL_DIR/kanpanel" ]; then
+  if [ -f "$INSTALL_DIR/teamkan" ]; then
     local tmp
     tmp=$(mktemp "${BIN_PATH}.XXXXXX")
-    cp "$INSTALL_DIR/kanpanel" "$tmp"
+    cp "$INSTALL_DIR/teamkan" "$tmp"
     chmod +x "$tmp"
     mv -f "$tmp" "$BIN_PATH"
   fi
@@ -219,7 +226,7 @@ claim_code() {
 
 do_install() {
   need_root
-  echo "== نصب KanPanel — ربات مدیریت cPanel =="
+  echo "== نصب cPanel TeamKan — ربات مدیریت cPanel =="
   install_deps_os
   migrate_legacy
   ensure_repo
@@ -241,11 +248,11 @@ do_install() {
 
 do_update() {
   need_root
-  if [ ! -d "$INSTALL_DIR/.git" ] && [ ! -d "$LEGACY_DIR/.git" ]; then
+  if [ ! -d "$INSTALL_DIR/.git" ] && [ ! -d "${LEGACY_DIRS[0]}/.git" ] && [ ! -d "${LEGACY_DIRS[1]}/.git" ]; then
     echo "هنوز نصب نشده. اول «نصب» را بزنید."
     return 1
   fi
-  echo "== به‌روزرسانی KanPanel =="
+  echo "== به‌روزرسانی cPanel TeamKan =="
   migrate_legacy
   ensure_repo
   self_link
@@ -329,7 +336,7 @@ do_set_port() {
 do_uninstall() {
   need_root
   local confirm=""
-  read -rp "مطمئنید KanPanel کاملاً حذف شود؟ (y/N): " confirm
+  read -rp "مطمئنید cPanel TeamKan کاملاً حذف شود؟ (y/N): " confirm
   if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
     echo "لغو شد."
     return
@@ -345,7 +352,7 @@ do_uninstall() {
 show_menu() {
   while true; do
     echo ""
-    echo "==== KanPanel — مدیریت سرویس ===="
+    echo "==== cPanel TeamKan — مدیریت سرویس ===="
     echo "1) نصب / آپدیت"
     echo "2) وضعیت"
     echo "3) لاگ زنده (خروج با Ctrl+C)"

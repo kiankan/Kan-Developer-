@@ -6,7 +6,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 
 const USAGE = <<<TXT
-    KanPanel — مدیریت cPanel/WHM از خط فرمان (همان API‌ای که ربات تلگرام استفاده می‌کند).
+    cPanel TeamKan — مدیریت cPanel/WHM از خط فرمان (همان API‌ای که ربات تلگرام استفاده می‌کند).
 
     سرورها:
       php cli.php servers
@@ -591,7 +591,7 @@ try {
 
         case 'webhook:set':
             $secret = trim((string) (getenv('WEBHOOK_SECRET') ?: ''));
-            (new TelegramApi(kanpanel_bot_token()))->setWebhook(arg($positional, 0), $secret);
+            (new TelegramApi(teamkan_bot_token()))->setWebhook(arg($positional, 0), $secret);
             echo "وبهوک تنظیم شد: {$positional[0]}\n";
             echo $secret === ''
                 ? "⚠️ WEBHOOK_SECRET در .env خالی است؛ توصیه می‌شود یک رشته‌ی تصادفی بگذارید تا فقط تلگرام بتواند به این آدرس درخواست بدهد.\n"
@@ -599,7 +599,7 @@ try {
             break;
 
         case 'webhook:delete':
-            (new TelegramApi(kanpanel_bot_token()))->deleteWebhook();
+            (new TelegramApi(teamkan_bot_token()))->deleteWebhook();
             echo "وبهوک حذف شد.\n";
             break;
 

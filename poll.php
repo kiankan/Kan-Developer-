@@ -10,7 +10,7 @@ declare(strict_types=1);
  * آدرس HTTPS عمومی برای وبهوک هست. این اسکریپت یک دور کوتاه (پیش‌فرض ۵۵ ثانیه)
  * آپدیت‌ها را می‌گیرد و تمام می‌شود، پس می‌شود با یک کران هر دقیقه‌ای صدایش زد:
  *
- *   * * * * * /usr/local/bin/php /home/user/kanpanel/poll.php >/dev/null 2>&1
+ *   * * * * * /usr/local/bin/php /home/user/teamkan/poll.php >/dev/null 2>&1
  *
  * قفل فایلی جلوی هم‌پوشانی دو اجرا را می‌گیرد و آخرین offset روی دیسک ذخیره
  * می‌شود تا پیام‌ها دوباره پردازش نشوند.
@@ -18,7 +18,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-$dataDir = getenv('KAN_DATA_DIR') ?: __DIR__ . '/data';
+$dataDir = Paths::dataDir();
 if (!is_dir($dataDir)) {
     @mkdir($dataDir, 0700, true);
 }
@@ -34,7 +34,7 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
-$token = kanpanel_bot_token();
+$token = teamkan_bot_token();
 
 $offsetPath = $dataDir . '/offset.txt';
 $offset = is_file($offsetPath) ? (int) trim((string) file_get_contents($offsetPath)) : 0;
@@ -51,7 +51,7 @@ while (time() < $deadline) {
     try {
         $updates = $api->getUpdates($offset, $pollTimeout);
     } catch (Throwable $e) {
-        error_log('kanpanel poll error: ' . $e->getMessage());
+        error_log('teamkan poll error: ' . $e->getMessage());
         break;
     }
 
@@ -66,7 +66,7 @@ while (time() < $deadline) {
                 UpdateHandler::handleCallback($api, $update['callback_query']);
             }
         } catch (Throwable $e) {
-            error_log('kanpanel poll update error: ' . $e->getMessage());
+            error_log('teamkan poll update error: ' . $e->getMessage());
         }
     }
 }

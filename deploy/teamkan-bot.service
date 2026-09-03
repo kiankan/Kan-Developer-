@@ -1,5 +1,5 @@
 [Unit]
-Description=KanPanel — cPanel/WHM manager Telegram bot
+Description=cPanel TeamKan — cPanel/WHM manager Telegram bot
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
@@ -7,9 +7,9 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/kanpanel
-EnvironmentFile=/opt/kanpanel/.env
-ExecStart=/usr/bin/php /opt/kanpanel/bot.php
+WorkingDirectory=/opt/teamkan
+EnvironmentFile=/opt/teamkan/.env
+ExecStart=/usr/bin/php /opt/teamkan/bot.php
 Restart=on-failure
 RestartSec=5
 Nice=10

@@ -14,9 +14,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../bootstrap.php';
 
-$dataDir = sys_get_temp_dir() . '/kanpanel_tests_' . getmypid();
+$dataDir = sys_get_temp_dir() . '/teamkan_tests_' . getmypid();
 @mkdir($dataDir, 0700, true);
-putenv("KAN_DATA_DIR=$dataDir");
+putenv("TEAMKAN_DATA_DIR=$dataDir");
 
 $passed = 0;
 $failed = 0;

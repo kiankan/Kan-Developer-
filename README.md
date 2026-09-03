@@ -1,4 +1,4 @@
-# KanPanel — مدیریت cPanel/WHM از تلگرام
+# cPanel TeamKan — مدیریت cPanel/WHM از تلگرام
 
 ربات تلگرامی مدیریت هاست که از طریق **API رسمی cPanel و WHM** به سرورهایتان وصل می‌شود: ایمیل، دیتابیس، دامنه، DNS، FTP، کران، SSL، نسخه‌ی PHP، بکاپ و مدیریت حساب‌های سرور — همه با منوی فارسی و **دکمه‌ی شیشه‌ای**.
 
@@ -6,12 +6,12 @@
 - بعد از نصب، **همه‌چیز از داخل خود ربات تنظیم می‌شود** — هاست‌ها، توکن‌های cPanel/WHM، ادمین‌ها، سرور فعال.
 - PHP خالص، **بدون هیچ وابستگی خارجی**. اتصال فقط با **API Token**؛ رمز حساب هیچ‌جا ذخیره نمی‌شود.
 
-> این پروژه قبلاً یک چکر Fragment/TON بود و حالا کاملاً یک ابزار مدیریت cPanel است. نصب‌های قدیمی (`kan_checker`) با اجرای دستور نصب، خودکار به `kanpanel` منتقل می‌شوند و تنظیمات و سرورهایشان حفظ می‌شود.
+> این پروژه قبلاً یک چکر Fragment/TON بود و حالا کاملاً یک ابزار مدیریت cPanel است. نصب‌های قدیمی (با نام‌های `kan_checker` یا `kanpanel`) با اجرای همان دستور نصب، خودکار به `teamkan` منتقل می‌شوند و `.env` و سرورهای ذخیره‌شده‌شان حفظ می‌شود.
 
 ## نصب (روی سرور)
 
 ```bash
-sudo bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/install.sh)
+sudo bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh)
 ```
 
 فقط توکن ربات را می‌پرسد (از [@BotFather](https://t.me/BotFather) بگیرید)، دو سرویس systemd بالا می‌آورد و در آخر یک **کد نصب** چاپ می‌کند:
@@ -27,7 +27,7 @@ sudo bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/
 بدون هیچ سوالی (مثلاً در اسکریپت):
 
 ```bash
-ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=123456:ABC... bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/install.sh)'
+ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=123456:ABC... bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh)'
 ```
 
 برای **آپدیت** همین دستور را دوباره بزنید.
@@ -35,13 +35,13 @@ ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=123456:ABC... bash <(curl -Ls https://raw
 ### مدیریت سرویس روی سرور
 
 ```
-kanpanel            منوی مدیریت
-kanpanel status     وضعیت دو سرویس + آدرس صفحه‌ی وضعیت
-kanpanel logs       لاگ زنده
-kanpanel code       نمایش کد نصب (اگر هنوز ربات را تحویل نگرفته‌اید)
-kanpanel token      تغییر توکن ربات
-kanpanel port       تغییر پورت صفحه‌ی وضعیت (پیش‌فرض 2000)
-kanpanel restart | stop | update | uninstall
+teamkan             منوی مدیریت
+teamkan status     وضعیت دو سرویس + آدرس صفحه‌ی وضعیت
+teamkan logs       لاگ زنده
+teamkan code       نمایش کد نصب (اگر هنوز ربات را تحویل نگرفته‌اید)
+teamkan token      تغییر توکن ربات
+teamkan port       تغییر پورت صفحه‌ی وضعیت (پیش‌فرض 2000)
+teamkan restart | stop | update | uninstall
 ```
 
 ## بعد از نصب، همه‌چیز از داخل ربات
@@ -92,7 +92,7 @@ kanpanel restart | stop | update | uninstall
 
 | چه چیزی | پورت | توضیح |
 | --- | --- | --- |
-| **سرویس خود ربات** | `2000` (قابل تغییر با `kanpanel port`) | صفحه‌ی وضعیت `/` و سلامت JSON `/health` |
+| **سرویس خود ربات** | `2000` (قابل تغییر با `teamkan port`) | صفحه‌ی وضعیت `/` و سلامت JSON `/health` |
 | **هاست‌هایی که مدیریت می‌کنید** | پورت خودشان | `2083` برای cPanel، `2087` برای WHM، و هرچه هاستتان داده (`2096`، `443`، ...) |
 
 پورت هر هاست را می‌توانید داخل خود آدرس بنویسید؛ ربات خودش جدایش می‌کند:
@@ -112,7 +112,7 @@ https://cp.example.com:443/   → 443
 هرچه در ربات هست، از ترمینال سرور هم در دسترس است — مفید برای اسکریپت و اتوماسیون:
 
 ```bash
-cd /opt/kanpanel
+cd /opt/teamkan
 
 php cli.php ping                      # تست اتصال و اعتبار توکن
 php cli.php summary                   # خلاصه‌ی منابع حساب
@@ -160,7 +160,7 @@ docker compose exec bot php cli.php code
 روی هاستی که پروسه‌ی دائمی نمی‌شود اجرا کرد، ربات با یک کران هر دقیقه‌ای کار می‌کند: هر اجرا حدود ۵۵ ثانیه گوش می‌دهد (`poll.php`، با قفل فایلی و ذخیره‌ی offset).
 
 ```
-* * * * * /usr/local/bin/php /home/user/kanpanel/poll.php >/dev/null 2>&1
+* * * * * /usr/local/bin/php /home/user/teamkan/poll.php >/dev/null 2>&1
 ```
 
 اگر ربات جای دیگری نصب است، همین کران را می‌توانید از داخل ربات روی آن حساب بسازید: ⚙️ سرورها → 🧩 اجرای ربات با کران روی هاست (یا `php cli.php selfhost:cron`).
@@ -173,11 +173,11 @@ docker compose exec bot php cli.php code
 <summary>systemd دستی</summary>
 
 ```bash
-sudo mkdir -p /opt/kanpanel && cd /opt/kanpanel
-sudo git clone https://github.com/kiankan/kan_checker.git .
+sudo mkdir -p /opt/teamkan && cd /opt/teamkan
+sudo git clone https://github.com/kiankan/cpanel_teamkan.git .
 sudo cp .env.example .env    # فقط TELEGRAM_BOT_TOKEN
-sudo cp deploy/kanpanel-bot.service deploy/kanpanel-web.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now kanpanel-bot kanpanel-web
+sudo cp deploy/teamkan-bot.service deploy/teamkan-web.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now teamkan-bot teamkan-web
 ```
 
 </details>
@@ -207,8 +207,8 @@ php tests/integration.php  # تست سرتاسری رابط تلگرام
 ## ساختار پروژه
 
 ```
-kanpanel              اسکریپت نصب و مدیریت سرویس روی سرور
-install.sh            نصب یک‌خطی (همان kanpanel را صدا می‌زند)
+teamkan               اسکریپت نصب و مدیریت سرویس روی سرور
+install.sh            نصب یک‌خطی (همان teamkan را صدا می‌زند)
 bot.php               اجرای ربات با long polling (سرویس اصلی)
 serve.php             صفحه‌ی وضعیت/سلامت روی پورت 2000
 poll.php              یک دور کوتاه polling برای کران هاست اشتراکی

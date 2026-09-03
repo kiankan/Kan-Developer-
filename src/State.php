@@ -89,6 +89,6 @@ final class State
 
     private static function path(): string
     {
-        return (getenv('KAN_DATA_DIR') ?: dirname(__DIR__) . '/data') . '/state.json';
+        return Paths::data('state.json');
     }
 }

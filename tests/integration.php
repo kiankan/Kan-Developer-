@@ -17,12 +17,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 
 $port = 18081 + (getmypid() % 500);
-$dataDir = sys_get_temp_dir() . '/kanpanel_it_' . getmypid();
+$dataDir = sys_get_temp_dir() . '/teamkan_it_' . getmypid();
 $logPath = $dataDir . '/telegram.log';
 @mkdir($dataDir, 0700, true);
 touch($logPath);
 
-putenv("KAN_DATA_DIR=$dataDir");
+putenv("TEAMKAN_DATA_DIR=$dataDir");
 putenv("FAKE_TG_LOG=$logPath");
 putenv("TELEGRAM_API_BASE=http://127.0.0.1:$port");
 putenv('TELEGRAM_BOT_TOKEN=test:token');

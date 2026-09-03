@@ -179,6 +179,6 @@ final class Admins
 
     private static function path(): string
     {
-        return (getenv('KAN_DATA_DIR') ?: dirname(__DIR__) . '/data') . '/admins.json';
+        return Paths::data('admins.json');
     }
 }

@@ -46,6 +46,6 @@ final class Heartbeat
 
     private static function path(): string
     {
-        return (getenv('KAN_DATA_DIR') ?: dirname(__DIR__) . '/data') . '/heartbeat.json';
+        return Paths::data('heartbeat.json');
     }
 }

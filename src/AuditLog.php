@@ -66,6 +66,6 @@ final class AuditLog
 
     private static function path(): string
     {
-        return (getenv('KAN_DATA_DIR') ?: dirname(__DIR__) . '/data') . '/audit.log';
+        return Paths::data('audit.log');
     }
 }

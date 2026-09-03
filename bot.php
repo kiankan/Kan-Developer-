@@ -5,7 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-$token = kanpanel_bot_token();
+$token = teamkan_bot_token();
 
 if (Admins::isClaimed()) {
     fwrite(STDOUT, 'دسترسی محدود به ادمین‌های: ' . implode(', ', Admins::all()) . "\n");

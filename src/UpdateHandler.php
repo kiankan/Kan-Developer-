@@ -296,7 +296,7 @@ final class UpdateHandler
                     ['/usr/local/bin/ea-php82', '/usr/local/bin/ea-php82'],
                     ['/usr/local/bin/ea-php83', '/usr/local/bin/ea-php83'],
                 ]],
-                ['key' => 'path', 'prompt' => "پوشه‌ی پروژه روی آن هاست کجاست؟ (مثل <code>/home/user/kanpanel</code>)"],
+                ['key' => 'path', 'prompt' => "پوشه‌ی پروژه روی آن هاست کجاست؟ (مثل <code>/home/user/teamkan</code>)"],
             ],
         ],
         'admin_add' => [
@@ -1680,7 +1680,7 @@ final class UpdateHandler
             $chatId,
             "🔒 این ربات هنوز تحویل گرفته نشده.\n\n"
             . "کد نصب را که موقع نصب روی سرور چاپ شد برای من بفرستید تا مالکش شوید.\n"
-            . 'اگر کد را ندارید، روی سرور بزنید: <code>kanpanel code</code>',
+            . 'اگر کد را ندارید، روی سرور بزنید: <code>teamkan code</code>',
         );
     }
 

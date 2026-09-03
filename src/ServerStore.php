@@ -284,6 +284,6 @@ final class ServerStore
 
     private static function path(): string
     {
-        return (getenv('KAN_DATA_DIR') ?: dirname(__DIR__) . '/data') . '/servers.json';
+        return Paths::data('servers.json');
     }
 }

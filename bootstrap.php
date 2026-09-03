@@ -20,14 +20,14 @@ Env::load($root . '/.env');
  * خطای مرگبار، متناسب با محیط اجرا: توی ترمینال روی STDERR، و توی وب یک
  * پاسخ 500 تمیز (چون STDERR در SAPI وب اصلاً وجود ندارد).
  */
-function kanpanel_fatal(string $message): never
+function teamkan_fatal(string $message): never
 {
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, $message . "\n");
         exit(1);
     }
 
-    error_log('kanpanel: ' . $message);
+    error_log('teamkan: ' . $message);
     if (!headers_sent()) {
         http_response_code(500);
         header('Content-Type: application/json; charset=utf-8');
@@ -36,11 +36,11 @@ function kanpanel_fatal(string $message): never
     exit;
 }
 
-function kanpanel_bot_token(): string
+function teamkan_bot_token(): string
 {
     $token = getenv('TELEGRAM_BOT_TOKEN');
     if ($token === false || trim($token) === '') {
-        kanpanel_fatal('TELEGRAM_BOT_TOKEN تنظیم نشده است (در .env یا متغیر محیطی قرار دهید).');
+        teamkan_fatal('TELEGRAM_BOT_TOKEN تنظیم نشده است (در .env یا متغیر محیطی قرار دهید).');
     }
 
     return $token;
@@ -50,7 +50,7 @@ function kanpanel_bot_token(): string
  * پردازش یک آپدیت وبهوکی. هم webhook.php (روی هاست اشتراکی) و هم سرویس
  * پورت اختصاصی (serve.php) از همین استفاده می‌کنند.
  */
-function kanpanel_handle_webhook(): void
+function teamkan_handle_webhook(): void
 {
     http_response_code(200);
 
@@ -72,7 +72,7 @@ function kanpanel_handle_webhook(): void
         return;
     }
 
-    $api = new TelegramApi(kanpanel_bot_token());
+    $api = new TelegramApi(teamkan_bot_token());
 
     try {
         Heartbeat::touch('webhook');
@@ -82,6 +82,6 @@ function kanpanel_handle_webhook(): void
             UpdateHandler::handleCallback($api, $update['callback_query']);
         }
     } catch (Throwable $e) {
-        error_log('kanpanel webhook error: ' . $e->getMessage());
+        error_log('teamkan webhook error: ' . $e->getMessage());
     }
 }

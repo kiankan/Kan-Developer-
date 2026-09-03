@@ -28,7 +28,7 @@ $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 /**
  * @return array<string, mixed>
  */
-function kanpanel_status(): array
+function teamkan_status(): array
 {
     $heartbeat = Heartbeat::read();
     $servers = [];
@@ -48,7 +48,7 @@ function kanpanel_status(): array
 
     return [
         'ok' => true,
-        'service' => 'kanpanel',
+        'service' => 'cpanel_teamkan',
         'php' => PHP_VERSION,
         'listen_port' => (int) (getenv('LISTEN_PORT') ?: 2000),
         'bot' => [
@@ -64,18 +64,18 @@ function kanpanel_status(): array
 }
 
 if ($method === 'POST' && (str_starts_with($path, '/webhook') || $path === '/')) {
-    kanpanel_handle_webhook();
+    teamkan_handle_webhook();
     exit;
 }
 
 if ($path === '/health' || $path === '/health/') {
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(kanpanel_status(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    echo json_encode(teamkan_status(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 if ($path === '/' && $method === 'GET') {
-    $status = kanpanel_status();
+    $status = teamkan_status();
     $bot = $status['bot']['alive'] ? '🟢 در حال اجرا' : '🔴 پاسخ نمی‌دهد';
     $admins = $status['bot']['claimed']
         ? '✅ تحویل گرفته شده (' . (int) $status['bot']['admins'] . ' ادمین)'
@@ -98,7 +98,7 @@ if ($path === '/' && $method === 'GET') {
         <html lang="fa" dir="rtl">
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>KanPanel</title>
+        <title>cPanel TeamKan</title>
         <style>
           body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1rem;line-height:1.9;color:#1c1c1e}
           table{border-collapse:collapse;width:100%;margin-top:.5rem}
@@ -106,7 +106,7 @@ if ($path === '/' && $method === 'GET') {
           code{background:#f2f2f7;padding:.1rem .35rem;border-radius:.25rem}
           @media (prefers-color-scheme:dark){body{background:#111;color:#eee}th,td{border-color:#333}code{background:#222}}
         </style>
-        <h1>KanPanel</h1>
+        <h1>cPanel TeamKan</h1>
         <p>مدیریت cPanel/WHM از تلگرام.</p>
         <p>ربات: <b>{$bot}</b><br>ادمین: {$admins}<br>پورت این سرویس: <code>{$status['listen_port']}</code></p>
         <h2>سرورها</h2>
