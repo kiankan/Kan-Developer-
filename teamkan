@@ -3,7 +3,7 @@
 # اسکریپت نصب و مدیریت سرویس روی سرور (root + systemd).
 #
 # نصب یا آپدیت (همین یک دستور، هر دو کار را می‌کند):
-#   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/teamkan) install
+#   curl -fsSL https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh | sudo bash
 #
 # بعد از نصب، از هر جای سرور:
 #   teamkan             منوی مدیریت
@@ -28,6 +28,23 @@ BIN_PATH="/usr/local/bin/teamkan"
 LEGACY_DIRS=("/opt/kanpanel" "/opt/kan_checker")
 LEGACY_SERVICES=("kanpanel-bot" "kanpanel-web" "kan_checker-bot" "kan_checker-web")
 LEGACY_BINS=("/usr/local/bin/kanpanel" "/usr/local/bin/kancheckerctl")
+
+# وقتی اسکریپت با لوله اجرا می‌شود (curl ... | bash)، ورودی استاندارد خودِ
+# متن اسکریپت است؛ پس سؤال‌ها را مستقیم از ترمینال می‌خوانیم. خود پرامپت روی
+# stderr چاپ می‌شود (رفتار read -p) تا با مقدار برگشتی قاطی نشود.
+ask() {
+  local prompt="$1" reply=""
+
+  # اول از خود ترمینال؛ اگر ترمینالی در کار نبود (اجرای غیرتعاملی) خواندن از
+  # /dev/tty با EOF شکست می‌خورد و می‌افتیم روی ورودی استاندارد.
+  if read -rp "$prompt" reply < /dev/tty 2>/dev/tty; then
+    printf '%s' "$reply"
+    return 0
+  fi
+
+  read -rp "$prompt" reply || true
+  printf '%s' "$reply"
+}
 
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
@@ -127,12 +144,12 @@ prompt_token() {
 
   if [ -z "$token" ]; then
     if [ -n "$current" ]; then
-      read -rp "توکن ربات از قبل تنظیم شده. برای تغییر توکن جدید را بدهید (Enter = بدون تغییر): " token
+      token=$(ask "توکن ربات از قبل تنظیم شده. برای تغییر توکن جدید را بدهید (Enter = بدون تغییر): ")
       [ -z "$token" ] && token="$current"
     else
       echo ""
       echo "یک ربات در تلگرام از @BotFather بسازید و توکنش را اینجا بگذارید."
-      read -rp "توکن ربات: " token
+      token=$(ask "توکن ربات: ")
     fi
   fi
 
@@ -326,7 +343,7 @@ do_set_port() {
   need_root
   local port current
   current=$(listen_port)
-  read -rp "پورت سرویس (الان $current): " port
+  port=$(ask "پورت سرویس (الان $current): ")
   env_set LISTEN_PORT "${port:-$current}"
   write_systemd_unit
   systemctl restart "$WEB_SERVICE_NAME" 2>/dev/null
@@ -336,7 +353,7 @@ do_set_port() {
 do_uninstall() {
   need_root
   local confirm=""
-  read -rp "مطمئنید cPanel TeamKan کاملاً حذف شود؟ (y/N): " confirm
+  confirm=$(ask "مطمئنید cPanel TeamKan کاملاً حذف شود؟ (y/N): ")
   if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
     echo "لغو شد."
     return
@@ -363,7 +380,7 @@ show_menu() {
     echo "8) تغییر پورت سرویس (الان: $(listen_port))"
     echo "9) حذف کامل"
     echo "0) خروج"
-    read -rp "انتخاب شما: " choice
+    choice=$(ask "انتخاب شما: ")
     case "$choice" in
       1) if [ -d "$INSTALL_DIR/.git" ]; then do_update; else do_install; fi ;;
       2) do_status ;;

@@ -11,8 +11,10 @@
 ## نصب (روی سرور)
 
 ```bash
-sudo bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh | sudo bash
 ```
+
+(اگر از قبل root هستید، `sudo` را بردارید.)
 
 فقط توکن ربات را می‌پرسد (از [@BotFather](https://t.me/BotFather) بگیرید)، دو سرویس systemd بالا می‌آورد و در آخر یک **کد نصب** چاپ می‌کند:
 
@@ -27,8 +29,11 @@ sudo bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/ma
 بدون هیچ سوالی (مثلاً در اسکریپت):
 
 ```bash
-ssh root@SERVER_IP 'TELEGRAM_BOT_TOKEN=123456:ABC... bash <(curl -Ls https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh)'
+ssh root@SERVER_IP 'curl -fsSL https://raw.githubusercontent.com/kiankan/cpanel_teamkan/main/install.sh | TELEGRAM_BOT_TOKEN=123456:ABC... bash'
 ```
+
+اگر با `sudo` اجرا می‌کنید، متغیر را با `env` بدهید تا به bash برسد نه به curl:
+`... | sudo env TELEGRAM_BOT_TOKEN=xxx bash`
 
 برای **آپدیت** همین دستور را دوباره بزنید.
 
