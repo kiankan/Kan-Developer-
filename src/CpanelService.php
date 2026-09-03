@@ -241,12 +241,14 @@ final class CpanelService
         if (trim($dir) !== '') {
             $params['dir'] = $dir;
         }
-        $client->uapi('SubDomain', 'addsubdomain', $params);
+        // SubDomain هم روی بعضی نسخه‌ها فقط API2 دارد.
+        self::uapiOrApi2($client, ['SubDomain', 'addsubdomain', $params], ['SubDomain', 'addsubdomain', $params]);
     }
 
     public static function deleteSubdomain(CpanelClient $client, string $fullSubdomain): void
     {
-        $client->uapi('SubDomain', 'delsubdomain', ['domain' => $fullSubdomain]);
+        $params = ['domain' => $fullSubdomain];
+        self::uapiOrApi2($client, ['SubDomain', 'delsubdomain', $params], ['SubDomain', 'delsubdomain', $params]);
     }
 
     // ----------------------------------------------------------------- FTP
@@ -294,11 +296,17 @@ final class CpanelService
     // ---------------------------------------------------------------- کران
 
     /**
+     * کران‌جاب‌ها.
+     *
+     * روی خیلی از نسخه‌های cPanel اصلاً ماژول UAPI برای Cron وجود ندارد
+     * (خطای «Failed to load module Cron») و کران فقط از API2 در دسترس است؛
+     * پس هر دو را امتحان می‌کنیم.
+     *
      * @return array<int, array{key: string, schedule: string, command: string}>
      */
     public static function cronJobs(CpanelClient $client): array
     {
-        $raw = $client->uapi('Cron', 'list_lines');
+        $raw = self::uapiOrApi2($client, ['Cron', 'list_lines'], ['Cron', 'listcron']);
         if (is_array($raw) && isset($raw['lines'])) {
             $raw = $raw['lines'];
         }
@@ -306,6 +314,10 @@ final class CpanelService
         $out = [];
         foreach (self::normalizeList($raw) as $row) {
             if (!is_array($row)) {
+                continue;
+            }
+            $command = (string) ($row['command'] ?? '');
+            if ($command === '') {
                 continue;
             }
             $schedule = trim(implode(' ', [
@@ -316,9 +328,9 @@ final class CpanelService
                 (string) ($row['weekday'] ?? '*'),
             ]));
             $out[] = [
-                'key' => (string) ($row['linekey'] ?? ($row['line'] ?? '')),
+                'key' => (string) ($row['linekey'] ?? ($row['line'] ?? ($row['count'] ?? ''))),
                 'schedule' => $schedule,
-                'command' => (string) ($row['command'] ?? ''),
+                'command' => $command,
             ];
         }
 
@@ -330,26 +342,28 @@ final class CpanelService
      */
     public static function addCron(CpanelClient $client, array $schedule, string $command): void
     {
-        $client->uapi('Cron', 'add_line', [
+        $params = [
             'command' => $command,
             'minute' => $schedule['minute'],
             'hour' => $schedule['hour'],
             'day' => $schedule['day'],
             'month' => $schedule['month'],
             'weekday' => $schedule['weekday'],
-        ]);
+        ];
+
+        self::uapiOrApi2($client, ['Cron', 'add_line', $params], ['Cron', 'add_line', $params]);
     }
 
     public static function deleteCron(CpanelClient $client, string $lineKey): void
     {
         try {
-            $client->uapi('Cron', 'remove_line', ['linekey' => $lineKey]);
+            self::uapiOrApi2($client, ['Cron', 'remove_line', ['linekey' => $lineKey]], ['Cron', 'remove_line', ['linekey' => $lineKey]]);
         } catch (CpanelError $e) {
             if ($e->kind !== CpanelError::KIND_API || !ctype_digit($lineKey)) {
                 throw $e;
             }
-            // نسخه‌های قدیمی به‌جای linekey شماره‌ی خط می‌گیرن.
-            $client->uapi('Cron', 'remove_line', ['line' => (int) $lineKey]);
+            // نسخه‌های قدیمی به‌جای linekey شماره‌ی خط می‌گیرند.
+            self::uapiOrApi2($client, ['Cron', 'remove_line', ['line' => (int) $lineKey]], ['Cron', 'remove_line', ['line' => (int) $lineKey]]);
         }
     }
 
@@ -382,12 +396,32 @@ final class CpanelService
     // ----------------------------------------------------------------- DNS
 
     /**
-     * @return array{serial: ?string, records: array<int, array{line: int, name: string, ttl: ?int, type: string, data: array<int, string>}>}
+     * رکوردهای یک زون.
+     *
+     * روی نسخه‌های جدید از UAPI DNS::parse_zone (که فیلدهایش base64 است)
+     * خوانده می‌شود، و روی نسخه‌هایی که آن ماژول را ندارند از API2
+     * ZoneEdit::fetchzone_records.
+     *
+     * @return array{serial: ?string, records: array<int, array{line: int, name: string, ttl: ?int, type: string, data: array<int, string>}>, api2: bool}
      */
     public static function dnsZone(CpanelClient $client, string $zone): array
     {
-        $raw = $client->uapi('DNS', 'parse_zone', ['zone' => $zone]);
+        try {
+            return self::parseUapiZone($client->uapi('DNS', 'parse_zone', ['zone' => $zone]));
+        } catch (CpanelError $e) {
+            if (!self::isModuleMissing($e)) {
+                throw $e;
+            }
+        }
 
+        return self::parseApi2Zone($client->api2('ZoneEdit', 'fetchzone_records', ['domain' => $zone]));
+    }
+
+    /**
+     * @return array{serial: ?string, records: array<int, array{line: int, name: string, ttl: ?int, type: string, data: array<int, string>}>, api2: bool}
+     */
+    private static function parseUapiZone(mixed $raw): array
+    {
         $records = [];
         $serial = null;
         foreach (self::normalizeList($raw) as $row) {
@@ -411,7 +445,44 @@ final class CpanelService
             ];
         }
 
-        return ['serial' => $serial, 'records' => $records];
+        return ['serial' => $serial, 'records' => $records, 'api2' => false];
+    }
+
+    /**
+     * ZoneEdit مقدار هر رکورد را در کلید مخصوص خودش می‌گذارد (address برای A،
+     * cname برای CNAME، txtdata برای TXT و ...).
+     *
+     * @return array{serial: ?string, records: array<int, array{line: int, name: string, ttl: ?int, type: string, data: array<int, string>}>, api2: bool}
+     */
+    private static function parseApi2Zone(mixed $raw): array
+    {
+        $records = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $type = strtoupper((string) ($row['type'] ?? ''));
+            if ($type === '') {
+                continue;
+            }
+
+            $data = [];
+            foreach (['preference', 'exchange', 'address', 'cname', 'txtdata', 'nsdname', 'ptrdname', 'record'] as $key) {
+                if (isset($row[$key]) && trim((string) $row[$key]) !== '') {
+                    $data[] = (string) $row[$key];
+                }
+            }
+
+            $records[] = [
+                'line' => (int) ($row['Line'] ?? ($row['line'] ?? 0)),
+                'name' => (string) ($row['name'] ?? ''),
+                'ttl' => isset($row['ttl']) ? (int) $row['ttl'] : null,
+                'type' => $type,
+                'data' => $data,
+            ];
+        }
+
+        return ['serial' => null, 'records' => $records, 'api2' => true];
     }
 
     /**
@@ -426,6 +497,14 @@ final class CpanelService
         int $ttl = 14400,
     ): void {
         $zoneData = self::dnsZone($client, $zone);
+        $type = strtoupper($type);
+
+        if ($zoneData['api2']) {
+            $client->api2('ZoneEdit', 'add_zone_record', self::api2RecordParams($zone, $name, $type, $data, $ttl));
+
+            return;
+        }
+
         if ($zoneData['serial'] === null) {
             throw CpanelError::api("سریال SOA برای زون «{$zone}» پیدا نشد؛ رکورد اضافه نشد.");
         }
@@ -436,15 +515,54 @@ final class CpanelService
             'add' => json_encode([
                 'dname' => $name,
                 'ttl' => $ttl,
-                'record_type' => strtoupper($type),
+                'record_type' => $type,
                 'data' => array_values($data),
             ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);
     }
 
+    /**
+     * @param array<int, string> $data
+     *
+     * @return array<string, mixed>
+     */
+    private static function api2RecordParams(string $zone, string $name, string $type, array $data, int $ttl): array
+    {
+        $params = ['domain' => $zone, 'name' => $name, 'type' => $type, 'ttl' => $ttl];
+        $value = implode(' ', $data);
+
+        switch ($type) {
+            case 'MX':
+                // «10 mail.example.com.» → اولویت و میزبان جدا
+                $params['preference'] = $data[0] ?? '0';
+                $params['exchange'] = $data[1] ?? '';
+                break;
+            case 'CNAME':
+                $params['cname'] = $value;
+                break;
+            case 'TXT':
+                $params['txtdata'] = $value;
+                break;
+            case 'NS':
+                $params['nsdname'] = $value;
+                break;
+            default:
+                $params['address'] = $value;
+        }
+
+        return $params;
+    }
+
     public static function deleteDnsRecord(CpanelClient $client, string $zone, int $lineIndex): void
     {
         $zoneData = self::dnsZone($client, $zone);
+
+        if ($zoneData['api2']) {
+            $client->api2('ZoneEdit', 'remove_zone_record', ['domain' => $zone, 'line' => $lineIndex]);
+
+            return;
+        }
+
         if ($zoneData['serial'] === null) {
             throw CpanelError::api("سریال SOA برای زون «{$zone}» پیدا نشد؛ رکورد حذف نشد.");
         }
@@ -807,6 +925,44 @@ final class CpanelService
         $raw = $row['diskquota'] ?? null;
 
         return is_numeric($raw) ? self::mbToBytes((float) $raw) : $raw;
+    }
+
+    /**
+     * همان کار، اول با UAPI و اگر آن نسخه‌ی cPanel ماژولش را نداشت با API2.
+     *
+     * @param array{0: string, 1: string, 2?: array<string, mixed>} $uapi
+     * @param array{0: string, 1: string, 2?: array<string, mixed>} $api2
+     */
+    private static function uapiOrApi2(CpanelClient $client, array $uapi, array $api2): mixed
+    {
+        try {
+            return $client->uapi($uapi[0], $uapi[1], $uapi[2] ?? []);
+        } catch (CpanelError $e) {
+            if (!self::isModuleMissing($e)) {
+                throw $e;
+            }
+        }
+
+        return $client->api2($api2[0], $api2[1], $api2[2] ?? []);
+    }
+
+    /**
+     * تشخیص «این ماژول روی این نسخه‌ی cPanel وجود ندارد» از بقیه‌ی خطاها —
+     * تنها حالتی که برگشتن به API2 معنی می‌دهد.
+     */
+    private static function isModuleMissing(CpanelError $e): bool
+    {
+        if ($e->kind !== CpanelError::KIND_API) {
+            return false;
+        }
+
+        foreach (['Failed to load module', "Can\'t locate", 'is not a valid module', 'does not exist', 'Undefined subroutine', 'No such module'] as $needle) {
+            if (stripos($e->getMessage(), $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

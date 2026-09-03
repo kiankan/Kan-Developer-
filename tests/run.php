@@ -407,6 +407,124 @@ check('حساب‌های WHM مرتب و نرمال می‌شوند', function (
     assertSame(true, $accounts[1]['suspended']);
 });
 
+check('نبودن ماژول Cron در UAPI، خودکار به API2 برمی‌گردد', function (): void {
+    // پیام واقعی سرورهایی که UAPI ماژول Cron ندارند.
+    $missing = json_encode(['status' => 0, 'errors' => [
+        'Failed to load module “Cron”: The system failed to load the module “Cpanel::API::Cron” because of an error: '
+        . "Can't locate Cpanel/API/Cron.pm in @INC",
+    ]]);
+    $api2 = json_encode(['cpanelresult' => ['apiversion' => 2, 'module' => 'Cron', 'func' => 'listcron',
+        'event' => ['result' => 1], 'data' => [
+            ['linekey' => 'k1', 'minute' => '*/5', 'hour' => '*', 'day' => '*', 'month' => '*', 'weekday' => '*', 'command' => '/usr/local/bin/php /home/demo/cron.php'],
+        ]]]);
+
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => (string) $missing],
+        ['body' => (string) $api2],
+    ], $captured));
+
+    $jobs = CpanelService::cronJobs($client);
+
+    assertSame(2, count($captured), 'باید اول UAPI و بعد API2 صدا زده شود');
+    assertTrue(str_contains($captured[0]['url'], '/execute/Cron/list_lines'), 'اول باید UAPI امتحان شود');
+    assertTrue(str_contains($captured[1]['url'], '/json-api/cpanel'), 'بعدش باید API2 صدا زده شود');
+    assertTrue(str_contains($captured[1]['body'], 'cpanel_jsonapi_func=listcron'), 'تابع API2 باید listcron باشد');
+    assertSame(1, count($jobs));
+    assertSame('*/5 * * * *', $jobs[0]['schedule']);
+    assertSame('k1', $jobs[0]['key']);
+});
+
+check('خطاهای عادی cPanel بی‌خود روی API2 دوباره امتحان نمی‌شوند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(
+        ['body' => '{"status":0,"errors":["You do not have permission to manage cron jobs."]}'],
+        $captured,
+    ));
+
+    $error = assertThrows(static fn () => CpanelService::cronJobs($client), CpanelError::KIND_API);
+    assertTrue(str_contains($error->getMessage(), 'permission'), 'پیام اصلی باید حفظ شود');
+    assertSame(1, count($captured), 'خطای غیرمرتبط نباید باعث تلاش دوباره شود');
+});
+
+check('افزودن کران هم روی API2 با همان پارامترها انجام می‌شود', function (): void {
+    $missing = '{"status":0,"errors":["Failed to load module “Cron”"]}';
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $missing],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{"linekey":"new"}]}}'],
+    ], $captured));
+
+    CpanelService::addCron($client, CpanelService::parseSchedule('0 3 * * *'), '/usr/local/bin/php backup.php');
+
+    $body = urldecode($captured[1]['body']);
+    assertTrue(str_contains($body, 'cpanel_jsonapi_func=add_line'), 'تابع API2 باید add_line باشد');
+    assertTrue(str_contains($body, 'minute=0') && str_contains($body, 'hour=3'), "زمان‌بندی درست ارسال نشد: {$body}");
+    assertTrue(str_contains($body, 'command=/usr/local/bin/php backup.php'), "دستور درست ارسال نشد: {$body}");
+});
+
+check('API2 وقتی event.result صفر باشد خطا می‌دهد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(
+        ['body' => '{"cpanelresult":{"event":{"result":0,"reason":"Sorry, you do not have access"},"data":[]}}'],
+        $captured,
+    ));
+    $error = assertThrows(static fn () => $client->api2('Cron', 'listcron'), CpanelError::KIND_API);
+    assertTrue(str_contains($error->getMessage(), 'do not have access'), 'دلیل خطای API2 باید منتقل شود');
+});
+
+check('زون DNS روی نسخه‌های بدون UAPI از ZoneEdit خوانده می‌شود', function (): void {
+    $missing = '{"status":0,"errors":["Failed to load module “DNS”"]}';
+    $api2 = json_encode(['cpanelresult' => ['event' => ['result' => 1], 'data' => [
+        ['Line' => 12, 'name' => 'example.com.', 'type' => 'A', 'ttl' => 14400, 'address' => '203.0.113.10'],
+        ['Line' => 15, 'name' => 'mail.example.com.', 'type' => 'MX', 'ttl' => 14400, 'preference' => 10, 'exchange' => 'mail.example.com.'],
+        ['Line' => 18, 'name' => 'example.com.', 'type' => 'TXT', 'ttl' => 300, 'txtdata' => 'v=spf1 -all'],
+    ]]]);
+
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $missing],
+        ['body' => (string) $api2],
+    ], $captured));
+
+    $zone = CpanelService::dnsZone($client, 'example.com');
+
+    assertTrue($zone['api2'], 'باید مسیر API2 استفاده شود');
+    assertSame(3, count($zone['records']));
+    assertSame(['203.0.113.10'], $zone['records'][0]['data']);
+    assertSame(['10', 'mail.example.com.'], $zone['records'][1]['data'], 'MX باید اولویت و میزبان را با هم بدهد');
+    assertSame(18, $zone['records'][2]['line']);
+});
+
+check('افزودن رکورد روی مسیر API2 فیلد درست هر نوع را می‌فرستد', function (): void {
+    $missing = '{"status":0,"errors":["Failed to load module “DNS”"]}';
+    $zone = '{"cpanelresult":{"event":{"result":1},"data":[]}}';
+    $added = '{"cpanelresult":{"event":{"result":1},"data":[{"result":{"status":1}}]}}';
+
+    $cases = [
+        ['A', ['203.0.113.10'], 'address=203.0.113.10'],
+        ['CNAME', ['target.example.com.'], 'cname=target.example.com.'],
+        ['TXT', ['v=spf1', '-all'], 'txtdata=v=spf1 -all'],
+        ['MX', ['10', 'mail.example.com.'], 'preference=10'],
+    ];
+
+    foreach ($cases as [$type, $data, $expected]) {
+        $captured = [];
+        $client = new CpanelClient(cpanelServer(), fakeTransport([
+            ['body' => $missing],
+            ['body' => $zone],
+            ['body' => $added],
+        ], $captured));
+
+        CpanelService::addDnsRecord($client, 'example.com', 'www', $type, $data, 300);
+
+        $body = urldecode($captured[2]['body']);
+        assertTrue(str_contains($body, 'cpanel_jsonapi_func=add_zone_record'), 'باید add_zone_record صدا زده شود');
+        assertTrue(str_contains($body, $expected), "برای {$type} انتظار «{$expected}» داشتیم: {$body}");
+        assertTrue(str_contains($body, 'ttl=300'), 'TTL باید ارسال شود');
+    }
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {
@@ -498,6 +616,13 @@ check('خروجی متنی CLI بدون تگ HTML است', function (): void {
     $plain = Render::toPlain($html);
     assertTrue(!str_contains($plain, '<'), 'تگ HTML نباید باقی بماند');
     assertTrue(!str_contains($plain, 'ABCDEFGHIJKL'), 'توکن کامل نباید نمایش داده شود');
+});
+
+check('خطای «ماژول نیست» به زبان آدمیزاد ترجمه می‌شود', function (): void {
+    $raw = CpanelError::api('cPanel دستور «SSL::installed_hosts» را رد کرد: Failed to load module “SSL”');
+    $text = Render::toPlain(Render::error($raw));
+    assertTrue(str_contains($text, 'در دسترس نیست'), 'باید توضیح فارسی داده شود');
+    assertTrue(!str_contains($text, 'Failed to load module'), 'پیام خام پرل نباید به کاربر نشان داده شود');
 });
 
 check('پیام خطا برای توکن نامعتبر راهنمای ساخت توکن دارد', function (): void {

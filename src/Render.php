@@ -316,6 +316,15 @@ final class Render
     public static function error(Throwable $error): string
     {
         $hint = '';
+
+        // بعضی نسخه‌های cPanel ماژول موردنیاز را ندارند؛ پیام خام پرل برای
+        // کاربر بی‌معنی است، پس ترجمه‌اش می‌کنیم.
+        if (stripos($error->getMessage(), 'Failed to load module') !== false
+            || stripos($error->getMessage(), "Can't locate") !== false) {
+            return '⚠️ این قابلیت روی نسخه‌ی cPanel این هاست در دسترس نیست (ماژول موردنیازش روی سرور نصب نشده).'
+                . "\n\n💡 اگر فکر می‌کنید باید فعال باشد، از پشتیبانی هاست بخواهید ماژول مربوطه را فعال کند.";
+        }
+
         if ($error instanceof CpanelError) {
             $hint = match ($error->kind) {
                 CpanelError::KIND_AUTH => "\n\n💡 توکن را در cPanel از مسیر Security → Manage API Tokens (و در WHM از Development → Manage API Tokens) بسازید و مطمئن شوید نام کاربری دقیقاً همان حساب است.",

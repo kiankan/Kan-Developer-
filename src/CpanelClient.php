@@ -238,8 +238,14 @@ final class CpanelClient
         // به یک ساختار واحد UAPI برمی‌گردونیم.
         if (isset($decoded['cpanelresult']) && is_array($decoded['cpanelresult'])) {
             $envelope = $decoded['cpanelresult'];
-            if (isset($envelope['error'])) {
+            if (self::str($envelope['error'] ?? '') !== '') {
                 throw CpanelError::api("cPanel دستور «{$label}» را رد کرد: " . self::str($envelope['error']));
+            }
+            // API2 نتیجه را در event.result می‌گذارد، نه در status.
+            $event = is_array($envelope['event'] ?? null) ? $envelope['event'] : [];
+            if (isset($event['result']) && (int) $event['result'] !== 1) {
+                $reason = self::str($event['reason'] ?? '') ?: 'دلیلی برنگشت';
+                throw CpanelError::api("cPanel دستور «{$label}» را رد کرد: {$reason}");
             }
             if (isset($envelope['result']) && is_array($envelope['result'])) {
                 return $this->unwrapUapi($envelope['result'], $label);
