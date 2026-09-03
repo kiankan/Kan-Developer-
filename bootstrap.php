@@ -6,20 +6,14 @@ date_default_timezone_set('UTC');
 
 $root = __DIR__;
 
-require_once $root . '/src/Env.php';
-require_once $root . '/src/Format.php';
-require_once $root . '/src/FragmentClient.php';
-require_once $root . '/src/GiftClient.php';
-require_once $root . '/src/TonClient.php';
-require_once $root . '/src/WalletClient.php';
-require_once $root . '/src/CurrencyClient.php';
-require_once $root . '/src/Render.php';
-require_once $root . '/src/TelegramApi.php';
-require_once $root . '/src/TextStore.php';
-require_once $root . '/src/EditState.php';
-require_once $root . '/src/Settings.php';
-require_once $root . '/src/UpdateHandler.php';
+spl_autoload_register(static function (string $class) use ($root): void {
+    $path = $root . '/src/' . $class . '.php';
+    if (is_file($path)) {
+        require_once $path;
+    }
+});
 
+require_once $root . '/src/Env.php';
 Env::load($root . '/.env');
 
 function kanchecker_bot_token(): string
@@ -33,16 +27,28 @@ function kanchecker_bot_token(): string
     return $token;
 }
 
-function kanchecker_admin_id(): ?int
+/**
+ * آیدی‌های مجاز؛ هم ADMIN_ID تکی (سازگاری با نصب‌های قبلی) و هم ADMIN_IDS
+ * چندتایی جدا شده با کاما پشتیبانی می‌شن.
+ *
+ * @return array<int, int>
+ */
+function kanchecker_admin_ids(): array
 {
-    $raw = getenv('ADMIN_ID');
-    if ($raw === false || trim((string) $raw) === '') {
-        return null;
-    }
-    if (!ctype_digit(trim((string) $raw))) {
-        fwrite(STDERR, "ADMIN_ID باید یک عدد باشد، مقدار فعلی نامعتبر است: $raw\n");
-        exit(1);
+    $raw = trim((string) (getenv('ADMIN_IDS') ?: '')) . ',' . trim((string) (getenv('ADMIN_ID') ?: ''));
+
+    $ids = [];
+    foreach (explode(',', $raw) as $part) {
+        $part = trim($part);
+        if ($part === '') {
+            continue;
+        }
+        if (!ctype_digit($part)) {
+            fwrite(STDERR, "آیدی ادمین باید عدد باشد، مقدار نامعتبر: $part\n");
+            exit(1);
+        }
+        $ids[] = (int) $part;
     }
 
-    return (int) $raw;
+    return array_values(array_unique($ids));
 }

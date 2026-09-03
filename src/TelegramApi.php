@@ -57,6 +57,19 @@ final class TelegramApi
         $this->call('sendMessage', $params);
     }
 
+    /**
+     * پیام HTML که اگه از سقف ۴۰۹۶ کاراکتری تلگرام بلندتر باشه، خودکار تکه
+     * می‌شه؛ کیبورد فقط به آخرین تکه می‌چسبه.
+     */
+    public function sendHtml(int $chatId, string $html, ?array $replyMarkup = null): void
+    {
+        $chunks = Render::chunks($html);
+        $last = count($chunks) - 1;
+        foreach ($chunks as $index => $chunk) {
+            $this->sendMessage($chatId, $chunk, $index === $last ? $replyMarkup : null, 'HTML');
+        }
+    }
+
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
         try {
@@ -76,6 +89,19 @@ final class TelegramApi
             $this->call('sendChatAction', ['chat_id' => $chatId, 'action' => $action]);
         } catch (Throwable) {
             // فقط برای UX است، نبودش مهم نیست
+        }
+    }
+
+    /**
+     * پیام‌های حاوی رمز عبور بعد از استفاده از چت پاک می‌شن (تلگرام تا ۴۸
+     * ساعت اجازه‌ی حذف می‌ده) تا رمز توی تاریخچه‌ی گفت‌وگو نمونه.
+     */
+    public function deleteMessage(int $chatId, int $messageId): void
+    {
+        try {
+            $this->call('deleteMessage', ['chat_id' => $chatId, 'message_id' => $messageId]);
+        } catch (Throwable) {
+            // اگه نشد (پیام قدیمی یا دسترسی نبود) مهم نیست.
         }
     }
 

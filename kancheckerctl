@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# منوی مدیریت kan_checker روی سرور (systemd، PHP)، به‌همراه دستورهای مستقیم.
+# منوی مدیریت kan_checker روی سرور (systemd، PHP) — ربات مدیریت cPanel/WHM.
 #
-# نصب اولیه، تعاملی (توکن و آیدی ادمین رو می‌پرسه):
+# نصب اولیه، تعاملی (توکن ربات، آیدی ادمین و اتصال cPanel را می‌پرسد):
 #   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
 #
 # یا کاملا خودکار روی SSH بدون هیچ سوالی:
 #   TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123456789 \
+#     CPANEL_HOST=server.example.com CPANEL_USER=cpuser CPANEL_TOKEN=xxxx \
 #     bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kancheckerctl) install
 #
 # بعد از نصب، از هر جای سرور کافیه بنویسید:
 #   kancheckerctl            # منو رو باز می‌کند
-#   kancheckerctl update     # آپدیت مستقیم (و در صورت نیاز مهاجرت خودکار نسخه‌ی قدیمی پایتون به PHP)
-#   kancheckerctl status     # وضعیت مستقیم
+#   kancheckerctl update     # آپدیت مستقیم
+#   kancheckerctl cpanel     # تنظیم/تغییر اتصال cPanel/WHM
+#   kancheckerctl ping       # تست اتصال به cPanel
 #   و ...
 
 set -uo pipefail
@@ -51,7 +53,7 @@ install_deps_os() {
   fi
 }
 
-# اگر نصب قبلی پایتون (نسخه‌ی قدیمی این پروژه) باقی مانده باشه پاکش می‌کنه.
+# اگر نصب قبلی پایتون (نسخه‌ی خیلی قدیمی این پروژه) باقی مانده باشه پاکش می‌کنه.
 cleanup_legacy_python() {
   if [ -d "$INSTALL_DIR/.venv" ]; then
     echo "نصب قدیمی پایتون پیدا شد؛ در حال مهاجرت به PHP ..."
@@ -59,18 +61,33 @@ cleanup_legacy_python() {
   fi
 }
 
-prompt_config() {
-  local current_token="" current_admin=""
-  if [ -f "$ENV_FILE" ]; then
-    current_token=$(grep '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
-    current_admin=$(grep '^ADMIN_ID=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
-  fi
+# فایل .env کلید‌به‌کلید به‌روزرسانی می‌شه تا تنظیمات دیگه (مثلا WHM) موقع
+# عوض‌کردن توکن ربات از بین نرن.
+env_get() {
+  [ -f "$ENV_FILE" ] || return 0
+  grep "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+}
 
-  # اگر از قبل به‌صورت متغیر محیطی داده شده باشن (مثلا برای نصب کاملا خودکار روی
-  # سرور از طریق SSH)، هیچ سوالی پرسیده نمی‌شه:
-  #   TELEGRAM_BOT_TOKEN=xxx ADMIN_ID=123 kancheckerctl install
-  local token="${TELEGRAM_BOT_TOKEN:-}"
-  local admin="${ADMIN_ID:-}"
+env_set() {
+  local key="$1" value="$2"
+  mkdir -p "$(dirname "$ENV_FILE")"
+  touch "$ENV_FILE"
+  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" && mv -f "${ENV_FILE}.tmp" "$ENV_FILE"
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+}
+
+prompt_telegram() {
+  local current_token current_admin token admin
+  current_token=$(env_get TELEGRAM_BOT_TOKEN)
+  current_admin=$(env_get ADMIN_ID)
+
+  # اگر از قبل به‌صورت متغیر محیطی داده شده باشن (نصب کاملا خودکار روی SSH)،
+  # هیچ سوالی پرسیده نمی‌شه.
+  token="${TELEGRAM_BOT_TOKEN:-}"
+  admin="${ADMIN_ID:-}"
 
   if [ -z "$token" ]; then
     if [ -n "$current_token" ]; then
@@ -90,16 +107,68 @@ prompt_config() {
     fi
   fi
 
-  {
-    echo "TELEGRAM_BOT_TOKEN=$token"
-    echo "ADMIN_ID=$admin"
-  } > "$ENV_FILE"
+  env_set TELEGRAM_BOT_TOKEN "$token"
+  env_set ADMIN_ID "$admin"
+}
+
+prompt_cpanel() {
+  local current_host current_user current_token host user token port
+
+  current_host=$(env_get CPANEL_HOST)
+  current_user=$(env_get CPANEL_USER)
+  current_token=$(env_get CPANEL_TOKEN)
+
+  host="${CPANEL_HOST:-}"
+  user="${CPANEL_USER:-}"
+  token="${CPANEL_TOKEN:-}"
+  port="${CPANEL_PORT:-}"
+
+  # اگر هیچ‌کدام از متغیرهای محیطی داده نشده و قبلا هم چیزی ذخیره نشده،
+  # می‌پرسیم؛ رد کردنش هم اشکالی ندارد چون بعداً از داخل خود ربات هم می‌شود
+  # سرور اضافه کرد.
+  if [ -z "$host" ] && [ -z "$user" ] && [ -z "$token" ]; then
+    if [ -n "$current_host" ]; then
+      echo "اتصال cPanel از قبل تنظیم شده: $current_user@$current_host"
+      local change=""
+      read -rp "می‌خواهید عوضش کنید؟ (y/N): " change
+      if [ "$change" != "y" ] && [ "$change" != "Y" ]; then
+        return
+      fi
+    fi
+    echo ""
+    echo "— اتصال به cPanel (می‌توانید با Enter رد کنید و بعداً از داخل ربات اضافه کنید) —"
+    echo "  توکن را از cPanel → Security → Manage API Tokens بسازید."
+    read -rp "آدرس سرور (مثل server.example.com): " host
+    [ -z "$host" ] && { echo "تنظیم cPanel رد شد."; return; }
+    read -rp "نام کاربری cPanel: " user
+    read -rp "API Token: " token
+    read -rp "پورت (Enter = 2083): " port
+  fi
+
+  [ -z "$host" ] && return
+  env_set CPANEL_HOST "$host"
+  env_set CPANEL_USER "$user"
+  env_set CPANEL_TOKEN "$token"
+  env_set CPANEL_PORT "${port:-2083}"
+
+  # WHM اختیاریه؛ فقط وقتی متغیرهاش داده شده باشن نوشته می‌شه.
+  if [ -n "${WHM_HOST:-}" ]; then
+    env_set WHM_HOST "$WHM_HOST"
+    env_set WHM_USER "${WHM_USER:-root}"
+    env_set WHM_TOKEN "${WHM_TOKEN:-}"
+    env_set WHM_PORT "${WHM_PORT:-2087}"
+  fi
+}
+
+prompt_config() {
+  prompt_telegram
+  prompt_cpanel
 }
 
 write_systemd_unit() {
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=kan_checker Telegram bot
+Description=kan_checker — cPanel/WHM manager Telegram bot
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
@@ -137,31 +206,42 @@ self_link() {
   fi
 }
 
+# داده‌های ربات (سرورهای اضافه‌شده و لاگ عملیات) توکن دارن، پس دسترسی‌شون
+# محدود می‌شه.
+secure_data_dir() {
+  mkdir -p "$INSTALL_DIR/data"
+  chmod 700 "$INSTALL_DIR/data"
+  [ -f "$ENV_FILE" ] && chmod 600 "$ENV_FILE"
+}
+
 do_install() {
   need_root
-  echo "== نصب kan_checker روی سرور (PHP) =="
+  echo "== نصب kan_checker (ربات مدیریت cPanel) روی سرور =="
   install_deps_os
   ensure_repo
   cleanup_legacy_python
   prompt_config
+  secure_data_dir
   write_systemd_unit
   self_link
   systemctl enable --now "$SERVICE_NAME"
   echo ""
   echo "نصب کامل شد و سرویس در حال اجراست."
+  echo "برای تست اتصال به cPanel:  kancheckerctl ping"
   echo "از این به بعد کافیه بنویسید: kancheckerctl"
 }
 
 # مرحله‌ی نهایی آپدیت؛ همیشه با نسخه‌ی تازه pull‌شده‌ی خود اسکریپت اجرا می‌شه
-# (بعد از self_link)، تا مهاجرت‌هایی مثل پایتون -> PHP همیشه با آخرین منطق انجام بشه.
+# (بعد از self_link)، تا مهاجرت‌ها همیشه با آخرین منطق انجام بشن.
 do_finish_update() {
   need_root
   install_deps_os
   cleanup_legacy_python
+  secure_data_dir
   write_systemd_unit
   systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
   systemctl restart "$SERVICE_NAME"
-  echo "آپدیت انجام شد و سرویس با آخرین نسخه (PHP) ری‌استارت شد."
+  echo "آپدیت انجام شد و سرویس با آخرین نسخه ری‌استارت شد."
 }
 
 do_update() {
@@ -173,9 +253,6 @@ do_update() {
   echo "== به‌روزرسانی kan_checker =="
   ensure_repo
   self_link
-  # با باینری تازه self-link‌شده ادامه می‌دیم تا همیشه آخرین منطق مهاجرت اجرا بشه.
-  # اگه از نسخه‌ی خیلی قدیمی (قبل از این قابلیت) آپدیت می‌کنید، همین دستور را
-  # یک بار دیگر هم بزنید تا مهاجرت کامل شود.
   exec "$BIN_PATH" _finish-update
 }
 
@@ -187,10 +264,31 @@ do_logs()    { journalctl -u "$SERVICE_NAME" -f -n 100; }
 
 do_set_token() {
   need_root
-  prompt_config
+  prompt_telegram
   systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
   systemctl restart "$SERVICE_NAME" 2>/dev/null
   echo "توکن/آیدی ادمین به‌روز شد و سرویس ری‌استارت شد."
+}
+
+do_set_cpanel() {
+  need_root
+  prompt_cpanel
+  systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
+  systemctl restart "$SERVICE_NAME" 2>/dev/null
+  echo "اتصال cPanel به‌روز شد و سرویس ری‌استارت شد."
+  do_ping
+}
+
+do_ping() {
+  if [ ! -f "$INSTALL_DIR/cli.php" ]; then
+    echo "هنوز نصب نشده."
+    return 1
+  fi
+  ( cd "$INSTALL_DIR" && php cli.php ping )
+}
+
+do_servers() {
+  ( cd "$INSTALL_DIR" && php cli.php servers )
 }
 
 do_uninstall() {
@@ -211,7 +309,7 @@ do_uninstall() {
 show_menu() {
   while true; do
     echo ""
-    echo "==== kan_checker — منوی مدیریت سرور ===="
+    echo "==== kan_checker — مدیریت cPanel از تلگرام ===="
     echo "1) نصب"
     echo "2) آپدیت"
     echo "3) شروع سرویس"
@@ -219,8 +317,11 @@ show_menu() {
     echo "5) ری‌استارت سرویس"
     echo "6) وضعیت سرویس"
     echo "7) نمایش لاگ (زنده، خروج با Ctrl+C)"
-    echo "8) تنظیم/تغییر توکن و آیدی ادمین"
-    echo "9) حذف کامل"
+    echo "8) تنظیم/تغییر توکن ربات و آیدی ادمین"
+    echo "9) تنظیم/تغییر اتصال cPanel یا WHM"
+    echo "10) تست اتصال به cPanel"
+    echo "11) لیست سرورهای تعریف‌شده"
+    echo "12) حذف کامل"
     echo "0) خروج"
     read -rp "انتخاب شما: " choice
     case "$choice" in
@@ -232,7 +333,10 @@ show_menu() {
       6) do_status ;;
       7) do_logs ;;
       8) do_set_token ;;
-      9) do_uninstall ;;
+      9) do_set_cpanel ;;
+      10) do_ping ;;
+      11) do_servers ;;
+      12) do_uninstall ;;
       0) exit 0 ;;
       *) echo "گزینه نامعتبر است." ;;
     esac
@@ -250,11 +354,14 @@ case "$cmd" in
   status)           do_status ;;
   logs)             do_logs ;;
   set-token|token)  do_set_token ;;
+  cpanel|set-cpanel) do_set_cpanel ;;
+  ping|test)        do_ping ;;
+  servers)          do_servers ;;
   uninstall|remove) do_uninstall ;;
   menu|"")          show_menu ;;
   *)
     echo "دستور نامعتبر: $cmd"
-    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, set-token, uninstall, menu"
+    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, set-token, cpanel, ping, servers, uninstall, menu"
     exit 1
     ;;
 esac

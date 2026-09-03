@@ -1,5 +1,5 @@
 [Unit]
-Description=kan_checker Telegram bot
+Description=kan_checker — cPanel/WHM manager Telegram bot
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60

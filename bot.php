@@ -6,12 +6,19 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 
 $token = kanchecker_bot_token();
-$adminId = kanchecker_admin_id();
+$adminIds = kanchecker_admin_ids();
 
-if ($adminId !== null) {
-    fwrite(STDOUT, "دسترسی محدود به ADMIN_ID=$adminId شد.\n");
+if ($adminIds !== []) {
+    fwrite(STDOUT, 'دسترسی محدود به ' . implode(', ', $adminIds) . " شد.\n");
 } else {
-    fwrite(STDOUT, "هشدار: ADMIN_ID تنظیم نشده — ربات به پیام هر کاربری در تلگرام پاسخ می‌دهد.\n");
+    fwrite(STDOUT, "هشدار: ADMIN_ID تنظیم نشده — ربات تا تنظیم‌شدن آن هیچ دستوری را اجرا نمی‌کند.\n");
+}
+
+$server = ServerStore::active();
+if ($server === null) {
+    fwrite(STDOUT, "هشدار: هیچ سرور cPanel/WHM تنظیم نشده — از داخل ربات («⚙️ سرورها») یکی اضافه کنید.\n");
+} else {
+    fwrite(STDOUT, 'سرور فعال: ' . $server['label'] . ' (' . $server['type'] . ")\n");
 }
 
 $api = new TelegramApi($token);
@@ -33,9 +40,9 @@ while (true) {
         $offset = $update['update_id'] + 1;
         try {
             if (isset($update['message'])) {
-                UpdateHandler::handle($api, $update['message'], $adminId);
+                UpdateHandler::handle($api, $update['message'], $adminIds);
             } elseif (isset($update['callback_query'])) {
-                UpdateHandler::handleCallback($api, $update['callback_query'], $adminId);
+                UpdateHandler::handleCallback($api, $update['callback_query'], $adminIds);
             }
         } catch (Throwable $e) {
             fwrite(STDERR, 'خطا در پردازش آپدیت: ' . $e->getMessage() . "\n");
