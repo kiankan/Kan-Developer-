@@ -1,0 +1,395 @@
+#!/usr/bin/env bash
+# KanPanel — مدیریت cPanel/WHM از تلگرام.
+# اسکریپت نصب و مدیریت سرویس روی سرور (root + systemd).
+#
+# نصب یا آپدیت (همین یک دستور، هر دو کار را می‌کند):
+#   bash <(curl -Ls https://raw.githubusercontent.com/kiankan/kan_checker/main/kanpanel) install
+#
+# بعد از نصب، از هر جای سرور:
+#   kanpanel            منوی مدیریت
+#   kanpanel code       نمایش کد نصب (برای تحویل‌گرفتن ربات در تلگرام)
+#   kanpanel status     وضعیت سرویس‌ها
+#   kanpanel logs       لاگ زنده
+#
+# تنها چیزی که این اسکریپت می‌پرسد توکن ربات است؛ بقیه‌ی تنظیمات
+# (سرورهای cPanel/WHM، ادمین‌ها و ...) از داخل خود ربات انجام می‌شود.
+
+set -uo pipefail
+
+REPO_URL="${KANPANEL_REPO:-https://github.com/kiankan/kan_checker.git}"
+INSTALL_DIR="/opt/kanpanel"
+SERVICE_NAME="kanpanel-bot"
+WEB_SERVICE_NAME="kanpanel-web"
+DEFAULT_LISTEN_PORT=2000
+ENV_FILE="$INSTALL_DIR/.env"
+BIN_PATH="/usr/local/bin/kanpanel"
+
+# نصب‌های قدیمی با نام kan_checker
+LEGACY_DIR="/opt/kan_checker"
+LEGACY_SERVICES=("kan_checker-bot" "kan_checker-web")
+LEGACY_BIN="/usr/local/bin/kancheckerctl"
+
+need_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "این عملیات نیاز به دسترسی root دارد. با sudo اجرا کنید."
+    exit 1
+  fi
+}
+
+php_bin() { command -v php || echo /usr/bin/php; }
+
+install_deps_os() {
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y
+    apt-get install -y php-cli php-curl php-mbstring git curl
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y php-cli php-curl php-mbstring git curl
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y php-cli php-curl php-mbstring git curl
+  else
+    echo "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد؛ php-cli (با curl و mbstring) و git را خودتان نصب کنید."
+  fi
+}
+
+# نصب قدیمی (kan_checker) را به نام جدید منتقل می‌کند تا تنظیمات و سرورهای
+# ذخیره‌شده از دست نروند.
+migrate_legacy() {
+  local moved=0
+
+  for unit in "${LEGACY_SERVICES[@]}"; do
+    if [ -f "/etc/systemd/system/${unit}.service" ]; then
+      systemctl disable --now "$unit" 2>/dev/null
+      rm -f "/etc/systemd/system/${unit}.service"
+      moved=1
+    fi
+  done
+
+  if [ -d "$LEGACY_DIR" ] && [ ! -d "$INSTALL_DIR" ]; then
+    echo "نصب قدیمی (kan_checker) پیدا شد؛ در حال انتقال به $INSTALL_DIR ..."
+    mv "$LEGACY_DIR" "$INSTALL_DIR"
+    moved=1
+  elif [ -d "$LEGACY_DIR" ] && [ -d "$INSTALL_DIR" ]; then
+    # هر دو هستند: تنظیمات و داده‌های قدیمی را می‌بریم، بقیه‌اش دور ریخته می‌شود.
+    [ -f "$LEGACY_DIR/.env" ] && [ ! -f "$ENV_FILE" ] && cp "$LEGACY_DIR/.env" "$ENV_FILE"
+    [ -d "$LEGACY_DIR/data" ] && [ ! -d "$INSTALL_DIR/data" ] && cp -r "$LEGACY_DIR/data" "$INSTALL_DIR/data"
+    rm -rf "$LEGACY_DIR"
+    moved=1
+  fi
+
+  rm -f "$LEGACY_BIN"
+  [ "$moved" -eq 1 ] && systemctl daemon-reload
+  return 0
+}
+
+ensure_repo() {
+  if [ -d "$INSTALL_DIR/.git" ]; then
+    git -C "$INSTALL_DIR" pull --ff-only
+  else
+    mkdir -p "$INSTALL_DIR"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+}
+
+env_get() {
+  [ -f "$ENV_FILE" ] || return 0
+  grep "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+env_set() {
+  local key="$1" value="$2"
+  mkdir -p "$(dirname "$ENV_FILE")"
+  touch "$ENV_FILE"
+  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" && mv -f "${ENV_FILE}.tmp" "$ENV_FILE"
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+}
+
+listen_port() {
+  local port
+  port=$(env_get LISTEN_PORT)
+  echo "${port:-$DEFAULT_LISTEN_PORT}"
+}
+
+# تنها سؤال نصب: توکن ربات.
+prompt_token() {
+  local current token
+  current=$(env_get TELEGRAM_BOT_TOKEN)
+  token="${TELEGRAM_BOT_TOKEN:-}"
+
+  if [ -z "$token" ]; then
+    if [ -n "$current" ]; then
+      read -rp "توکن ربات از قبل تنظیم شده. برای تغییر توکن جدید را بدهید (Enter = بدون تغییر): " token
+      [ -z "$token" ] && token="$current"
+    else
+      echo ""
+      echo "یک ربات در تلگرام از @BotFather بسازید و توکنش را اینجا بگذارید."
+      read -rp "توکن ربات: " token
+    fi
+  fi
+
+  if [ -z "$token" ]; then
+    echo "بدون توکن ربات نمی‌شود ادامه داد."
+    exit 1
+  fi
+
+  env_set TELEGRAM_BOT_TOKEN "$token"
+  [ -z "$(env_get LISTEN_PORT)" ] && env_set LISTEN_PORT "${LISTEN_PORT:-$DEFAULT_LISTEN_PORT}"
+  return 0
+}
+
+write_systemd_unit() {
+  local php port
+  php=$(php_bin)
+  port=$(listen_port)
+
+  cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=KanPanel — cPanel/WHM manager Telegram bot
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$php $INSTALL_DIR/bot.php
+Restart=on-failure
+RestartSec=5
+Nice=10
+CPUQuota=25%
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat > "/etc/systemd/system/${WEB_SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=KanPanel — status page on port $port
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$php -S 0.0.0.0:$port -t $INSTALL_DIR $INSTALL_DIR/serve.php
+Restart=on-failure
+RestartSec=5
+Nice=10
+CPUQuota=15%
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+}
+
+self_link() {
+  # هرگز مستقیم روی $BIN_PATH بازنویسی نکن: اگر همین فایل در حال اجرا باشد،
+  # bash وسط خواندنش به محتوای جدید می‌پرد و با syntax error می‌افتد. فایل موقت
+  # + mv (اتمیک) اینود قدیمی را دست‌نخورده نگه می‌دارد.
+  if [ -f "$INSTALL_DIR/kanpanel" ]; then
+    local tmp
+    tmp=$(mktemp "${BIN_PATH}.XXXXXX")
+    cp "$INSTALL_DIR/kanpanel" "$tmp"
+    chmod +x "$tmp"
+    mv -f "$tmp" "$BIN_PATH"
+  fi
+}
+
+secure_data_dir() {
+  mkdir -p "$INSTALL_DIR/data"
+  chmod 700 "$INSTALL_DIR/data"
+  [ -f "$ENV_FILE" ] && chmod 600 "$ENV_FILE"
+  return 0
+}
+
+claim_code() {
+  ( cd "$INSTALL_DIR" && "$(php_bin)" cli.php code 2>/dev/null )
+}
+
+do_install() {
+  need_root
+  echo "== نصب KanPanel — ربات مدیریت cPanel =="
+  install_deps_os
+  migrate_legacy
+  ensure_repo
+  prompt_token
+  secure_data_dir
+  write_systemd_unit
+  self_link
+  systemctl enable --now "$SERVICE_NAME" "$WEB_SERVICE_NAME"
+  sleep 1
+
+  echo ""
+  echo "✅ نصب کامل شد."
+  echo ""
+  claim_code
+  echo ""
+  echo "بعدش همه‌چیز (سرورهای cPanel/WHM، ادمین‌ها و ...) از داخل خود ربات تنظیم می‌شود."
+  echo "مدیریت سرویس با دستور: kanpanel"
+}
+
+do_update() {
+  need_root
+  if [ ! -d "$INSTALL_DIR/.git" ] && [ ! -d "$LEGACY_DIR/.git" ]; then
+    echo "هنوز نصب نشده. اول «نصب» را بزنید."
+    return 1
+  fi
+  echo "== به‌روزرسانی KanPanel =="
+  migrate_legacy
+  ensure_repo
+  self_link
+  exec "$BIN_PATH" _finish-update
+}
+
+do_finish_update() {
+  need_root
+  install_deps_os
+  secure_data_dir
+  write_systemd_unit
+  for unit in "$SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+    systemctl reset-failed "$unit" 2>/dev/null
+    systemctl enable "$unit" >/dev/null 2>&1
+    systemctl restart "$unit"
+  done
+  echo "آپدیت انجام شد و سرویس‌ها با آخرین نسخه بالا آمدند."
+}
+
+do_start() {
+  need_root
+  for unit in "$SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+    systemctl reset-failed "$unit" 2>/dev/null
+    systemctl start "$unit"
+  done
+  echo "سرویس‌ها استارت شدند."
+}
+
+do_stop() {
+  need_root
+  systemctl stop "$SERVICE_NAME" "$WEB_SERVICE_NAME" 2>/dev/null
+  echo "سرویس‌ها متوقف شدند."
+}
+
+do_restart() {
+  need_root
+  for unit in "$SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+    systemctl reset-failed "$unit" 2>/dev/null
+    systemctl restart "$unit"
+  done
+  echo "سرویس‌ها ری‌استارت شدند."
+}
+
+do_status() {
+  systemctl status "$SERVICE_NAME" --no-pager
+  echo ""
+  systemctl status "$WEB_SERVICE_NAME" --no-pager
+  echo ""
+  echo "صفحه‌ی وضعیت: http://$(hostname -I 2>/dev/null | awk '{print $1}'):$(listen_port)/"
+}
+
+do_logs() { journalctl -u "$SERVICE_NAME" -u "$WEB_SERVICE_NAME" -f -n 100; }
+
+do_code() {
+  if [ ! -f "$INSTALL_DIR/cli.php" ]; then
+    echo "هنوز نصب نشده."
+    return 1
+  fi
+  claim_code
+}
+
+do_set_token() {
+  need_root
+  prompt_token
+  systemctl reset-failed "$SERVICE_NAME" 2>/dev/null
+  systemctl restart "$SERVICE_NAME" 2>/dev/null
+  echo "توکن ربات به‌روز شد و سرویس ری‌استارت شد."
+}
+
+do_set_port() {
+  need_root
+  local port current
+  current=$(listen_port)
+  read -rp "پورت سرویس (الان $current): " port
+  env_set LISTEN_PORT "${port:-$current}"
+  write_systemd_unit
+  systemctl restart "$WEB_SERVICE_NAME" 2>/dev/null
+  echo "پورت روی $(listen_port) تنظیم شد."
+}
+
+do_uninstall() {
+  need_root
+  local confirm=""
+  read -rp "مطمئنید KanPanel کاملاً حذف شود؟ (y/N): " confirm
+  if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "لغو شد."
+    return
+  fi
+  systemctl disable --now "$SERVICE_NAME" "$WEB_SERVICE_NAME" 2>/dev/null
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/systemd/system/${WEB_SERVICE_NAME}.service"
+  systemctl daemon-reload
+  rm -rf "$INSTALL_DIR"
+  rm -f "$BIN_PATH"
+  echo "حذف کامل شد."
+}
+
+show_menu() {
+  while true; do
+    echo ""
+    echo "==== KanPanel — مدیریت سرویس ===="
+    echo "1) نصب / آپدیت"
+    echo "2) وضعیت"
+    echo "3) لاگ زنده (خروج با Ctrl+C)"
+    echo "4) ری‌استارت"
+    echo "5) توقف"
+    echo "6) کد نصب (برای تحویل‌گرفتن ربات در تلگرام)"
+    echo "7) تغییر توکن ربات"
+    echo "8) تغییر پورت سرویس (الان: $(listen_port))"
+    echo "9) حذف کامل"
+    echo "0) خروج"
+    read -rp "انتخاب شما: " choice
+    case "$choice" in
+      1) if [ -d "$INSTALL_DIR/.git" ]; then do_update; else do_install; fi ;;
+      2) do_status ;;
+      3) do_logs ;;
+      4) do_restart ;;
+      5) do_stop ;;
+      6) do_code ;;
+      7) do_set_token ;;
+      8) do_set_port ;;
+      9) do_uninstall ;;
+      0) exit 0 ;;
+      *) echo "گزینه نامعتبر است." ;;
+    esac
+  done
+}
+
+case "${1:-menu}" in
+  install)          do_install ;;
+  update)           do_update ;;
+  _finish-update)   do_finish_update ;;
+  start)            do_start ;;
+  stop)             do_stop ;;
+  restart)          do_restart ;;
+  status)           do_status ;;
+  logs)             do_logs ;;
+  code|claim)       do_code ;;
+  token|set-token)  do_set_token ;;
+  port|set-port)    do_set_port ;;
+  uninstall|remove) do_uninstall ;;
+  menu|"")          show_menu ;;
+  *)
+    echo "دستور نامعتبر: $1"
+    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, code, token, port, uninstall, menu"
+    exit 1
+    ;;
+esac

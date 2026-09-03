@@ -5,13 +5,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-$token = kanchecker_bot_token();
-$adminIds = kanchecker_admin_ids();
+$token = kanpanel_bot_token();
 
-if ($adminIds !== []) {
-    fwrite(STDOUT, 'دسترسی محدود به ' . implode(', ', $adminIds) . " شد.\n");
+if (Admins::isClaimed()) {
+    fwrite(STDOUT, 'دسترسی محدود به ادمین‌های: ' . implode(', ', Admins::all()) . "\n");
 } else {
-    fwrite(STDOUT, "هشدار: ADMIN_ID تنظیم نشده — ربات تا تنظیم‌شدن آن هیچ دستوری را اجرا نمی‌کند.\n");
+    fwrite(STDOUT, "ربات هنوز تحویل گرفته نشده. کد نصب را در تلگرام برای ربات بفرستید: " . Admins::claimCode() . "\n");
 }
 
 $server = ServerStore::active();
@@ -43,9 +42,9 @@ while (true) {
         $offset = $update['update_id'] + 1;
         try {
             if (isset($update['message'])) {
-                UpdateHandler::handle($api, $update['message'], $adminIds);
+                UpdateHandler::handle($api, $update['message']);
             } elseif (isset($update['callback_query'])) {
-                UpdateHandler::handleCallback($api, $update['callback_query'], $adminIds);
+                UpdateHandler::handleCallback($api, $update['callback_query']);
             }
         } catch (Throwable $e) {
             fwrite(STDERR, 'خطا در پردازش آپدیت: ' . $e->getMessage() . "\n");

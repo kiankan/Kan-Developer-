@@ -10,7 +10,7 @@ declare(strict_types=1);
  * آدرس HTTPS عمومی برای وبهوک هست. این اسکریپت یک دور کوتاه (پیش‌فرض ۵۵ ثانیه)
  * آپدیت‌ها را می‌گیرد و تمام می‌شود، پس می‌شود با یک کران هر دقیقه‌ای صدایش زد:
  *
- *   * * * * * /usr/local/bin/php /home/user/kan_checker/poll.php >/dev/null 2>&1
+ *   * * * * * /usr/local/bin/php /home/user/kanpanel/poll.php >/dev/null 2>&1
  *
  * قفل فایلی جلوی هم‌پوشانی دو اجرا را می‌گیرد و آخرین offset روی دیسک ذخیره
  * می‌شود تا پیام‌ها دوباره پردازش نشوند.
@@ -34,8 +34,7 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
-$token = kanchecker_bot_token();
-$adminIds = kanchecker_admin_ids();
+$token = kanpanel_bot_token();
 
 $offsetPath = $dataDir . '/offset.txt';
 $offset = is_file($offsetPath) ? (int) trim((string) file_get_contents($offsetPath)) : 0;
@@ -52,7 +51,7 @@ while (time() < $deadline) {
     try {
         $updates = $api->getUpdates($offset, $pollTimeout);
     } catch (Throwable $e) {
-        error_log('kan_checker poll error: ' . $e->getMessage());
+        error_log('kanpanel poll error: ' . $e->getMessage());
         break;
     }
 
@@ -62,12 +61,12 @@ while (time() < $deadline) {
 
         try {
             if (isset($update['message'])) {
-                UpdateHandler::handle($api, $update['message'], $adminIds);
+                UpdateHandler::handle($api, $update['message']);
             } elseif (isset($update['callback_query'])) {
-                UpdateHandler::handleCallback($api, $update['callback_query'], $adminIds);
+                UpdateHandler::handleCallback($api, $update['callback_query']);
             }
         } catch (Throwable $e) {
-            error_log('kan_checker poll update error: ' . $e->getMessage());
+            error_log('kanpanel poll update error: ' . $e->getMessage());
         }
     }
 }

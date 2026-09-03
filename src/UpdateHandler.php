@@ -296,7 +296,22 @@ final class UpdateHandler
                     ['/usr/local/bin/ea-php82', '/usr/local/bin/ea-php82'],
                     ['/usr/local/bin/ea-php83', '/usr/local/bin/ea-php83'],
                 ]],
-                ['key' => 'path', 'prompt' => "پوشه‌ی پروژه روی آن هاست کجاست؟ (مثل <code>/home/user/kan_checker</code>)"],
+                ['key' => 'path', 'prompt' => "پوشه‌ی پروژه روی آن هاست کجاست؟ (مثل <code>/home/user/kanpanel</code>)"],
+            ],
+        ],
+        'admin_add' => [
+            'title' => '👮 افزودن ادمین',
+            'scope' => 'local',
+            'steps' => [
+                ['key' => 'id', 'prompt' => "آیدی عددی تلگرام فرد را بفرستید.\n\n💡 هر کسی می‌تواند آیدی خودش را از ربات @userinfobot بگیرد."],
+            ],
+        ],
+        'admin_del' => [
+            'title' => '🗑 حذف ادمین',
+            'scope' => 'local',
+            'confirm' => '⚠️ دسترسی ادمین <code>{id}</code> به این ربات قطع می‌شود.',
+            'steps' => [
+                ['key' => 'id', 'prompt' => 'کدام ادمین حذف شود؟', 'picker' => 'admins'],
             ],
         ],
         'srv_add' => [
@@ -337,10 +352,7 @@ final class UpdateHandler
         ],
     ];
 
-    /**
-     * @param array<int, int> $adminIds
-     */
-    public static function handle(TelegramApi $api, array $message, array $adminIds): void
+    public static function handle(TelegramApi $api, array $message): void
     {
         $chatId = $message['chat']['id'] ?? null;
         $fromId = $message['from']['id'] ?? null;
@@ -350,7 +362,16 @@ final class UpdateHandler
         if ($chatId === null || $text === '') {
             return;
         }
-        if (!self::authorize($api, (int) $chatId, $fromId, $adminIds)) {
+
+        // ربات تازه‌نصب: تا وقتی کسی با کد نصب تحویلش نگرفته، فقط همان کد را
+        // قبول می‌کند.
+        if (!Admins::isClaimed()) {
+            self::handleClaim($api, (int) $chatId, $fromId, $text, is_int($messageId) ? $messageId : null);
+
+            return;
+        }
+
+        if (!is_numeric($fromId) || !Admins::isAdmin((int) $fromId)) {
             return;
         }
         self::$actor = 'tg:' . $fromId;
@@ -377,10 +398,7 @@ final class UpdateHandler
         self::handleCommand($api, (int) $chatId, $text);
     }
 
-    /**
-     * @param array<int, int> $adminIds
-     */
-    public static function handleCallback(TelegramApi $api, array $callbackQuery, array $adminIds): void
+    public static function handleCallback(TelegramApi $api, array $callbackQuery): void
     {
         $callbackId = $callbackQuery['id'] ?? null;
         $data = (string) ($callbackQuery['data'] ?? '');
@@ -390,7 +408,7 @@ final class UpdateHandler
         if ($callbackId !== null) {
             $api->answerCallbackQuery((string) $callbackId);
         }
-        if ($chatId === null || !self::authorize($api, (int) $chatId, $fromId, $adminIds)) {
+        if ($chatId === null || !is_numeric($fromId) || !Admins::isAdmin((int) $fromId)) {
             return;
         }
         self::$actor = 'tg:' . $fromId;
@@ -567,6 +585,10 @@ final class UpdateHandler
                 self::runAction($api, $chatId, 'log');
 
                 return;
+            case '/admins':
+                self::sendMenu($api, $chatId, 'adm');
+
+                return;
         }
 
         if (str_starts_with($text, '/')) {
@@ -638,6 +660,11 @@ final class UpdateHandler
                 [self::btn('🎯 انتخاب کاربر مقصد', 'f:whm_user')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
+            'adm' => ['👮 <b>ادمین‌های ربات</b>', [
+                [self::btn('📋 لیست ادمین‌ها', 'a:admins')],
+                [self::btn('➕ افزودن ادمین', 'f:admin_add'), self::btn('🗑 حذف ادمین', 'f:admin_del')],
+                [self::btn('⬅️ بازگشت', 'menu')],
+            ]],
             'srv' => ['🖥 <b>سرورها</b>', array_merge(
                 [[self::btn('📋 لیست سرورها', 'a:servers'), self::btn('🔌 تست اتصال', 'a:ping')]],
                 self::serverPickerRows(),
@@ -665,7 +692,8 @@ final class UpdateHandler
             [self::btn('🧭 DNS', 'm:dns'), self::btn('🐘 نسخه PHP', 'm:php')],
             [self::btn('🔒 SSL', 'a:ssl'), self::btn('💾 بکاپ کامل', 'f:backup_run')],
             [self::btn('🖥 WHM', 'm:whm'), self::btn('⚙️ سرورها', 'm:srv')],
-            [self::btn('🧾 لاگ عملیات', 'a:log'), self::btn('❓ راهنما', 'a:help')],
+            [self::btn('👮 ادمین‌ها', 'm:adm'), self::btn('🧾 لاگ عملیات', 'a:log')],
+            [self::btn('❓ راهنما', 'a:help')],
         ]];
     }
 
@@ -724,6 +752,19 @@ final class UpdateHandler
 
         if ($action === 'servers') {
             $api->sendHtml($chatId, Render::servers(ServerStore::all(), ServerStore::activeId()), self::mainKeyboard());
+
+            return;
+        }
+
+        if ($action === 'admins') {
+            $lines = ['👮 <b>ادمین‌های ربات</b>', ''];
+            foreach (Admins::fromEnv() as $adminId) {
+                $lines[] = '• <code>' . $adminId . '</code> — تعریف‌شده در <code>.env</code> (از ربات حذف نمی‌شود)';
+            }
+            foreach (Admins::fromFile() as $adminId) {
+                $lines[] = '• <code>' . $adminId . '</code>';
+            }
+            $api->sendHtml($chatId, implode("\n", $lines), self::mainKeyboard());
 
             return;
         }
@@ -994,6 +1035,19 @@ final class UpdateHandler
 
             case 'whm_plans':
                 return $simple(CpanelService::whmPackages(self::whmClient()));
+
+            case 'admins':
+                $options = [];
+                foreach (Admins::fromFile() as $adminId) {
+                    if ($adminId === self::currentAdminId()) {
+                        // خود آدم را برای حذف پیشنهاد نمی‌دهیم تا با یک اشتباه
+                        // دسترسی خودش را قطع نکند.
+                        continue;
+                    }
+                    $options[] = ['label' => (string) $adminId, 'value' => (string) $adminId];
+                }
+
+                return $options;
 
             case 'servers':
                 $options = [];
@@ -1449,6 +1503,36 @@ final class UpdateHandler
     }
 
     /** @param array<string, mixed> $data */
+    private static function runAdminAdd(array $data): string
+    {
+        $id = trim((string) $data['id']);
+        if (!ctype_digit($id)) {
+            throw CpanelError::config('آیدی تلگرام باید فقط عدد باشد (یوزرنیم قبول نیست).');
+        }
+        Admins::add((int) $id);
+
+        return '✅ کاربر <code>' . Format::escapeHtml($id) . '</code> به ادمین‌ها اضافه شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runAdminDel(array $data): string
+    {
+        $id = (int) $data['id'];
+        if ($id === self::currentAdminId()) {
+            throw CpanelError::config('خودتان را نمی‌توانید حذف کنید؛ اگر می‌خواهید بروید، اول یک ادمین دیگر اضافه کنید و از حساب او حذفتان کند.');
+        }
+        if (in_array($id, Admins::fromEnv(), true)) {
+            throw CpanelError::config('این ادمین در فایل <code>.env</code> تعریف شده و از داخل ربات حذف نمی‌شود.');
+        }
+        if (count(Admins::all()) <= 1) {
+            throw CpanelError::config('این تنها ادمین ربات است؛ اگر حذفش کنید هیچ‌کس به ربات دسترسی نخواهد داشت.');
+        }
+        Admins::remove($id);
+
+        return '🗑 دسترسی <code>' . Format::escapeHtml((string) $id) . '</code> قطع شد.';
+    }
+
+    /** @param array<string, mixed> $data */
     private static function runSelfhostCron(array $data): string
     {
         $path = rtrim(trim((string) $data['path']), '/');
@@ -1516,6 +1600,19 @@ final class UpdateHandler
 
     // ------------------------------------------------------------- کمکی‌ها
 
+    /**
+     * آیدی ادمینی که همین حالا دارد با ربات کار می‌کند (از روی actor).
+     */
+    private static function currentAdminId(): ?int
+    {
+        if (!str_starts_with(self::$actor, 'tg:')) {
+            return null;
+        }
+        $id = substr(self::$actor, 3);
+
+        return ctype_digit($id) ? (int) $id : null;
+    }
+
     private static function clientFor(string $flow): ?CpanelClient
     {
         return match (self::FLOWS[$flow]['scope'] ?? 'account') {
@@ -1553,23 +1650,38 @@ final class UpdateHandler
     }
 
     /**
-     * @param array<int, int> $adminIds
+     * قبل از تحویل‌گرفتن ربات: فقط کد نصب کار می‌کند. اولین کسی که کد درست را
+     * بفرستد مالک می‌شود و از آن به بعد بقیه‌ی تنظیمات از داخل ربات انجام
+     * می‌شود.
      */
-    private static function authorize(TelegramApi $api, int $chatId, mixed $fromId, array $adminIds): bool
+    private static function handleClaim(TelegramApi $api, int $chatId, mixed $fromId, string $text, ?int $messageId): void
     {
-        if ($adminIds === []) {
-            // بدون ADMIN_ID این ربات به هرکسی اجازه‌ی مدیریت سرور می‌داد؛ پس
-            // به‌جای پاسخ دادن، هشدار می‌ده.
-            $api->sendMessage(
-                $chatId,
-                "⛔️ ربات هنوز قفل نشده: مقدار ADMIN_ID در فایل .env تنظیم نشده است.\n"
-                . 'تا وقتی آیدی عددی ادمین را تنظیم نکنید، هیچ دستوری اجرا نمی‌شود.',
-            );
-
-            return false;
+        if (!is_numeric($fromId)) {
+            return;
         }
 
-        return is_numeric($fromId) && in_array((int) $fromId, $adminIds, true);
+        if (Admins::claim((int) $fromId, $text)) {
+            if ($messageId !== null) {
+                // کد از تاریخچه‌ی چت پاک می‌شود.
+                $api->deleteMessage($chatId, $messageId);
+            }
+            AuditLog::record('tg:' . $fromId, '-', 'claim_bot', []);
+            $api->sendHtml(
+                $chatId,
+                "✅ ربات تحویل شما شد؛ از این به بعد فقط شما (و هر ادمینی که خودتان اضافه کنید) به آن دسترسی دارید.\n\n"
+                . self::welcome(),
+                self::mainKeyboard(),
+            );
+
+            return;
+        }
+
+        $api->sendHtml(
+            $chatId,
+            "🔒 این ربات هنوز تحویل گرفته نشده.\n\n"
+            . "کد نصب را که موقع نصب روی سرور چاپ شد برای من بفرستید تا مالکش شوید.\n"
+            . 'اگر کد را ندارید، روی سرور بزنید: <code>kanpanel code</code>',
+        );
     }
 
     /**

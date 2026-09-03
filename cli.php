@@ -6,7 +6,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 
 const USAGE = <<<TXT
-    مدیریت cPanel/WHM از خط فرمان (همان API‌ای که ربات تلگرام استفاده می‌کند).
+    KanPanel — مدیریت cPanel/WHM از خط فرمان (همان API‌ای که ربات تلگرام استفاده می‌کند).
 
     سرورها:
       php cli.php servers
@@ -60,6 +60,10 @@ const USAGE = <<<TXT
 
     هاست اشتراکی (اجرای ربات با کران، بدون پروسه‌ی دائمی):
       php cli.php selfhost:cron [php-binary] [project-path]
+
+    ربات و ادمین‌ها:
+      php cli.php code                    نمایش کد نصب (برای تحویل‌گرفتن ربات)
+      php cli.php admins                  فهرست ادمین‌ها
 
     متفرقه:
       php cli.php log [count]
@@ -555,6 +559,30 @@ try {
             show("✅ کران هر دقیقه‌ای ساخته شد:\n{$cronCommand}");
             break;
 
+        // ------------------------------------------------- ربات و ادمین‌ها
+        case 'code':
+        case 'claim':
+            if (Admins::isClaimed()) {
+                echo "ربات قبلاً تحویل گرفته شده؛ ادمین‌های فعلی: " . implode('، ', Admins::all()) . "\n";
+                echo "برای اضافه‌کردن ادمین جدید، از داخل خود ربات: 👮 ادمین‌ها → ➕ افزودن ادمین\n";
+                break;
+            }
+            echo "🤖 ربات را در تلگرام باز کنید و این کد را برایش بفرستید تا مالکش شوید:\n\n";
+            echo '    ' . Admins::claimCode() . "\n";
+            break;
+
+        case 'admins':
+            $env = Admins::fromEnv();
+            $file = Admins::fromFile();
+            if ($json) {
+                showJson(['env' => $env, 'bot' => $file]);
+                break;
+            }
+            echo $env === [] && $file === []
+                ? "هنوز ادمینی تعریف نشده (ربات تحویل گرفته نشده).\n"
+                : 'ادمین‌ها: ' . implode('، ', array_merge($env, $file)) . "\n";
+            break;
+
         // ---------------------------------------------------------- متفرقه
         case 'log':
             $lines = AuditLog::tail((int) ($positional[0] ?? 20));
@@ -563,7 +591,7 @@ try {
 
         case 'webhook:set':
             $secret = trim((string) (getenv('WEBHOOK_SECRET') ?: ''));
-            (new TelegramApi(kanchecker_bot_token()))->setWebhook(arg($positional, 0), $secret);
+            (new TelegramApi(kanpanel_bot_token()))->setWebhook(arg($positional, 0), $secret);
             echo "وبهوک تنظیم شد: {$positional[0]}\n";
             echo $secret === ''
                 ? "⚠️ WEBHOOK_SECRET در .env خالی است؛ توصیه می‌شود یک رشته‌ی تصادفی بگذارید تا فقط تلگرام بتواند به این آدرس درخواست بدهد.\n"
@@ -571,7 +599,7 @@ try {
             break;
 
         case 'webhook:delete':
-            (new TelegramApi(kanchecker_bot_token()))->deleteWebhook();
+            (new TelegramApi(kanpanel_bot_token()))->deleteWebhook();
             echo "وبهوک حذف شد.\n";
             break;
 

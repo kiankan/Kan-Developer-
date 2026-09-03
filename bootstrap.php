@@ -20,14 +20,14 @@ Env::load($root . '/.env');
  * خطای مرگبار، متناسب با محیط اجرا: توی ترمینال روی STDERR، و توی وب یک
  * پاسخ 500 تمیز (چون STDERR در SAPI وب اصلاً وجود ندارد).
  */
-function kanchecker_fatal(string $message): never
+function kanpanel_fatal(string $message): never
 {
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, $message . "\n");
         exit(1);
     }
 
-    error_log('kan_checker: ' . $message);
+    error_log('kanpanel: ' . $message);
     if (!headers_sent()) {
         http_response_code(500);
         header('Content-Type: application/json; charset=utf-8');
@@ -36,46 +36,21 @@ function kanchecker_fatal(string $message): never
     exit;
 }
 
-function kanchecker_bot_token(): string
+function kanpanel_bot_token(): string
 {
     $token = getenv('TELEGRAM_BOT_TOKEN');
     if ($token === false || trim($token) === '') {
-        kanchecker_fatal('TELEGRAM_BOT_TOKEN تنظیم نشده است (در .env یا متغیر محیطی قرار دهید).');
+        kanpanel_fatal('TELEGRAM_BOT_TOKEN تنظیم نشده است (در .env یا متغیر محیطی قرار دهید).');
     }
 
     return $token;
 }
 
 /**
- * آیدی‌های مجاز؛ هم ADMIN_ID تکی (سازگاری با نصب‌های قبلی) و هم ADMIN_IDS
- * چندتایی جدا شده با کاما پشتیبانی می‌شن.
- *
- * @return array<int, int>
- */
-function kanchecker_admin_ids(): array
-{
-    $raw = trim((string) (getenv('ADMIN_IDS') ?: '')) . ',' . trim((string) (getenv('ADMIN_ID') ?: ''));
-
-    $ids = [];
-    foreach (explode(',', $raw) as $part) {
-        $part = trim($part);
-        if ($part === '') {
-            continue;
-        }
-        if (!ctype_digit($part)) {
-            kanchecker_fatal("آیدی ادمین باید عدد باشد، مقدار نامعتبر: {$part}");
-        }
-        $ids[] = (int) $part;
-    }
-
-    return array_values(array_unique($ids));
-}
-
-/**
  * پردازش یک آپدیت وبهوکی. هم webhook.php (روی هاست اشتراکی) و هم سرویس
  * پورت اختصاصی (serve.php) از همین استفاده می‌کنند.
  */
-function kanchecker_handle_webhook(): void
+function kanpanel_handle_webhook(): void
 {
     http_response_code(200);
 
@@ -97,17 +72,16 @@ function kanchecker_handle_webhook(): void
         return;
     }
 
-    $api = new TelegramApi(kanchecker_bot_token());
-    $adminIds = kanchecker_admin_ids();
+    $api = new TelegramApi(kanpanel_bot_token());
 
     try {
         Heartbeat::touch('webhook');
         if (isset($update['message'])) {
-            UpdateHandler::handle($api, $update['message'], $adminIds);
+            UpdateHandler::handle($api, $update['message']);
         } elseif (isset($update['callback_query'])) {
-            UpdateHandler::handleCallback($api, $update['callback_query'], $adminIds);
+            UpdateHandler::handleCallback($api, $update['callback_query']);
         }
     } catch (Throwable $e) {
-        error_log('kan_checker webhook error: ' . $e->getMessage());
+        error_log('kanpanel webhook error: ' . $e->getMessage());
     }
 }

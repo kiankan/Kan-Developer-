@@ -9,4 +9,4 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-kanchecker_handle_webhook();
+kanpanel_handle_webhook();

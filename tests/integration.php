@@ -17,7 +17,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 
 $port = 18081 + (getmypid() % 500);
-$dataDir = sys_get_temp_dir() . '/kan_checker_it_' . getmypid();
+$dataDir = sys_get_temp_dir() . '/kanpanel_it_' . getmypid();
 $logPath = $dataDir . '/telegram.log';
 @mkdir($dataDir, 0700, true);
 touch($logPath);
@@ -26,7 +26,10 @@ putenv("KAN_DATA_DIR=$dataDir");
 putenv("FAKE_TG_LOG=$logPath");
 putenv("TELEGRAM_API_BASE=http://127.0.0.1:$port");
 putenv('TELEGRAM_BOT_TOKEN=test:token');
-putenv('ADMIN_ID=555');
+// عمداً ADMIN_ID نمی‌گذاریم: می‌خواهیم مسیر «تحویل‌گرفتن ربات با کد نصب» هم
+// دقیقاً مثل یک نصب تازه تست شود.
+putenv('ADMIN_ID');
+putenv('ADMIN_IDS');
 
 $serverProcess = proc_open(
     [PHP_BINARY, '-S', "127.0.0.1:$port", __DIR__ . '/fake_telegram.php'],
@@ -53,7 +56,6 @@ for ($i = 0; $i < 50; $i++) {
 $passed = 0;
 $failed = 0;
 $api = new TelegramApi('test:token');
-$adminIds = kanchecker_admin_ids();
 
 function tg_log_reset(): void
 {
@@ -109,24 +111,24 @@ function tg_last_buttons(): array
 
 function send_text(string $text, int $from = 555): void
 {
-    global $api, $adminIds;
+    global $api;
     UpdateHandler::handle($api, [
         'message_id' => random_int(1, 999),
         'chat' => ['id' => 555],
         'from' => ['id' => $from],
         'text' => $text,
-    ], $adminIds);
+    ]);
 }
 
 function press(string $callbackData, int $from = 555): void
 {
-    global $api, $adminIds;
+    global $api;
     UpdateHandler::handleCallback($api, [
         'id' => (string) random_int(1, 999),
         'data' => $callbackData,
         'from' => ['id' => $from],
         'message' => ['chat' => ['id' => 555], 'message_id' => 1],
-    ], $adminIds);
+    ]);
 }
 
 function scenario(string $name, callable $test): void
@@ -151,6 +153,25 @@ function expect(bool $condition, string $message): void
 }
 
 echo "رابط تلگرام (end-to-end با سرور ساختگی)\n";
+
+scenario('ربات تحویل‌نگرفته فقط کد نصب را قبول می‌کند', function (): void {
+    expect(!Admins::isClaimed(), 'ربات نباید از قبل ادمین داشته باشد');
+    send_text('/start');
+    expect(str_contains(tg_last_text(), 'تحویل گرفته نشده'), 'باید بگوید هنوز تحویل گرفته نشده');
+    expect(!Admins::isClaimed(), 'با پیام معمولی نباید کسی مالک شود');
+
+    send_text('WRONG-CODE');
+    expect(!Admins::isClaimed(), 'کد اشتباه نباید مالکیت بدهد');
+});
+
+scenario('کد نصب درست، فرستنده را مالک می‌کند و کد را می‌سوزاند', function (): void {
+    $code = Admins::claimCode();
+    send_text($code);
+    expect(Admins::isClaimed(), 'بعد از کد درست باید مالک ثبت شود');
+    expect(Admins::isAdmin(555), 'فرستنده‌ی کد باید ادمین شود');
+    expect(str_contains(tg_last_text(), 'تحویل شما شد'), 'پیام خوش‌آمد نیامد');
+    expect(Admins::claimCode() !== $code, 'کد نصب باید یک‌بارمصرف باشد');
+});
 
 scenario('/start منوی اصلی را با دکمه‌های شیشه‌ای می‌فرستد', function (): void {
     send_text('/start');
@@ -230,6 +251,43 @@ scenario('بدون سرور، عملیات‌ها پیام راهنمای روش
 scenario('منوی سرورها دکمه‌ی نصب کران هاست اشتراکی را دارد', function (): void {
     press('m:srv');
     expect(in_array('f:selfhost_cron', tg_last_buttons(), true), 'دکمه‌ی کران هاست اشتراکی نبود');
+});
+
+scenario('ادمین دوم از داخل ربات اضافه و حذف می‌شود', function (): void {
+    press('m:adm');
+    expect(in_array('f:admin_add', tg_last_buttons(), true), 'دکمه‌ی افزودن ادمین نبود');
+
+    press('f:admin_add');
+    send_text('777');
+    expect(Admins::isAdmin(777), 'ادمین جدید اضافه نشد');
+
+    // حالا ادمین دوم هم واقعاً به ربات دسترسی دارد.
+    tg_log_reset();
+    send_text('/panel', 777);
+    expect(tg_last_buttons() !== [], 'ادمین جدید باید به منو دسترسی داشته باشد');
+
+    press('f:admin_del');
+    expect(in_array('c:0', tg_last_buttons(), true), 'ادمین‌ها باید به‌صورت دکمه بیایند');
+    press('c:0');
+    expect(str_contains(tg_last_text(), '777'), 'فقط ادمین دیگر باید پیشنهاد شود');
+    press('ok');
+    expect(!Admins::isAdmin(777), 'ادمین باید حذف شود');
+    expect(Admins::isAdmin(555), 'ادمین فعلی نباید دست بخورد');
+});
+
+scenario('ادمین نمی‌تواند خودش را حذف کند', function (): void {
+    Admins::add(777);
+    press('f:admin_del');
+    $buttons = tg_last_buttons();
+    $optionCount = count(array_filter($buttons, static fn (string $b): bool => str_starts_with($b, 'c:')));
+    expect($optionCount === 1, 'فهرست حذف باید فقط ادمین دیگر را نشان دهد، نه خود کاربر را');
+
+    send_text('555');   // تلاش برای حذف خودش با تایپ دستی
+    press('ok');
+    expect(str_contains(tg_last_text(), 'خودتان'), 'باید جلوی حذف خود کاربر گرفته شود');
+    expect(Admins::isAdmin(555), 'ادمین فعلی نباید حذف شود');
+
+    Admins::remove(777);
 });
 
 scenario('پیام‌های بلند تکه می‌شوند نه اینکه رد شوند', function (): void {

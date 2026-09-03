@@ -28,7 +28,7 @@ $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 /**
  * @return array<string, mixed>
  */
-function kanchecker_status(): array
+function kanpanel_status(): array
 {
     $heartbeat = Heartbeat::read();
     $servers = [];
@@ -48,14 +48,15 @@ function kanchecker_status(): array
 
     return [
         'ok' => true,
-        'service' => 'kan_checker',
+        'service' => 'kanpanel',
         'php' => PHP_VERSION,
         'listen_port' => (int) (getenv('LISTEN_PORT') ?: 2000),
         'bot' => [
             'alive' => $heartbeat['alive'],
             'mode' => $heartbeat['mode'],
             'seconds_since_last_update' => $heartbeat['seconds_ago'],
-            'admins_configured' => kanchecker_admin_ids() !== [],
+            'claimed' => Admins::isClaimed(),
+            'admins' => count(Admins::all()),
         ],
         'servers' => $servers,
         'time' => gmdate('c'),
@@ -63,20 +64,22 @@ function kanchecker_status(): array
 }
 
 if ($method === 'POST' && (str_starts_with($path, '/webhook') || $path === '/')) {
-    kanchecker_handle_webhook();
+    kanpanel_handle_webhook();
     exit;
 }
 
 if ($path === '/health' || $path === '/health/') {
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(kanchecker_status(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    echo json_encode(kanpanel_status(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 if ($path === '/' && $method === 'GET') {
-    $status = kanchecker_status();
+    $status = kanpanel_status();
     $bot = $status['bot']['alive'] ? '🟢 در حال اجرا' : '🔴 پاسخ نمی‌دهد';
-    $admins = $status['bot']['admins_configured'] ? '✅ تنظیم شده' : '⛔️ تنظیم نشده (ربات هیچ دستوری اجرا نمی‌کند)';
+    $admins = $status['bot']['claimed']
+        ? '✅ تحویل گرفته شده (' . (int) $status['bot']['admins'] . ' ادمین)'
+        : '⛔️ هنوز تحویل گرفته نشده — کد نصب را در تلگرام برای ربات بفرستید';
 
     $rows = '';
     foreach ($status['servers'] as $server) {
@@ -95,7 +98,7 @@ if ($path === '/' && $method === 'GET') {
         <html lang="fa" dir="rtl">
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>kan_checker</title>
+        <title>KanPanel</title>
         <style>
           body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1rem;line-height:1.9;color:#1c1c1e}
           table{border-collapse:collapse;width:100%;margin-top:.5rem}
@@ -103,7 +106,7 @@ if ($path === '/' && $method === 'GET') {
           code{background:#f2f2f7;padding:.1rem .35rem;border-radius:.25rem}
           @media (prefers-color-scheme:dark){body{background:#111;color:#eee}th,td{border-color:#333}code{background:#222}}
         </style>
-        <h1>kan_checker</h1>
+        <h1>KanPanel</h1>
         <p>مدیریت cPanel/WHM از تلگرام.</p>
         <p>ربات: <b>{$bot}</b><br>ادمین: {$admins}<br>پورت این سرویس: <code>{$status['listen_port']}</code></p>
         <h2>سرورها</h2>
