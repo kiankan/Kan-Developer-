@@ -728,6 +728,70 @@ check('لاگ عملیات به فارسی و بدون کلید داخلی نم�
     assertTrue(!str_contains($text, 'context'), 'JSON خام نباید نمایش داده شود');
 });
 
+check('پاک‌سازی صندوق، مسیر Maildir درست را هدف می‌گیرد', function (): void {
+    $captured = [];
+    // ترتیب پاسخ‌ها: هوم، سپس برای هر پوشه یک list و یک unlink
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],
+        ['body' => '{"status":1,"data":[{"file":"1.eml","type":"file","size":10}]}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[]}}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $result = CpanelService::purgeMailFolders($client, 'info@example.com', false);
+
+    $listCall = urldecode($captured[1]['body']);
+    assertTrue(str_contains($listCall, '/home/demo/mail/example.com/info/.Trash/cur'), "مسیر Maildir درست نبود: {$listCall}");
+    assertTrue($result['deleted'] >= 1, 'باید حداقل یک نامه پاک شود');
+});
+
+check('جست‌وجو فقط گروه‌های دارای نتیجه را برمی‌گرداند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":{"main_domain":"example.com","addon_domains":[],"sub_domains":[],"parked_domains":[]}}'],
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],
+        ['body' => '{"status":1,"data":[]}'],
+        ['body' => '{"status":1,"data":[]}'],
+        ['body' => '{"status":1,"data":[{"email":"info@example.com","domain":"example.com"}]}'],
+        ['body' => '{"status":1,"data":[]}'],
+        ['body' => '{"status":1,"data":[]}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $results = CpanelService::search($client, 'example');
+
+    assertTrue(isset($results['دامنه']), 'دامنه باید پیدا شود');
+    foreach ($results as $group => $rows) {
+        assertTrue($rows !== [], "گروه خالی نباید برگردد: {$group}");
+    }
+    assertSame([], CpanelService::search($client, '   '), 'عبارت خالی نباید چیزی برگرداند');
+});
+
+check('اصلاح رکورد A، رکورد قبلی همان نام را برمی‌دارد', function (): void {
+    $captured = [];
+    $zone = json_encode(['status' => 1, 'data' => [
+        ['type' => 'record', 'line_index' => 8, 'record_type' => 'SOA', 'dname_b64' => base64_encode('example.com.'),
+            'data_b64' => array_map('base64_encode', ['ns1.x.', 'root.x.', '2024010101'])],
+        ['type' => 'record', 'line_index' => 14, 'record_type' => 'A', 'dname_b64' => base64_encode('www.example.com.'),
+            'data_b64' => [base64_encode('203.0.113.10')]],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => (string) $zone],   // خواندن زون برای پیدا کردن رکورد قبلی
+        ['body' => (string) $zone],   // خواندن دوباره برای حذف
+        ['body' => '{"status":1,"data":{}}'],
+        ['body' => (string) $zone],   // خواندن برای افزودن
+        ['body' => '{"status":1,"data":{}}'],
+    ], $captured));
+
+    CpanelService::setARecord($client, 'example.com', 'www', '203.0.113.99');
+
+    $bodies = array_map(static fn (array $call): string => urldecode($call['body']), $captured);
+    $removed = array_filter($bodies, static fn (string $body): bool => str_contains($body, 'remove=14'));
+    $added = array_filter($bodies, static fn (string $body): bool => str_contains($body, '203.0.113.99'));
+    assertTrue($removed !== [], 'رکورد قبلی باید حذف شود');
+    assertTrue($added !== [], 'رکورد جدید باید اضافه شود');
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {
@@ -861,7 +925,8 @@ check('تعریف مرحله‌های هر جریان کامل است', function
         // هر جریان باید بداند بعد از تمام‌شدن، دکمه‌ی بازگشتش به کدام منوست.
         assertTrue(isset($definition['back']), "جریان $name دکمه‌ی بازگشت (back) ندارد");
         assertTrue(
-            str_contains((string) file_get_contents(__DIR__ . '/../src/UpdateHandler.php'), "'{$definition['back']}' => ["),
+            $definition['back'] === 'menu'
+                || str_contains((string) file_get_contents(__DIR__ . '/../src/UpdateHandler.php'), "'{$definition['back']}' => ["),
             "منوی بازگشت جریان $name («{$definition['back']}») تعریف نشده است",
         );
         foreach ($definition['steps'] as $index => $step) {

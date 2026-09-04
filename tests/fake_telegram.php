@@ -21,7 +21,15 @@ if (str_contains($path, '/file/bot')) {
 
 $method = basename($path);
 
-parse_str((string) file_get_contents('php://input'), $params);
+$raw = (string) file_get_contents('php://input');
+$params = [];
+if (str_contains((string) ($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data')) {
+    // فقط برای لاگ؛ نام فیلدها کافی است.
+    preg_match_all('/name="([^"]+)"/', $raw, $names);
+    $params = ['fields' => implode(',', $names[1] ?? [])];
+} else {
+    parse_str($raw, $params);
+}
 file_put_contents($logPath, json_encode(['method' => $method, 'params' => $params], JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
 
 header('Content-Type: application/json');

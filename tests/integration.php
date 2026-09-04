@@ -708,6 +708,79 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains(urldecode((string) array_values($calls)[0]['body']), 'state=1'), 'وضعیت روشن ارسال نشد');
     });
 
+    scenario('پاسخ خودکار و نشست‌های FTP از منوهای خودشان در دسترس‌اند', function (): void {
+        press('m:email');
+        expect(in_array('a:responders', tg_last_buttons(), true), 'دکمه‌ی پاسخ خودکار نبود');
+        expect(in_array('f:mail_purge', tg_last_buttons(), true), 'دکمه‌ی پاک‌سازی Trash نبود');
+
+        press('a:responders');
+        expect(str_contains(tg_last_text(), 'در مرخصی هستم'), 'پاسخ خودکار نمایش داده نشد');
+
+        press('m:ftp');
+        foreach (['f:ftp_passwd', 'f:ftp_quota', 'a:ftpsessions'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی FTP نبود");
+        }
+
+        press('a:ftpsessions');
+        expect(str_contains(tg_last_text(), 'deploy@example.com'), 'نشست FTP نمایش داده نشد');
+        expect(in_array('f:ftp_kill', tg_last_buttons(), true), 'دکمه‌ی قطع نشست نبود');
+    });
+
+    scenario('پاک‌سازی Trash صندوق، نامه‌ها را پاک می‌کند', function (): void {
+        press('f:mail_purge');
+        press('c:0');
+        press('ok');
+        $text = tg_last_text();
+        expect(str_contains($text, 'پاک شد') || str_contains($text, 'خالی'), 'نتیجه‌ی پاک‌سازی نیامد');
+    });
+
+    scenario('دامنه‌ی ادان و پارک از منوی دامنه‌ها اضافه می‌شوند', function (): void {
+        press('m:dom');
+        foreach (['f:addon_add', 'f:addon_del', 'f:park_add', 'a:bandwidth'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی دامنه‌ها نبود");
+        }
+
+        press('f:addon_add');
+        send_text('newsite.com');
+        press('skip');
+        $calls = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'addaddondomain'));
+        expect($calls !== [], 'درخواست افزودن ادان‌دامنه فرستاده نشد');
+        expect(str_contains(tg_last_text(), 'newsite.com'), 'پیام موفقیت نیامد');
+    });
+
+    scenario('جست‌وجوی سراسری، در همه‌ی بخش‌ها می‌گردد', function (): void {
+        press('menu');
+        expect(in_array('f:search', tg_last_buttons(), true), 'دکمه‌ی جست‌وجو در منوی اصلی نبود');
+
+        press('f:search');
+        send_text('example');
+        $text = tg_last_text();
+        expect(str_contains($text, 'ایمیل') || str_contains($text, 'دامنه'), 'گروه‌های نتیجه نیامدند');
+        expect(str_contains($text, 'example.com'), 'نتیجه‌ی واقعی پیدا نشد');
+    });
+
+    scenario('گزارش وضعیت به‌صورت فایل فرستاده می‌شود', function (): void {
+        press('a:summary');
+        expect(in_array('a:report', tg_last_buttons(), true), 'دکمه‌ی گزارش نبود');
+
+        press('a:report');
+        $documents = array_filter(tg_calls(), static fn (array $call): bool => $call['method'] === 'sendDocument');
+        expect($documents !== [], 'فایل گزارش فرستاده نشد');
+    });
+
+    scenario('اصلاح رکورد A، رکورد قبلی را جایگزین می‌کند', function (): void {
+        press('m:dns');
+        expect(in_array('f:dns_fix', tg_last_buttons(), true), 'دکمه‌ی اصلاح رکورد A نبود');
+
+        press('f:dns_fix');
+        press('c:0');                    // zone
+        send_text('www');
+        send_text('203.0.113.99');
+        press('ok');
+        $edits = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains(urldecode($c['body']), '203.0.113.99'));
+        expect($edits !== [], 'رکورد جدید فرستاده نشد');
+    });
+
     scenario('لاگ عملیات، کارهای انجام‌شده را ثبت می‌کند و کلید داخلی لو نمی‌دهد', function (): void {
         press('a:log');
         $text = tg_last_text();

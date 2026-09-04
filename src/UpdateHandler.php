@@ -76,6 +76,34 @@ final class UpdateHandler
                 ['key' => 'list', 'prompt' => "آدرس‌های کامل را بفرستید، هر خط یکی:\n\n<code>old@example.com\ntest@example.com</code>"],
             ],
         ],
+        'mail_purge' => [
+            'title' => '🧽 پاک‌سازی سطل زباله و اسپم',
+            'scope' => 'account',
+            'back' => 'email',
+            'confirm' => '⚠️ نامه‌های داخل Trash و Spam صندوق <code>{email}</code> برای همیشه پاک می‌شوند (نامه‌های Inbox دست نمی‌خورند).',
+            'steps' => [
+                ['key' => 'email', 'prompt' => "کدام صندوق پاک‌سازی شود؟\n\n💡 وقتی صندوق پر شده و نامه‌ی جدید نمی‌گیرد، معمولاً همین Trash و Spam پرش کرده‌اند.", 'picker' => 'emails'],
+            ],
+        ],
+        'responder_add' => [
+            'title' => '🤖 تنظیم پاسخ خودکار',
+            'scope' => 'account',
+            'back' => 'email',
+            'steps' => [
+                ['key' => 'email', 'prompt' => 'برای کدام صندوق؟', 'picker' => 'emails'],
+                ['key' => 'subject', 'prompt' => 'موضوع پاسخ خودکار (مثل <code>در مرخصی هستم</code>):'],
+                ['key' => 'body', 'prompt' => 'متن پاسخ خودکار را بفرستید:'],
+            ],
+        ],
+        'responder_del' => [
+            'title' => '🗑 حذف پاسخ خودکار',
+            'scope' => 'account',
+            'back' => 'email',
+            'confirm' => '⚠️ پاسخ خودکار <code>{email}</code> حذف می‌شود.',
+            'steps' => [
+                ['key' => 'email', 'prompt' => 'کدام پاسخ خودکار حذف شود؟', 'picker' => 'responders'],
+            ],
+        ],
         'email_passwd' => [
             'title' => '🔑 تغییر رمز ایمیل',
             'scope' => 'account',
@@ -252,6 +280,51 @@ final class UpdateHandler
                 ['key' => 'dir', 'prompt' => 'مسیر پوشه (اختیاری، خالی = پیش‌فرض cPanel):', 'optional' => true, 'default' => ''],
             ],
         ],
+        'addon_add' => [
+            'title' => '🌍 افزودن دامنه‌ی جدید (ادان)',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => "دامنه‌ی جدید را بفرستید، مثل <code>example.com</code>.\n\n💡 ادان‌دامنه یعنی یک سایت کاملاً جدا روی همین هاست، با پوشه‌ی خودش."],
+                ['key' => 'dir', 'prompt' => 'پوشه‌ی سایت (خالی = <code>public_html/دامنه</code>):', 'optional' => true, 'default' => ''],
+            ],
+        ],
+        'addon_del' => [
+            'title' => '🗑 حذف دامنه‌ی ادان',
+            'scope' => 'account',
+            'back' => 'dom',
+            'confirm' => '⚠️ دامنه‌ی <code>{domain}</code> از حساب حذف می‌شود (فایل‌های پوشه‌اش می‌مانند).',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => 'کدام دامنه حذف شود؟', 'picker' => 'addon_domains'],
+            ],
+        ],
+        'park_add' => [
+            'title' => '🅿️ پارک کردن دامنه',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => "دامنه‌ای که باید همان سایت اصلی را نشان دهد:\n\n💡 مثلاً <code>example.net</code> که می‌خواهید همان محتوای <code>example.com</code> را بدهد."],
+            ],
+        ],
+        'dns_fix' => [
+            'title' => '🛠 اصلاح رکورد A دامنه',
+            'scope' => 'account',
+            'back' => 'dns',
+            'confirm' => '⚠️ رکورد A برای <code>{name}</code> روی <code>{ip}</code> تنظیم می‌شود (رکورد قبلی جایگزین می‌شود).',
+            'steps' => [
+                ['key' => 'zone', 'prompt' => 'کدام دامنه؟', 'picker' => 'zones'],
+                ['key' => 'name', 'prompt' => "کدام نام؟ (<code>@</code> برای خود دامنه، <code>www</code> برای نسخه‌ی www)"],
+                ['key' => 'ip', 'prompt' => "آی‌پی مقصد را بفرستید.\n\n💡 آی‌پی هاست را در «دامنه‌ها → لیست دامنه‌ها» می‌بینید."],
+            ],
+        ],
+        'search' => [
+            'title' => '🔍 جست‌وجو',
+            'scope' => 'account',
+            'back' => 'menu',
+            'steps' => [
+                ['key' => 'term' , 'prompt' => "چه چیزی را می‌گردید؟\n\nبخشی از نام ایمیل، دیتابیس، دامنه، حساب FTP یا فایل را بفرستید."],
+            ],
+        ],
         'sub_del' => [
             'title' => '🗑 حذف ساب‌دامنه',
             'scope' => 'account',
@@ -270,6 +343,33 @@ final class UpdateHandler
                 ['key' => 'password', 'prompt' => 'رمز عبور را بفرستید (یا <code>/gen</code>):', 'secret' => true],
                 ['key' => 'dir', 'prompt' => 'مسیر پوشه (اختیاری):', 'optional' => true, 'default' => ''],
                 ['key' => 'quota', 'prompt' => 'سهمیه‌ی فضا:', 'optional' => true, 'default' => '0', 'choices' => self::QUOTA_CHOICES],
+            ],
+        ],
+        'ftp_passwd' => [
+            'title' => '🔑 تغییر رمز FTP',
+            'scope' => 'account',
+            'back' => 'ftp',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام حساب FTP؟', 'picker' => 'ftp'],
+                ['key' => 'password', 'prompt' => 'رمز جدید (یا <code>/gen</code>):', 'secret' => true],
+            ],
+        ],
+        'ftp_quota' => [
+            'title' => '📦 تغییر سهمیه FTP',
+            'scope' => 'account',
+            'back' => 'ftp',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام حساب FTP؟', 'picker' => 'ftp'],
+                ['key' => 'quota', 'prompt' => 'سهمیه‌ی جدید:', 'choices' => self::QUOTA_CHOICES],
+            ],
+        ],
+        'ftp_kill' => [
+            'title' => '✂️ قطع نشست FTP',
+            'scope' => 'account',
+            'back' => 'ftp',
+            'confirm' => '⚠️ نشست باز <code>{session}</code> قطع می‌شود؛ اگر وسط آپلود باشد، ناقص می‌ماند.',
+            'steps' => [
+                ['key' => 'session', 'prompt' => 'کدام نشست قطع شود؟', 'picker' => 'ftp_sessions'],
             ],
         ],
         'ftp_del' => [
@@ -1017,7 +1117,8 @@ final class UpdateHandler
                 [self::btn('➕ افزودن', 'f:email_add'), self::btn('🗑 حذف', 'f:email_del')],
                 [self::btn('👥 ساخت گروهی', 'f:email_bulk_add'), self::btn('🗑 حذف گروهی', 'f:email_bulk_del')],
                 [self::btn('🔑 تغییر رمز', 'f:email_passwd'), self::btn('📦 سهمیه', 'f:email_quota')],
-                [self::btn('📮 فورواردها', 'a:forwarders'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
+                [self::btn('📮 فورواردها', 'a:forwarders'), self::btn('🤖 پاسخ خودکار', 'a:responders')],
+                [self::btn('🧽 پاک‌سازی Trash و Spam', 'f:mail_purge'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'db' => [self::databaseMenuText(), [
@@ -1034,6 +1135,8 @@ final class UpdateHandler
             'dom' => ["🌐 <b>دامنه‌ها</b>\n\nدامنه‌ی اصلی حساب، دامنه‌های اضافه (ادان)، ساب‌دامنه‌ها، ریدایرکت‌ها و گواهی‌های SSL.", [
                 [self::btn('📋 لیست دامنه‌ها', 'a:domains')],
                 [self::btn('➕ ساب‌دامنه', 'f:sub_add'), self::btn('🗑 حذف ساب‌دامنه', 'f:sub_del')],
+                [self::btn('🌍 دامنه‌ی جدید (ادان)', 'f:addon_add'), self::btn('🗑 حذف ادان', 'f:addon_del')],
+                [self::btn('🅿️ پارک دامنه', 'f:park_add'), self::btn('📶 پهنای‌باند', 'a:bandwidth')],
                 [self::btn('↪️ ریدایرکت‌ها', 'a:redirects'), self::btn('🧭 DNS', 'm:dns')],
                 [self::btn('🩺 بررسی سلامت دامنه', 'f:site_check'), self::btn('🔒 SSL', 'm:ssl')],
                 [self::btn('⬅️ بازگشت', 'menu')],
@@ -1052,6 +1155,8 @@ final class UpdateHandler
             'ftp' => ["📁 <b>حساب‌های FTP</b>\n\nبرای وصل‌شدن با نرم‌افزارهایی مثل FileZilla.", [
                 [self::btn('📋 لیست حساب‌ها', 'a:ftps')],
                 [self::btn('➕ افزودن', 'f:ftp_add'), self::btn('🗑 حذف', 'f:ftp_del')],
+                [self::btn('🔑 تغییر رمز', 'f:ftp_passwd'), self::btn('📦 سهمیه', 'f:ftp_quota')],
+                [self::btn('🔌 نشست‌های باز', 'a:ftpsessions')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'cron' => ["⏰ <b>کران‌جاب‌ها</b>\n\nدستورهایی که سرور خودکار و سر وقت اجرا می‌کند (مثل کران وردپرس یا بکاپ روزانه).", [
@@ -1063,6 +1168,7 @@ final class UpdateHandler
             'dns' => ["🧭 <b>رکوردهای DNS</b>\n\nمشخص می‌کند دامنه به کجا اشاره کند (A برای آی‌پی، CNAME برای نام، MX برای ایمیل، TXT برای تأییدیه‌ها).", [
                 [self::btn('📄 نمایش رکوردها', 'f:dns_list')],
                 [self::btn('➕ رکورد جدید', 'f:dns_add'), self::btn('🗑 حذف رکورد', 'f:dns_del')],
+                [self::btn('🛠 اصلاح رکورد A', 'f:dns_fix')],
                 [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
             'ssl' => ["🔒 <b>گواهی SSL</b>\n\nگواهی همان چیزی است که قفل سبز مرورگر و آدرس <code>https</code> را می‌سازد. روی اکثر هاست‌ها cPanel خودش رایگان صادر می‌کند (AutoSSL).", [
@@ -1160,7 +1266,7 @@ final class UpdateHandler
 
         $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
         $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('✨ قابلیت‌ها', 'a:features')];
-        $rows[] = [self::btn('🧾 لاگ عملیات', 'a:log')];
+        $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('🧾 لاگ عملیات', 'a:log')];
         $rows[] = [self::btn('❓ راهنما', 'a:help')];
 
         return ['inline_keyboard' => $rows];
@@ -1319,6 +1425,47 @@ final class UpdateHandler
             return;
         }
 
+        if ($action === 'responders') {
+            $api->sendChatAction($chatId);
+            try {
+                $text = Render::autoResponders(CpanelService::autoResponders(self::accountClient()));
+                $keyboard = ['inline_keyboard' => [
+                    [self::btn('➕ تنظیم پاسخ خودکار', 'f:responder_add'), self::btn('🗑 حذف', 'f:responder_del')],
+                    [self::btn('⬅️ بازگشت', 'm:email')],
+                ]];
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $keyboard = self::backKeyboard('email');
+            }
+            self::respond($api, $chatId, $text, $keyboard);
+
+            return;
+        }
+
+        if ($action === 'ftpsessions') {
+            $api->sendChatAction($chatId);
+            try {
+                $sessions = CpanelService::ftpSessions(self::accountClient());
+                $text = Render::ftpSessions($sessions);
+                $keyboard = ['inline_keyboard' => array_merge(
+                    $sessions === [] ? [] : [[self::btn('✂️ قطع یک نشست', 'f:ftp_kill')]],
+                    [[self::btn('⬅️ بازگشت', 'm:ftp'), self::btn('🏠 منوی اصلی', 'menu')]],
+                )];
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $keyboard = self::backKeyboard('ftp');
+            }
+            self::respond($api, $chatId, $text, $keyboard);
+
+            return;
+        }
+
+        if ($action === 'report') {
+            self::sendReport($api, $chatId);
+
+            return;
+        }
+
         if ($action === 'cleanup') {
             $api->sendChatAction($chatId);
             try {
@@ -1434,6 +1581,7 @@ final class UpdateHandler
                     CpanelService::domainsData(self::accountClient()),
                 ),
                 'acctfeatures' => Render::features(CpanelService::accountFeatures(self::accountClient())),
+                'bandwidth' => Render::bandwidth(CpanelService::bandwidth(self::accountClient())),
                 'dbinfo' => Render::mysqlInfo(
                     CpanelService::mysqlServerInfo(self::accountClient()),
                     CpanelService::databaseInfo(self::accountClient())['prefix'],
@@ -1478,7 +1626,10 @@ final class UpdateHandler
     private static function actionKeyboard(string $action): array
     {
         $extra = match ($action) {
-            'summary' => [[self::btn('🧩 امکانات فعال حساب', 'a:acctfeatures')]],
+            'summary' => [
+                [self::btn('🧩 امکانات فعال حساب', 'a:acctfeatures')],
+                [self::btn('📄 گزارش وضعیت (فایل)', 'a:report'), self::btn('📶 پهنای‌باند', 'a:bandwidth')],
+            ],
             'acctfeatures' => [[self::btn('⬅️ خلاصه‌ی حساب', 'a:summary')]],
             'domains' => [[self::btn('🩺 بررسی سلامت دامنه', 'f:site_check')]],
             'bigfiles', 'recentfiles' => [[self::btn('🗂 مرور فایل‌ها', 'a:files')]],
@@ -1837,6 +1988,48 @@ final class UpdateHandler
         return $text;
     }
 
+    /**
+     * گزارش وضعیت هاست به‌صورت یک فایل متنی — برای بایگانی یا فرستادن به
+     * پشتیبانی هاست.
+     */
+    private static function sendReport(TelegramApi $api, int $chatId): void
+    {
+        $api->sendChatAction($chatId, 'upload_document');
+
+        try {
+            $client = self::accountClient();
+            $summary = CpanelService::summary($client);
+            $lines = [
+                'گزارش وضعیت هاست — ' . Format::jalaliNow(),
+                str_repeat('=', 48),
+                '',
+                Render::toPlain(Render::summary($summary)),
+                '',
+                str_repeat('-', 48),
+                Render::toPlain(Render::domains($summary['domains'], CpanelService::domainsData($client))),
+                '',
+                str_repeat('-', 48),
+                Render::toPlain(Render::emails(CpanelService::emails($client))),
+                '',
+                str_repeat('-', 48),
+                Render::toPlain(Render::databases(CpanelService::databases($client), CpanelService::databaseUsers($client))),
+                '',
+                str_repeat('-', 48),
+                Render::toPlain(Render::ssl(CpanelService::sslHosts($client))),
+            ];
+
+            $api->sendDocument(
+                $chatId,
+                'host-report-' . gmdate('Ymd-His') . '.txt',
+                implode("\n", $lines),
+                '📄 گزارش وضعیت هاست',
+            );
+            AuditLog::record(self::$actor, (string) (ServerStore::activeId() ?? '-'), 'report', []);
+        } catch (Throwable $e) {
+            self::respond($api, $chatId, Render::error($e), self::backKeyboard());
+        }
+    }
+
     private static function runAutoSslAction(): string
     {
         CpanelService::runAutoSsl(self::accountClient());
@@ -1860,7 +2053,9 @@ final class UpdateHandler
             'mysqlhosts' => 'db',
             'files', 'bigfiles', 'recentfiles' => 'files',
             'acctfeatures' => null,
-            'ftps' => 'ftp',
+            'ftps', 'ftpsessions' => 'ftp',
+            'responders' => 'email',
+            'bandwidth' => 'dom',
             'crons' => 'cron',
             'php' => 'php',
             'backups' => 'backup',
@@ -2099,6 +2294,26 @@ final class UpdateHandler
                 }
 
                 return $simple(array_values(array_unique($dirs)));
+
+            case 'responders':
+                return $simple(array_column(CpanelService::autoResponders(self::accountClient()), 'email'));
+
+            case 'ftp_sessions':
+                $options = [];
+                foreach (CpanelService::ftpSessions(self::accountClient()) as $session) {
+                    if ($session['user'] === '') {
+                        continue;
+                    }
+                    $options[] = [
+                        'label' => $session['user'] . ($session['host'] !== '' ? ' — ' . $session['host'] : ''),
+                        'value' => $session['user'] . '|' . $session['pid'],
+                    ];
+                }
+
+                return $options;
+
+            case 'addon_domains':
+                return $simple(CpanelService::domains(self::accountClient())['addon_domains']);
 
             case 'cleanup':
                 $options = [];
@@ -2649,6 +2864,110 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runMailPurge(array $data): string
+    {
+        $result = CpanelService::purgeMailFolders(self::accountClient(), (string) $data['email']);
+
+        return $result['deleted'] === 0
+            ? '✅ چیزی برای پاک‌کردن نبود؛ Trash و Spam این صندوق خالی‌اند.'
+            : '🧽 ' . $result['deleted'] . ' نامه از ' . implode('، ', $result['folders']) . ' پاک شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runResponderAdd(array $data): string
+    {
+        CpanelService::addAutoResponder(
+            self::accountClient(),
+            (string) $data['email'],
+            (string) $data['subject'],
+            (string) $data['body'],
+        );
+
+        return '🤖 پاسخ خودکار برای <code>' . Format::escapeHtml((string) $data['email']) . '</code> فعال شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runResponderDel(array $data): string
+    {
+        CpanelService::deleteAutoResponder(self::accountClient(), (string) $data['email']);
+
+        return '🗑 پاسخ خودکار حذف شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFtpPasswd(array $data): string
+    {
+        CpanelService::setFtpPassword(self::accountClient(), (string) $data['user'], (string) $data['password']);
+
+        return '✅ رمز حساب FTP <code>' . Format::escapeHtml((string) $data['user']) . '</code> عوض شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFtpQuota(array $data): string
+    {
+        CpanelService::setFtpQuota(self::accountClient(), (string) $data['user'], $data['quota']);
+
+        return '✅ سهمیه‌ی <code>' . Format::escapeHtml((string) $data['user']) . '</code> به‌روزرسانی شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFtpKill(array $data): string
+    {
+        // مقدار انتخاب‌شده به‌شکل «کاربر|pid» ذخیره شده است.
+        [$login, $pid] = array_pad(explode('|', (string) $data['session'], 2), 2, '');
+        CpanelService::killFtpSession(self::accountClient(), $login, $pid);
+
+        return '✂️ نشست <code>' . Format::escapeHtml($login) . '</code> قطع شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runAddonAdd(array $data): string
+    {
+        CpanelService::addAddonDomain(self::accountClient(), (string) $data['domain'], '', (string) ($data['dir'] ?? ''));
+
+        return '✅ دامنه‌ی <code>' . Format::escapeHtml((string) $data['domain']) . "</code> اضافه شد.\n\n"
+            . '💡 قدم بعد: سورس سایت را در پوشه‌اش آپلود کنید و برایش SSL بگیرید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runAddonDel(array $data): string
+    {
+        CpanelService::deleteAddonDomain(self::accountClient(), (string) $data['domain']);
+
+        return '🗑 دامنه‌ی <code>' . Format::escapeHtml((string) $data['domain']) . '</code> از حساب حذف شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runParkAdd(array $data): string
+    {
+        CpanelService::parkDomain(self::accountClient(), (string) $data['domain']);
+
+        return '🅿️ دامنه‌ی <code>' . Format::escapeHtml((string) $data['domain']) . '</code> پارک شد و همان سایت اصلی را نشان می‌دهد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDnsFix(array $data): string
+    {
+        CpanelService::setARecord(
+            self::accountClient(),
+            (string) $data['zone'],
+            (string) $data['name'],
+            (string) $data['ip'],
+        );
+
+        return '✅ رکورد A تنظیم شد روی <code>' . Format::escapeHtml((string) $data['ip']) . "</code>.\n\n"
+            . '⏳ تا چند دقیقه (گاهی چند ساعت) طول می‌کشد تا همه‌جا اعمال شود.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSearch(array $data): string
+    {
+        $term = (string) $data['term'];
+
+        return Render::search($term, CpanelService::search(self::accountClient(), $term));
     }
 
     /** @param array<string, mixed> $data */

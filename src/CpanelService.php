@@ -347,6 +347,96 @@ final class CpanelService
         ]);
     }
 
+    /**
+     * پاک‌سازی سطل زباله و اسپم یک صندوق ایمیل.
+     *
+     * سی‌پنل تابع API برای این کار ندارد، ولی نامه‌ها فایل‌اند: هر صندوق زیر
+     * ~/mail/<domain>/<user>/ با ساختار Maildir نگه داشته می‌شود، پس همان
+     * فایل‌ها را پاک می‌کنیم.
+     *
+     * @return array{deleted: int, folders: array<int, string>}
+     */
+    public static function purgeMailFolders(CpanelClient $client, string $email, bool $spamToo = true): array
+    {
+        [$local, $domain] = self::splitEmail($email);
+        $home = self::homeDir($client);
+        $base = "{$home}/mail/{$domain}/{$local}";
+
+        $folders = ['.Trash/cur', '.Trash/new'];
+        if ($spamToo) {
+            $folders = array_merge($folders, ['.spam/cur', '.spam/new', '.Junk/cur', '.Junk/new']);
+        }
+
+        $deleted = 0;
+        $cleared = [];
+        foreach ($folders as $folder) {
+            $path = "{$base}/{$folder}";
+            $count = (int) self::softCall(fn () => self::purgePath($client, $path), 0);
+            if ($count > 0) {
+                $deleted += $count;
+                $cleared[] = $folder;
+            }
+        }
+
+        return ['deleted' => $deleted, 'folders' => $cleared];
+    }
+
+    /**
+     * پاسخ‌های خودکار ایمیل.
+     *
+     * @return array<int, array{email: string, subject: string, from: string}>
+     */
+    public static function autoResponders(CpanelClient $client): array
+    {
+        $raw = self::uapiOrApi2($client, ['Email', 'list_auto_responders'], ['Email', 'listautoresponders']);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (is_string($row)) {
+                $out[] = ['email' => $row, 'subject' => '', 'from' => ''];
+                continue;
+            }
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[] = [
+                'email' => (string) ($row['email'] ?? ($row['domain'] ?? '')),
+                'subject' => (string) ($row['subject'] ?? ''),
+                'from' => (string) ($row['from'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    public static function addAutoResponder(
+        CpanelClient $client,
+        string $email,
+        string $subject,
+        string $body,
+        string $from = '',
+    ): void {
+        $client->uapi('Email', 'add_auto_responder', [
+            'email' => $email,
+            'from' => $from !== '' ? $from : $email,
+            'subject' => $subject,
+            'body' => $body,
+            'is_html' => 0,
+            'interval' => 4,
+            'start' => 0,
+            'stop' => 0,
+        ]);
+    }
+
+    public static function deleteAutoResponder(CpanelClient $client, string $email): void
+    {
+        self::uapiOrApi2(
+            $client,
+            ['Email', 'delete_auto_responder', ['email' => $email]],
+            ['Email', 'delautoresponder', ['email' => $email]],
+        );
+    }
+
     // ------------------------------------------------------------ دیتابیس
 
     /**
@@ -639,6 +729,49 @@ final class CpanelService
         self::uapiOrApi2($client, ['SubDomain', 'addsubdomain', $params], ['SubDomain', 'addsubdomain', $params]);
     }
 
+    /**
+     * دامنه‌ی اضافه (ادان) — یعنی یک سایت کاملاً جدا روی همین حساب.
+     */
+    public static function addAddonDomain(CpanelClient $client, string $domain, string $subdomain = '', string $dir = ''): void
+    {
+        $subdomain = $subdomain !== '' ? $subdomain : explode('.', $domain)[0];
+        $params = [
+            'newdomain' => $domain,
+            'subdomain' => $subdomain,
+            'dir' => $dir !== '' ? $dir : 'public_html/' . $domain,
+        ];
+
+        self::uapiOrApi2(
+            $client,
+            ['AddonDomain', 'addaddondomain', $params],
+            ['AddonDomain', 'addaddondomain', $params],
+        );
+    }
+
+    public static function deleteAddonDomain(CpanelClient $client, string $domain, string $subdomain = ''): void
+    {
+        $params = ['domain' => $domain, 'subdomain' => $subdomain !== '' ? $subdomain : explode('.', $domain)[0]];
+
+        self::uapiOrApi2(
+            $client,
+            ['AddonDomain', 'deladdondomain', $params],
+            ['AddonDomain', 'deladdondomain', $params],
+        );
+    }
+
+    /**
+     * دامنه‌ی پارک‌شده — یعنی دامنه‌ای که همان سایت اصلی را نشان می‌دهد.
+     */
+    public static function parkDomain(CpanelClient $client, string $domain): void
+    {
+        self::uapiOrApi2($client, ['Park', 'park', ['domain' => $domain]], ['Park', 'park', ['domain' => $domain]]);
+    }
+
+    public static function unparkDomain(CpanelClient $client, string $domain): void
+    {
+        self::uapiOrApi2($client, ['Park', 'unpark', ['domain' => $domain]], ['Park', 'unpark', ['domain' => $domain]]);
+    }
+
     public static function deleteSubdomain(CpanelClient $client, string $fullSubdomain): void
     {
         $params = ['domain' => $fullSubdomain];
@@ -680,6 +813,47 @@ final class CpanelService
             $params['homedir'] = $dir;
         }
         $client->uapi('Ftp', 'add_ftp', $params);
+    }
+
+    public static function setFtpPassword(CpanelClient $client, string $user, string $password): void
+    {
+        $client->uapi('Ftp', 'passwd', ['user' => $user, 'pass' => $password]);
+    }
+
+    public static function setFtpQuota(CpanelClient $client, string $user, mixed $quotaMb): void
+    {
+        $client->uapi('Ftp', 'set_quota', ['user' => $user, 'quota' => self::quotaValue($quotaMb)]);
+    }
+
+    /**
+     * نشست‌های FTP که همین حالا باز هستند.
+     *
+     * @return array<int, array{user: string, host: string, file: string, pid: string, status: string}>
+     */
+    public static function ftpSessions(CpanelClient $client): array
+    {
+        $raw = self::softCall(fn () => $client->uapi('Ftp', 'list_sessions'), []);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[] = [
+                'user' => (string) ($row['user'] ?? ($row['login'] ?? '')),
+                'host' => (string) ($row['host'] ?? ''),
+                'file' => (string) ($row['file'] ?? ''),
+                'pid' => (string) ($row['pid'] ?? ''),
+                'status' => (string) ($row['status'] ?? ($row['cmdline'] ?? '')),
+            ];
+        }
+
+        return $out;
+    }
+
+    public static function killFtpSession(CpanelClient $client, string $login, string $pid): void
+    {
+        $client->uapi('Ftp', 'kill_session', ['login' => $login, 'pid' => $pid]);
     }
 
     public static function deleteFtp(CpanelClient $client, string $user, bool $destroyFiles = false): void
@@ -986,6 +1160,115 @@ final class CpanelService
             'serial' => $zoneData['serial'],
             'remove' => $lineIndex,
         ]);
+    }
+
+    /**
+     * جست‌وجوی سراسری: یک عبارت را در ایمیل‌ها، دیتابیس‌ها، کاربران، دامنه‌ها،
+     * حساب‌های FTP و فایل‌های هوم/public_html می‌گردد.
+     *
+     * @return array<string, array<int, string>>
+     */
+    public static function search(CpanelClient $client, string $term): array
+    {
+        $needle = mb_strtolower(trim($term));
+        if ($needle === '') {
+            return [];
+        }
+
+        $match = static function (array $values) use ($needle): array {
+            $found = [];
+            foreach ($values as $value) {
+                if (str_contains(mb_strtolower((string) $value), $needle)) {
+                    $found[] = (string) $value;
+                }
+            }
+
+            return array_values(array_slice(array_unique($found), 0, 15));
+        };
+
+        $domains = self::softCall(fn () => self::domains($client), ['main_domain' => '', 'addon_domains' => [], 'sub_domains' => [], 'parked_domains' => []]);
+        $home = self::homeDir($client);
+
+        $files = [];
+        foreach ([$home, $home . '/public_html'] as $dir) {
+            foreach (self::softCall(fn () => self::listFiles($client, $dir), []) as $entry) {
+                $files[] = $entry['path'];
+            }
+        }
+
+        $results = [
+            'ایمیل' => $match(array_column(self::softCall(fn () => self::emails($client), []), 'email')),
+            'دیتابیس' => $match(array_column(self::softCall(fn () => self::databases($client), []), 'name')),
+            'کاربر دیتابیس' => $match(self::softCall(fn () => self::databaseUsers($client), [])),
+            'دامنه' => $match(array_merge(
+                [$domains['main_domain']],
+                $domains['addon_domains'],
+                $domains['sub_domains'],
+                $domains['parked_domains'],
+            )),
+            'FTP' => $match(array_column(self::softCall(fn () => self::ftpAccounts($client), []), 'user')),
+            'فایل' => $match($files),
+        ];
+
+        return array_filter($results, static fn (array $rows): bool => $rows !== []);
+    }
+
+    /**
+     * مصرف پهنای‌باند به تفکیک دامنه (اگر هاست این API را داشته باشد).
+     *
+     * @return array<int, array{domain: string, bytes: float}>
+     */
+    public static function bandwidth(CpanelClient $client): array
+    {
+        $raw = self::softCall(
+            fn () => $client->uapi('Bandwidth', 'query', ['grouping' => 'domain', 'interval' => 'daily', 'timezone' => 'UTC']),
+            null,
+        );
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $rows = is_array($raw['domains'] ?? null) ? $raw['domains'] : $raw;
+        $out = [];
+        foreach ($rows as $key => $row) {
+            $domain = is_array($row) ? (string) ($row['domain'] ?? $key) : (string) $key;
+            $bytes = is_array($row) ? ($row['bytes'] ?? ($row['total'] ?? 0)) : $row;
+            if (!is_numeric($bytes)) {
+                continue;
+            }
+            $out[] = ['domain' => $domain, 'bytes' => (float) $bytes];
+        }
+
+        usort($out, static fn (array $a, array $b): int => $b['bytes'] <=> $a['bytes']);
+
+        return $out;
+    }
+
+    /**
+     * جایگزین‌کردن رکورد A یک نام با آی‌پی جدید — برای وقتی دامنه به سرور
+     * اشتباه اشاره می‌کند.
+     */
+    public static function setARecord(CpanelClient $client, string $zone, string $name, string $ip, int $ttl = 14400): void
+    {
+        $zoneData = self::dnsZone($client, $zone);
+        $target = rtrim($name, '.');
+        $targetFull = rtrim($target === '@' ? $zone : $target, '.');
+        if (!str_contains($targetFull, '.')) {
+            $targetFull .= '.' . $zone;
+        }
+
+        foreach ($zoneData['records'] as $record) {
+            if ($record['type'] !== 'A') {
+                continue;
+            }
+            $recordName = rtrim($record['name'], '.');
+            if ($recordName === $targetFull) {
+                self::deleteDnsRecord($client, $zone, $record['line']);
+                break;
+            }
+        }
+
+        self::addDnsRecord($client, $zone, $target, 'A', [$ip], $ttl);
     }
 
     // ----------------------------------------------------------- ریدایرکت

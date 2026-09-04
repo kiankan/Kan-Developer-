@@ -593,6 +593,82 @@ final class Render
         return implode("\n", $lines);
     }
 
+    /**
+     * @param array<int, array{email: string, subject: string, from: string}> $responders
+     */
+    public static function autoResponders(array $responders): string
+    {
+        if ($responders === []) {
+            return "🤖 هیچ پاسخ خودکاری تنظیم نشده.\n\nپاسخ خودکار یعنی هر نامه‌ای که به آن آدرس برسد، یک جواب آماده (مثل «در مرخصی هستم») برایش فرستاده شود.";
+        }
+
+        $lines = ['🤖 <b>پاسخ‌های خودکار</b> (' . count($responders) . ')', ''];
+        foreach ($responders as $responder) {
+            $lines[] = '• <code>' . self::e($responder['email']) . '</code>'
+                . ($responder['subject'] !== '' ? ' — ' . self::e($responder['subject']) : '');
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{user: string, host: string, file: string, pid: string, status: string}> $sessions
+     */
+    public static function ftpSessions(array $sessions): string
+    {
+        if ($sessions === []) {
+            return '🔌 هیچ نشست FTP فعالی نیست.';
+        }
+
+        $lines = ['🔌 <b>نشست‌های FTP باز</b> (' . count($sessions) . ')', ''];
+        foreach ($sessions as $session) {
+            $lines[] = '• <code>' . self::e($session['user']) . '</code> از ' . self::e($session['host'] ?: '—');
+            if ($session['file'] !== '') {
+                $lines[] = '   📄 ' . self::e($session['file']);
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, array<int, string>> $results
+     */
+    public static function search(string $term, array $results): string
+    {
+        if ($results === []) {
+            return '🔍 برای «' . self::e($term) . "» چیزی پیدا نشد.\n\nربات در ایمیل‌ها، دیتابیس‌ها، دامنه‌ها، حساب‌های FTP و فایل‌های هوم می‌گردد.";
+        }
+
+        $lines = ['🔍 <b>نتیجه‌ی جست‌وجوی «' . self::e($term) . '»</b>'];
+        foreach ($results as $group => $rows) {
+            $lines[] = '';
+            $lines[] = '<b>' . self::e((string) $group) . '</b> (' . count($rows) . '):';
+            foreach ($rows as $row) {
+                $lines[] = '• <code>' . self::e($row) . '</code>';
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{domain: string, bytes: float}> $rows
+     */
+    public static function bandwidth(array $rows): string
+    {
+        if ($rows === []) {
+            return 'ℹ️ این هاست آمار پهنای‌باند به تفکیک دامنه را از طریق API نمی‌دهد. مصرف کل را در «خلاصه‌ی حساب» ببینید.';
+        }
+
+        $lines = ['📶 <b>مصرف پهنای‌باند به تفکیک دامنه</b>', ''];
+        foreach ($rows as $row) {
+            $lines[] = '• <code>' . self::e($row['domain']) . '</code> — ' . Format::bytes($row['bytes']);
+        }
+
+        return implode("\n", $lines);
+    }
+
     public static function ssl(array $hosts): string
     {
         if ($hosts === []) {

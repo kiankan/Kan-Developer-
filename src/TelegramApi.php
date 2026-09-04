@@ -160,6 +160,44 @@ final class TelegramApi
         return (string) $body;
     }
 
+    /**
+     * فرستادن یک فایل ساخته‌شده در حافظه (مثل گزارش وضعیت) به‌صورت Document.
+     */
+    public function sendDocument(int $chatId, string $fileName, string $contents, string $caption = ''): void
+    {
+        $boundary = '----teamkan' . bin2hex(random_bytes(10));
+        $fields = ['chat_id' => (string) $chatId];
+        if ($caption !== '') {
+            $fields['caption'] = $caption;
+            $fields['parse_mode'] = 'HTML';
+        }
+
+        $body = '';
+        foreach ($fields as $key => $value) {
+            $body .= "--{$boundary}\r\nContent-Disposition: form-data; name=\"{$key}\"\r\n\r\n{$value}\r\n";
+        }
+        $body .= "--{$boundary}\r\n"
+            . 'Content-Disposition: form-data; name="document"; filename="' . str_replace('"', '', $fileName) . "\"\r\n"
+            . "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+            . $contents . "\r\n--{$boundary}--\r\n";
+
+        $ch = curl_init(self::baseUrl() . "/bot{$this->token}/sendDocument");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data; boundary=' . $boundary],
+            CURLOPT_TIMEOUT => 60,
+        ]);
+        $response = curl_exec($ch);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($response === false) {
+            throw new RuntimeException("فرستادن فایل به تلگرام نشد: {$error}");
+        }
+    }
+
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
     {
         try {

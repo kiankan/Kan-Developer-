@@ -114,6 +114,12 @@ while (time() < $deadline) {
             ['sourceurl' => 'old.example.com', 'destination' => 'https://example.com', 'type' => 'permanent'],
         ]],
         str_contains($path, 'Mysql/list_hosts') => ['status' => 1, 'data' => [['host' => '203.0.113.10']]],
+        str_contains($path, 'Email/list_auto_responders') => ['status' => 1, 'data' => [
+            ['email' => 'info@example.com', 'subject' => 'در مرخصی هستم'],
+        ]],
+        str_contains($path, 'Ftp/list_sessions') => ['status' => 1, 'data' => [
+            ['user' => 'deploy@example.com', 'host' => '203.0.113.9', 'pid' => '2471', 'file' => '/public_html/app.zip'],
+        ]],
         str_contains($path, 'Email/list_forwarders') => ['status' => 1, 'data' => [
             ['dest' => 'info@example.com', 'forward' => 'kian@gmail.com'],
         ]],
