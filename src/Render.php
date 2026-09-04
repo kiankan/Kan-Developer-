@@ -956,6 +956,15 @@ final class Render
             'whm_bulk' => 'تعلیق/رفع تعلیق گروهی', 'export_csv' => 'خروجی CSV',
             'whm_user' => 'انتخاب کاربر مقصد', 'whm_summary' => 'دیدن جزئیات حساب',
             'site_copy' => 'کپی سایت',
+            'filter_add' => 'ساخت فیلتر ایمیل', 'filter_del' => 'حذف فیلتر ایمیل',
+            'mail_track' => 'ردیابی ارسال ایمیل', 'db_export' => 'خروجی SQL دیتابیس',
+            'file_grep' => 'جست‌وجوی متن در فایل‌ها', 'dir_size' => 'اندازه‌گیری پوشه',
+            'file_prune' => 'حذف فایل‌های قدیمی', 'harden' => 'سخت‌سازی سایت',
+            'dns_check' => 'مقایسه‌ی DNS با بیرون', 'ssl_install' => 'نصب گواهی دستی',
+            'ssl_del' => 'حذف گواهی', 'php_limit_set' => 'تغییر محدودیت PHP',
+            'cron_template' => 'ساخت کران آماده', 'backup_download' => 'دانلود بکاپ',
+            'sshkey_add' => 'افزودن کلید SSH', 'sshkey_del' => 'حذف کلید SSH',
+            'whm_quota' => 'تغییر سهمیه‌ی حساب',
         ];
 
         $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];
@@ -1265,6 +1274,313 @@ final class Render
         }
         $lines[] = '';
         $lines[] = 'ℹ️ کارها با همان تایمری اجرا می‌شوند که هشدارها را می‌فرستد، پس تا ۱۵ دقیقه اختلاف طبیعی است.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{checks: array<int, array{label: string, state: string, detail: string, hint: string}>, score: int} $health
+     */
+    public static function health(array $health): string
+    {
+        if ($health['checks'] === []) {
+            return '🩺 چیزی برای بررسی پیدا نشد؛ اول یک هاست فعال کنید.';
+        }
+
+        $bad = 0;
+        $warn = 0;
+        foreach ($health['checks'] as $check) {
+            if ($check['state'] === 'bad') {
+                $bad++;
+            } elseif ($check['state'] === 'warn') {
+                $warn++;
+            }
+        }
+
+        $mood = $bad > 0 ? '🔴' : ($warn > 0 ? '🟡' : '🟢');
+        $lines = [
+            '🩺 <b>چک‌آپ کامل هاست</b>',
+            '',
+            $mood . ' نمره‌ی سلامت: <b>' . $health['score'] . '</b> از ۱۰۰'
+                . ($bad > 0 ? "   ({$bad} مورد جدی)" : ($warn > 0 ? "   ({$warn} مورد قابل بهبود)" : '')),
+            '',
+        ];
+
+        foreach ($health['checks'] as $check) {
+            $icon = match ($check['state']) {
+                'ok' => '✅',
+                'warn' => '⚠️',
+                default => '❌',
+            };
+            $lines[] = $icon . ' <b>' . self::e($check['label']) . '</b> — ' . self::e($check['detail']);
+            if ($check['hint'] !== '') {
+                $lines[] = '   💡 ' . self::e($check['hint']);
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{name: string, enabled: bool, rules: string}> $filters
+     */
+    public static function emailFilters(array $filters): string
+    {
+        if ($filters === []) {
+            return "🧹 <b>فیلترهای ایمیل</b>\n\nهنوز فیلتری تعریف نشده.\n\n"
+                . '💡 فیلتر یعنی «هر نامه‌ای که موضوعش فلان بود، بینداز در پوشه‌ی فلان یا اصلاً نگیرش».';
+        }
+
+        $lines = ['🧹 <b>فیلترهای ایمیل</b> (' . count($filters) . ')', ''];
+        foreach ($filters as $filter) {
+            $lines[] = ($filter['enabled'] ? '✅' : '⏸') . ' <code>' . self::e($filter['name']) . '</code>';
+            if ($filter['rules'] !== '') {
+                $lines[] = '   ' . self::e(mb_substr($filter['rules'], 0, 120));
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{time: ?int, sender: string, recipient: string, status: string, message: string}> $rows
+     */
+    public static function mailDelivery(string $recipient, array $rows): string
+    {
+        $title = '📨 <b>ردیابی ارسال ایمیل</b>'
+            . ($recipient !== '' ? ' — <code>' . self::e($recipient) . '</code>' : '');
+
+        if ($rows === []) {
+            return $title . "\n\nنامه‌ای در بازه‌ی اخیر پیدا نشد.\n\n"
+                . '💡 اگر مطمئنید نامه فرستاده شده، ممکن است سرور لاگش را نگه نداشته باشد.';
+        }
+
+        $lines = [$title, ''];
+        foreach ($rows as $row) {
+            $icon = match ($row['status']) {
+                'تحویل شد' => '✅',
+                'در صف' => '⏳',
+                default => '❌',
+            };
+            $lines[] = $icon . ' <code>' . self::e($row['recipient']) . '</code> — ' . self::e($row['status']);
+            if ($row['sender'] !== '') {
+                $lines[] = '   از: <code>' . self::e($row['sender']) . '</code>';
+            }
+            if ($row['time'] !== null) {
+                $lines[] = '   🕐 ' . self::e(Format::timestampWithRemaining($row['time']));
+            }
+            if ($row['message'] !== '' && $row['status'] !== 'تحویل شد') {
+                $lines[] = '   ↳ ' . self::e(mb_substr($row['message'], 0, 140));
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{matches: array<int, array{path: string, line: int, text: string}>, scanned: int, skipped: int, complete: bool} $result
+     */
+    public static function grep(string $needle, array $result): string
+    {
+        $header = '🔍 <b>جست‌وجوی</b> <code>' . self::e($needle) . '</code>';
+
+        if ($result['matches'] === []) {
+            return $header . "\n\nچیزی پیدا نشد. " . $result['scanned'] . ' فایل متنی گشته شد'
+                . ($result['skipped'] > 0 ? ' و ' . $result['skipped'] . ' فایل بزرگ یا باینری رد شد' : '') . '.';
+        }
+
+        $lines = [$header, '', count($result['matches']) . ' مورد در ' . $result['scanned'] . ' فایل:', ''];
+        $lastPath = '';
+        foreach ($result['matches'] as $match) {
+            if ($match['path'] !== $lastPath) {
+                $lines[] = '📄 <code>' . self::e($match['path']) . '</code>';
+                $lastPath = $match['path'];
+            }
+            $lines[] = '   ' . $match['line'] . ': <code>' . self::e($match['text']) . '</code>';
+        }
+
+        if (!$result['complete']) {
+            $lines[] = '';
+            $lines[] = 'ℹ️ به سقف فایل‌های قابل بررسی رسیدیم؛ برای نتیجه‌ی کامل‌تر پوشه‌ی دقیق‌تری بدهید.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{path: string, size: float, files: int, dirs: int, complete: bool, biggest: array<int, array{path: string, size: float}>} $info
+     */
+    public static function directorySize(array $info): string
+    {
+        $lines = [
+            '📏 <b>اندازه‌ی پوشه</b>',
+            '<code>' . self::e($info['path']) . '</code>',
+            '',
+            'مجموع: <b>' . Format::bytes($info['size']) . '</b>',
+            $info['files'] . ' فایل در ' . $info['dirs'] . ' پوشه',
+        ];
+
+        if ($info['biggest'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>سنگین‌ترین پوشه‌ها:</b>';
+            foreach ($info['biggest'] as $row) {
+                $share = $info['size'] > 0 ? $row['size'] / $info['size'] * 100 : 0.0;
+                $lines[] = '• <code>' . self::e($row['path']) . '</code> — ' . Format::bytes($row['size'])
+                    . ' ' . Format::bar($share, 8);
+            }
+        }
+
+        if (!$info['complete']) {
+            $lines[] = '';
+            $lines[] = 'ℹ️ پوشه‌های خیلی تودرتو تا سقف مشخصی شمرده شدند، پس عدد بالا کمینه‌ی اندازه‌ی واقعی است.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{path: string, name: string, size: float, mtime: int}> $files
+     */
+    public static function oldFiles(string $dir, int $days, array $files): string
+    {
+        if ($files === []) {
+            return '🧯 در <code>' . self::e($dir) . '</code> فایلی قدیمی‌تر از ' . $days . ' روز نبود.';
+        }
+
+        $total = 0.0;
+        foreach ($files as $file) {
+            $total += $file['size'];
+        }
+
+        $lines = [
+            '🧯 <b>فایل‌های قدیمی‌تر از ' . $days . ' روز</b>',
+            '<code>' . self::e($dir) . '</code>',
+            '',
+            count($files) . ' فایل، مجموعاً ' . Format::bytes($total),
+            '',
+        ];
+        foreach (array_slice($files, 0, 12) as $file) {
+            $age = (int) floor((time() - $file['mtime']) / 86400);
+            $lines[] = '• <code>' . self::e($file['name']) . '</code> — ' . Format::bytes($file['size'])
+                . " ({$age} روز)";
+        }
+        if (count($files) > 12) {
+            $lines[] = '… و ' . (count($files) - 12) . ' فایل دیگر.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{domain: string, rows: array<int, array{type: string, name: string, zone: array<int, string>, world: array<int, string>, state: string}>, problems: array<int, string>} $result
+     */
+    public static function dnsCompare(array $result): string
+    {
+        $lines = ['🌍 <b>DNS از دید دنیای بیرون</b> — <code>' . self::e($result['domain']) . '</code>', ''];
+
+        if ($result['rows'] === []) {
+            $lines[] = 'هیچ رکوردی نه روی هاست بود و نه از بیرون دیده شد.';
+        }
+
+        foreach ($result['rows'] as $row) {
+            $icon = match ($row['state']) {
+                'match' => '✅',
+                'differs' => '⚠️',
+                'missing' => '❌',
+                default => 'ℹ️',
+            };
+            $lines[] = $icon . ' <b>' . self::e($row['type']) . '</b> <code>' . self::e($row['name']) . '</code>';
+            $lines[] = '   روی هاست: ' . ($row['zone'] === [] ? '—' : '<code>' . self::e(implode('، ', $row['zone'])) . '</code>');
+            $lines[] = '   از بیرون: ' . ($row['world'] === [] ? '—' : '<code>' . self::e(implode('، ', $row['world'])) . '</code>');
+        }
+
+        if ($result['problems'] === []) {
+            $lines[] = '';
+            $lines[] = '✅ چیزی که روی هاست تنظیم شده، همان چیزی است که دنیا می‌بیند.';
+
+            return implode("\n", $lines);
+        }
+
+        $lines[] = '';
+        $lines[] = '<b>چه چیزی می‌لنگد:</b>';
+        foreach ($result['problems'] as $problem) {
+            $lines[] = '• ' . self::e($problem);
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ تغییر DNS تا چند ساعت طول می‌کشد؛ اگر همین حالا عوضش کردید، کمی بعد دوباره بررسی کنید.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{name: string, type: string, authorized: bool, fingerprint: string}> $keys
+     */
+    public static function sshKeys(array $keys): string
+    {
+        if ($keys === []) {
+            return "🔑 <b>کلیدهای SSH</b>\n\nکلیدی روی این حساب نیست.\n\n"
+                . '💡 با کلید SSH می‌شود بدون رمز به هاست وصل شد و از ابزارهایی مثل rsync و Git استفاده کرد.';
+        }
+
+        $lines = ['🔑 <b>کلیدهای SSH</b> (' . count($keys) . ')', ''];
+        foreach ($keys as $key) {
+            $lines[] = ($key['authorized'] ? '✅' : '⛔️') . ' <code>' . self::e($key['name']) . '</code>'
+                . ($key['type'] !== '' ? ' — ' . self::e($key['type']) : '')
+                . ($key['authorized'] ? '' : ' (مجاز نشده)');
+            if ($key['fingerprint'] !== '') {
+                $lines[] = '   <code>' . self::e(mb_substr($key['fingerprint'], 0, 60)) . '</code>';
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{ip: string, used: bool, dedicated: bool}> $ips
+     */
+    public static function whmIps(array $ips): string
+    {
+        if ($ips === []) {
+            return '🖧 آی‌پی‌ای گزارش نشد.';
+        }
+
+        $free = 0;
+        $lines = ['🖧 <b>آی‌پی‌های سرور</b> (' . count($ips) . ')', ''];
+        foreach ($ips as $ip) {
+            if (!$ip['used']) {
+                $free++;
+            }
+            $lines[] = ($ip['used'] ? '🔵' : '⚪️') . ' <code>' . self::e($ip['ip']) . '</code>'
+                . ($ip['used'] ? ' — در حال استفاده' : ' — آزاد')
+                . ($ip['dedicated'] ? ' (اختصاصی)' : '');
+        }
+        $lines[] = '';
+        $lines[] = $free > 0 ? "{$free} آی‌پی آزاد برای دادن به حساب‌های جدید هست." : 'همه‌ی آی‌پی‌ها در حال استفاده‌اند.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{user: string, reason: string, time: string}> $accounts
+     */
+    public static function whmSuspended(array $accounts): string
+    {
+        if ($accounts === []) {
+            return '✅ هیچ حساب معلقی روی این سرور نیست.';
+        }
+
+        $lines = ['⛔️ <b>حساب‌های معلق</b> (' . count($accounts) . ')', ''];
+        foreach ($accounts as $account) {
+            $lines[] = '• <code>' . self::e($account['user']) . '</code>';
+            if ($account['reason'] !== '') {
+                $lines[] = '   دلیل: ' . self::e($account['reason']);
+            }
+            if ($account['time'] !== '') {
+                $lines[] = '   🕐 ' . self::e($account['time']);
+            }
+        }
+        $lines[] = '';
+        $lines[] = '💡 با «✅ رفع تعلیق» هرکدام را برمی‌گردانید.';
 
         return implode("\n", $lines);
     }

@@ -1274,9 +1274,14 @@ check('همه‌ی دکمه‌ها به جریان/کار موجود وصل‌ا
         assertTrue(isset(flows()[$flow]), "دکمه به جریان ناشناخته‌ی $flow اشاره دارد");
     }
 
+    // فقط داخل خود runAction می‌گردیم؛ وگرنه اسم همان کار در جدول بخش‌ها
+    // پیدا می‌شود و تست الکی سبز می‌ماند.
+    $runAction = substr($source, (int) strpos($source, 'private static function runAction'));
+    $runAction = substr($runAction, 0, (int) strpos($runAction, 'private static function actionKeyboard'));
+
     preg_match_all("/'a:([a-z]+)'/", $source, $actionButtons);
     foreach (array_unique($actionButtons[1]) as $action) {
-        $handled = str_contains($source, "'$action' =>") || str_contains($source, "\$action === '$action'");
+        $handled = str_contains($runAction, "'$action' =>") || str_contains($runAction, "\$action === '$action'");
         assertTrue($handled, "کار $action در runAction پیاده‌سازی نشده است");
     }
 
@@ -1568,6 +1573,241 @@ check('مقایسه‌ی دو هاست تفاوت‌ها را جدا نشان م
     $broken['error'] = 'اتصال برقرار نشد';
     $text = Render::toPlain(Render::serverCompare($side('هاست الف', 'ea-php82', 3), $broken));
     assertTrue(str_contains($text, 'اتصال برقرار نشد'), 'خطای یک طرف باید نمایش داده شود');
+});
+
+echo "\nفیلتر ایمیل، ردیابی ارسال و کلید SSH\n";
+
+check('فیلترهای ایمیل با هر دو شکل پاسخ خوانده می‌شوند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => '{"status":1,"data":[{"filtername":"spam","enabled":1,"filter":"if $header_subject: contains \"x\""},{"filtername":"old","enabled":0}]}',
+    ], $captured));
+
+    $filters = CpanelService::emailFilters($client);
+    assertSame(2, count($filters));
+    assertSame('spam', $filters[0]['name']);
+    assertTrue($filters[0]['enabled']);
+    assertTrue(!$filters[1]['enabled'], 'فیلتر خاموش باید خاموش بماند');
+});
+
+check('ساخت فیلتر، ورودی نامعتبر را رد می‌کند و مقدارها را درست می‌فرستد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    assertThrows(
+        static fn () => CpanelService::addEmailFilter($client, 'x', 'هرچیزی', 'v', 'blackhole'),
+        CpanelError::KIND_CONFIG,
+    );
+    assertThrows(
+        static fn () => CpanelService::addEmailFilter($client, 'x', '$header_subject:', 'v', 'rm-rf'),
+        CpanelError::KIND_CONFIG,
+    );
+
+    CpanelService::addEmailFilter($client, 'بدون اسپم', '$header_subject:', 'viagra', 'blackhole');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'val=viagra'), "عبارت فیلتر فرستاده نشد: $body");
+    assertTrue(str_contains($body, 'action=blackhole'), 'عملیات فیلتر فرستاده نشد');
+
+    // «انداختن در پوشه» بدون مقصد، به INBOX می‌رود نه به مقصد خالی.
+    CpanelService::addEmailFilter($client, 'بایگانی', '$header_from:', 'billing', 'save');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'dest=INBOX'), "مقصد پیش‌فرض ست نشد: $body");
+});
+
+check('وضعیت تحویل نامه به فارسی ترجمه می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => '{"status":1,"data":[{"sendunixtime":1756900000,"sender":"a@b.c","recipient":"x@y.z","type":"success"},'
+            . '{"sendunixtime":1756900100,"sender":"a@b.c","recipient":"q@w.e","defer":"1"},'
+            . '{"sendunixtime":1756900200,"sender":"a@b.c","recipient":"bad@nowhere.tld","type":"failure","message":"host not found"}]}',
+    ], $captured));
+
+    $rows = CpanelService::mailDelivery($client);
+    assertSame('تحویل شد', $rows[0]['status']);
+    assertSame('در صف', $rows[1]['status']);
+    assertSame('ناموفق', $rows[2]['status']);
+    assertSame('host not found', $rows[2]['message']);
+});
+
+check('کلید خصوصی به‌جای عمومی پذیرفته نمی‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    assertThrows(
+        static fn () => CpanelService::importSshKey($client, 'laptop', "-----BEGIN OPENSSH PRIVATE KEY-----\nabc"),
+        CpanelError::KIND_CONFIG,
+    );
+    assertSame([], $captured, 'کلید نامعتبر نباید حتی فرستاده شود');
+
+    CpanelService::importSshKey($client, 'laptop', 'ssh-ed25519 AAAAC3Nza teamkan@test');
+    assertSame(2, count($captured), 'کلید باید هم وارد و هم مجاز شود');
+    assertTrue(str_contains($captured[0]['url'], 'SSH/import_key'), 'اول import_key');
+    assertTrue(str_contains($captured[1]['url'], 'SSH/authorize_key'), 'بعد authorize_key');
+});
+
+echo "\nفایل‌ها: جست‌وجوی متن، اندازه و فایل‌های قدیمی\n";
+
+check('جست‌وجوی متن، فایل باینری و بزرگ را رد می‌کند', function (): void {
+    $captured = [];
+    $listing = json_encode(['status' => 1, 'data' => [
+        ['file' => 'index.php', 'type' => 'file', 'size' => 120],
+        ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
+        ['file' => 'huge.log', 'type' => 'file', 'size' => 900000],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $listing],
+        ['body' => '{"status":1,"data":{"content":"<?php\\n$db = \'demo_old\';\\necho 1;"}}'],
+    ], $captured));
+
+    $result = CpanelService::grepFiles($client, '/home/demo/public_html', 'demo_old');
+
+    assertSame(1, $result['scanned'], 'فقط فایل متنی کوچک باید خوانده شود');
+    assertSame(2, $result['skipped'], 'zip و فایل بزرگ باید رد شوند');
+    assertSame(1, count($result['matches']));
+    assertSame(2, $result['matches'][0]['line'], 'شماره‌ی خط درست نیست');
+    assertTrue($result['complete'], 'جست‌وجو کامل بوده است');
+});
+
+check('اندازه‌ی پوشه، فایل‌ها را جمع می‌زند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => json_encode(['status' => 1, 'data' => [
+            ['file' => 'a.txt', 'type' => 'file', 'size' => 1000],
+            ['file' => 'b.txt', 'type' => 'file', 'size' => 2000],
+        ]]),
+    ], $captured));
+
+    $info = CpanelService::directorySize($client, '/home/demo/public_html');
+    assertSame(3000.0, $info['size']);
+    assertSame(2, $info['files']);
+    assertSame(1, $info['dirs']);
+    assertTrue($info['complete'], 'با یک پوشه، شمارش کامل است');
+});
+
+check('فایل‌های قدیمی‌تر از N روز جدا می‌شوند', function (): void {
+    $captured = [];
+    $old = time() - 40 * 86400;
+    $fresh = time() - 2 * 86400;
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => json_encode(['status' => 1, 'data' => [
+            ['file' => 'old.log', 'type' => 'file', 'size' => 100, 'mtime' => $old],
+            ['file' => 'new.log', 'type' => 'file', 'size' => 200, 'mtime' => $fresh],
+            ['file' => 'archive', 'type' => 'dir', 'size' => 4096, 'mtime' => $old],
+        ]]),
+    ], $captured));
+
+    $files = CpanelService::oldFiles($client, '/home/demo/logs', 30);
+    assertSame(1, count($files), 'فقط فایل قدیمی باید بیاید');
+    assertSame('old.log', $files[0]['name']);
+    // پوشه هرگز حذف نمی‌شود، حتی اگر قدیمی باشد.
+    assertTrue(!in_array('archive', array_column($files, 'name'), true), 'پوشه نباید در فهرست حذف باشد');
+});
+
+check('سخت‌سازی، بلوک نشان‌دار می‌نویسد و با خاموش‌کردن برمی‌گردد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":{"content":"# mine\\n"}}'],   // .htaccess فعلی
+        ['body' => '{"status":1,"data":[]}'],                        // ذخیره
+        ['body' => '{"status":1,"data":[]}'],                        // فهرست پوشه‌ها
+    ], $captured));
+
+    CpanelService::hardenSite($client, '/home/demo/public_html', true);
+    $saved = urldecode($captured[1]['body']);
+    assertTrue(str_contains($saved, 'Options -Indexes'), 'لیست‌شدن پوشه‌ها باید بسته شود');
+    assertTrue(str_contains($saved, 'TEAMKAN HARDEN START'), 'بلوک باید نشان‌دار باشد');
+    assertTrue(str_contains($saved, '# mine'), 'محتوای قبلی باید بماند');
+
+    $with = "# TEAMKAN HARDEN START\nOptions -Indexes\n# TEAMKAN HARDEN END\n# mine\n";
+    assertSame("# mine\n", CpanelService::stripBlock($with, 'HARDEN'));
+});
+
+echo "\nDNS واقعی، محدودیت PHP، کران آماده و WHM\n";
+
+check('مقایسه‌ی DNS، رکورد دیده‌نشده از بیرون را گزارش می‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => json_encode(['status' => 1, 'data' => [
+            ['type' => 'record', 'line_index' => 5, 'record_type' => 'A', 'ttl' => 14400,
+                'dname_b64' => base64_encode('teamkan-does-not-exist.invalid.'),
+                'data_b64' => [base64_encode('203.0.113.10')]],
+        ]]),
+    ], $captured));
+
+    $result = CpanelService::dnsCompare($client, 'teamkan-does-not-exist.invalid');
+    assertSame('teamkan-does-not-exist.invalid', $result['domain']);
+
+    $row = $result['rows'][0] ?? null;
+    assertTrue($row !== null, 'رکورد A باید در نتیجه باشد');
+    assertSame('missing', $row['state'], 'رکوردی که از بیرون دیده نمی‌شود باید missing باشد');
+    assertSame(['203.0.113.10'], $row['zone']);
+    assertTrue($result['problems'] !== [], 'باید مشکل گزارش شود');
+});
+
+check('محدودیت PHP فقط از فهرست مجاز عوض می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    assertThrows(
+        static fn () => CpanelService::setPhpLimit($client, 'example.com', 'disable_functions', ''),
+        CpanelError::KIND_CONFIG,
+    );
+
+    CpanelService::setPhpLimit($client, 'example.com', 'memory_limit', '512M');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'vhost=example.com'), 'نام دامنه فرستاده نشد');
+    assertTrue(str_contains($body, 'directive=memory_limit:512M'), "مقدار درست فرستاده نشد: $body");
+});
+
+check('قالب‌های کران، زمان‌بندی معتبر و جای‌خالی درست دارند', function (): void {
+    foreach (CpanelService::cronTemplates() as $key => $template) {
+        assertTrue(
+            CpanelService::parseSchedule($template['schedule']) !== null,
+            "زمان‌بندی قالب $key معتبر نیست",
+        );
+        assertTrue(in_array($template['needs'], ['docroot', 'domain'], true), "نیاز قالب $key نامعتبر است");
+        assertTrue(
+            str_contains($template['command'], '{docroot}') || str_contains($template['command'], '{domain}'),
+            "دستور قالب $key جای‌خالی ندارد",
+        );
+    }
+
+    $wordpress = CpanelService::cronTemplates()['wordpress'];
+    assertTrue(str_contains($wordpress['command'], 'wp-cron.php'), 'کران وردپرس باید wp-cron را صدا بزند');
+});
+
+check('آی‌پی‌ها و حساب‌های معلق WHM با هر شکل پاسخ خوانده می‌شوند', function (): void {
+    $captured = [];
+    $whm = new CpanelClient(
+        cpanelServer(['type' => CpanelClient::TYPE_WHM, 'port' => 2087, 'user' => 'root']),
+        fakeTransport([
+            ['body' => '{"data":{"ip":[{"ip":"203.0.113.7","used":1,"dedicated":0},{"ip":"203.0.113.8","used":0,"dedicated":1}]},"metadata":{"result":1}}'],
+            ['body' => '{"data":{"accts":[{"user":"ali","reason":"عدم پرداخت","time":"2026-09-01"}]},"metadata":{"result":1}}'],
+        ], $captured),
+    );
+
+    $ips = CpanelService::whmIps($whm);
+    assertSame(2, count($ips));
+    assertTrue($ips[0]['used'], 'آی‌پی اول در حال استفاده است');
+    assertTrue($ips[1]['dedicated'], 'آی‌پی دوم اختصاصی است');
+
+    $suspended = CpanelService::whmSuspended($whm);
+    assertSame('ali', $suspended[0]['user']);
+    assertSame('عدم پرداخت', $suspended[0]['reason']);
+});
+
+check('چک‌آپ، نمره و راهکار می‌دهد', function (): void {
+    $health = [
+        'checks' => [
+            ['label' => 'Disk Usage', 'state' => 'ok', 'detail' => '50٪ پر شده', 'hint' => ''],
+            ['label' => 'بکاپ', 'state' => 'bad', 'detail' => 'هیچ بکاپی روی حساب نیست', 'hint' => 'بکاپ خودکار را روشن کنید.'],
+        ],
+        'score' => 50,
+    ];
+    $text = Render::toPlain(Render::health($health));
+
+    assertTrue(str_contains($text, 'نمره‌ی سلامت'), 'نمره باید نمایش داده شود');
+    assertTrue(str_contains($text, '1 مورد جدی'), 'تعداد موارد جدی باید گفته شود');
+    assertTrue(str_contains($text, 'بکاپ خودکار را روشن کنید'), 'راهکار باید نمایش داده شود');
 });
 
 echo "\nState و AuditLog\n";

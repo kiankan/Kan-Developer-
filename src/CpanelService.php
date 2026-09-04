@@ -1430,6 +1430,19 @@ final class CpanelService
         return $out;
     }
 
+    /**
+     * مثل phpLimits، ولی اگر خواندن نشد به‌جای خطا خالی برمی‌گرداند — برای
+     * وقتی که فقط می‌خواهیم مقدار تازه‌ی تنظیم‌شده را نشان بدهیم.
+     *
+     * @return array<string, string>
+     */
+    public static function softLimits(CpanelClient $client, string $vhost): array
+    {
+        $limits = self::softCall(fn () => self::phpLimits($client, $vhost), []);
+
+        return is_array($limits) ? $limits : [];
+    }
+
     public static function setPhpVersion(CpanelClient $client, string $vhost, string $version): void
     {
         $client->uapi('LangPHP', 'php_set_vhost_lang_version', ['vhost' => $vhost, 'version' => $version]);
@@ -3330,6 +3343,948 @@ final class CpanelService
         $current = (string) self::softCall(fn () => self::readFile($client, self::normalizePath($docroot) . '/.htaccess'), '');
 
         return str_contains($current, 'TEAMKAN HOTLINK START');
+    }
+
+    // ---------------------------------------------------------- فیلتر ایمیل
+
+    /**
+     * فیلترهای سطح حساب (همان Email Filters پنل).
+     *
+     * @return array<int, array{name: string, enabled: bool, rules: string}>
+     */
+    public static function emailFilters(CpanelClient $client, string $account = ''): array
+    {
+        $params = $account === '' ? [] : ['account' => $account];
+        $raw = $client->uapi('Email', 'list_filters', $params);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (is_string($row)) {
+                $out[] = ['name' => $row, 'enabled' => true, 'rules' => ''];
+                continue;
+            }
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = (string) ($row['filtername'] ?? ($row['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $out[] = [
+                'name' => $name,
+                'enabled' => !isset($row['enabled']) || (string) $row['enabled'] === '1',
+                'rules' => trim((string) ($row['filter'] ?? '')),
+            ];
+        }
+
+        return $out;
+    }
+
+    /** بخش‌هایی از نامه که می‌شود رویشان فیلتر گذاشت. */
+    public const FILTER_PARTS = [
+        '$header_subject:' => 'موضوع نامه',
+        '$header_from:' => 'فرستنده',
+        '$header_to:' => 'گیرنده',
+        '$message_body' => 'متن نامه',
+    ];
+
+    /** کاری که فیلتر انجام می‌دهد. */
+    public const FILTER_ACTIONS = [
+        'blackhole' => 'حذف بی‌صدا',
+        'fail' => 'رد کردن با خطا',
+        'save' => 'انداختن در پوشه',
+    ];
+
+    /**
+     * ساخت فیلتر ایمیل. مقصد فقط برای «انداختن در پوشه» معنا دارد.
+     */
+    public static function addEmailFilter(
+        CpanelClient $client,
+        string $name,
+        string $part,
+        string $value,
+        string $action,
+        string $destination = '',
+        string $account = '',
+        string $match = 'contains',
+    ): void {
+        if (!isset(self::FILTER_PARTS[$part])) {
+            throw CpanelError::config('بخش انتخاب‌شده‌ی نامه معتبر نیست.');
+        }
+        if (!isset(self::FILTER_ACTIONS[$action])) {
+            throw CpanelError::config('عملیات انتخاب‌شده معتبر نیست.');
+        }
+
+        $destination = trim($destination);
+        if ($action === 'save' && $destination === '') {
+            $destination = 'INBOX';
+        }
+
+        $params = [
+            'filtername' => $name,
+            'part' => $part,
+            'match' => $match,
+            'val' => $value,
+            'opt' => 'or',
+            'action' => $action,
+            'dest' => $destination,
+        ];
+        if ($account !== '') {
+            $params['account'] = $account;
+        }
+
+        $client->uapi('Email', 'store_filter', $params);
+    }
+
+    public static function deleteEmailFilter(CpanelClient $client, string $name, string $account = ''): void
+    {
+        $params = ['filtername' => $name];
+        if ($account !== '') {
+            $params['account'] = $account;
+        }
+
+        $client->uapi('Email', 'delete_filter', $params);
+    }
+
+    /**
+     * ردیابی ارسال نامه‌ها (همان Track Delivery پنل): آیا نامه تحویل شده،
+     * در صف مانده، یا برگشت خورده است.
+     *
+     * @return array<int, array{time: ?int, sender: string, recipient: string, status: string, message: string}>
+     */
+    public static function mailDelivery(CpanelClient $client, string $recipient = '', int $limit = 15): array
+    {
+        $params = ['api.chunk.enable' => 1, 'api.chunk.size' => max(1, $limit)];
+        if (trim($recipient) !== '') {
+            $params['recipient'] = trim($recipient);
+        }
+
+        $raw = $client->uapi('EmailTrack', 'search', $params);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[] = [
+                'time' => isset($row['sendunixtime']) ? (int) $row['sendunixtime'] : null,
+                'sender' => (string) ($row['sender'] ?? ''),
+                'recipient' => (string) ($row['recipient'] ?? ($row['deliveredto'] ?? '')),
+                'status' => self::deliveryStatus($row),
+                'message' => trim((string) ($row['message'] ?? '')),
+            ];
+            if (count($out) >= $limit) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function deliveryStatus(array $row): string
+    {
+        $type = strtolower((string) ($row['type'] ?? ''));
+        if ($type !== '') {
+            return match ($type) {
+                'success' => 'تحویل شد',
+                'defer', 'inprogress', 'queued' => 'در صف',
+                'failure', 'bounce', 'error' => 'ناموفق',
+                default => $type,
+            };
+        }
+        if ((string) ($row['success'] ?? '') === '1') {
+            return 'تحویل شد';
+        }
+        if ((string) ($row['defer'] ?? '') === '1') {
+            return 'در صف';
+        }
+
+        return 'ناموفق';
+    }
+
+    // ------------------------------------------------------ خروجی دیتابیس
+
+    /**
+     * گرفتن خروجی SQL یک دیتابیس.
+     *
+     * UAPI برای این کار تابعی ندارد؛ خود cPanel از مسیر قدیمی
+     * <code>/getsqlbackup/</code> استفاده می‌کند و ما هم همان را با توکن صدا
+     * می‌زنیم. اگر روی این سرور بسته باشد، صریح می‌گوییم و راه جایگزین را
+     * پیشنهاد می‌دهیم.
+     *
+     * @return array{name: string, content: string}
+     */
+    public static function exportDatabase(CpanelClient $client, string $database): array
+    {
+        $database = trim($database);
+        if ($database === '') {
+            throw CpanelError::config('نام دیتابیس خالی است.');
+        }
+
+        $content = self::softCall(
+            fn () => $client->getRaw('getsqlbackup/' . rawurlencode($database) . '.sql.gz'),
+            null,
+        );
+
+        if (is_string($content) && $content !== '' && str_starts_with($content, "\x1f\x8b")) {
+            return ['name' => $database . '-' . gmdate('Ymd-Hi') . '.sql.gz', 'content' => $content];
+        }
+
+        // بعضی سرورها همان محتوا را بدون فشرده‌سازی می‌دهند.
+        if (is_string($content) && str_starts_with(ltrim($content), '--') && str_contains($content, 'CREATE')) {
+            return ['name' => $database . '-' . gmdate('Ymd-Hi') . '.sql', 'content' => $content];
+        }
+
+        throw CpanelError::api(
+            "این هاست اجازه‌ی خروجی‌گرفتن مستقیم از دیتابیس «{$database}» را نمی‌دهد.\n\n"
+            . '💡 به‌جایش «💾 بکاپ → گرفتن بکاپ کامل» را بزنید؛ دیتابیس‌ها هم داخل همان بکاپ هستند.'
+        );
+    }
+
+    // -------------------------------------------------------- کار با فایل‌ها
+
+    /** پسوندهایی که جست‌وجوی متن داخلشان بی‌معنی است. */
+    private const BINARY_FOR_GREP = 'zip|tar|gz|tgz|bz2|rar|7z|jpe?g|png|gif|webp|ico|bmp|pdf|mp[34]|avi|mkv|mov|woff2?|ttf|eot|so|bin|sqlite3?|db|class|jar';
+
+    /**
+     * جست‌وجوی یک عبارت داخل فایل‌های متنی یک پوشه.
+     *
+     * هر فایل یک درخواست API است، پس تعداد فایل‌ها سقف دارد؛ سقف در خروجی
+     * گزارش می‌شود تا کاربر بداند جست‌وجو کامل بوده یا نه.
+     *
+     * @return array{matches: array<int, array{path: string, line: int, text: string}>, scanned: int, skipped: int, complete: bool}
+     */
+    public static function grepFiles(
+        CpanelClient $client,
+        string $dir,
+        string $needle,
+        int $maxFiles = 25,
+        int $maxSize = 524288,
+    ): array {
+        $needle = trim($needle);
+        if ($needle === '') {
+            throw CpanelError::config('عبارت جست‌وجو خالی است.');
+        }
+
+        $matches = [];
+        $scanned = 0;
+        $skipped = 0;
+        $complete = true;
+        $queue = [[self::normalizePath($dir), 0]];
+
+        while ($queue !== []) {
+            [$current, $depth] = array_shift($queue);
+
+            foreach (self::softCall(fn () => self::listFiles($client, $current), []) as $entry) {
+                if ($entry['dir']) {
+                    if ($depth < 1 && !in_array($entry['name'], ['node_modules', 'vendor', 'cache', '.git', 'mail'], true)) {
+                        $queue[] = [$entry['path'], $depth + 1];
+                    }
+                    continue;
+                }
+                if (preg_match('/\.(' . self::BINARY_FOR_GREP . ')$/i', $entry['name']) === 1
+                    || (float) ($entry['size'] ?? 0) > $maxSize) {
+                    $skipped++;
+                    continue;
+                }
+                if ($scanned >= $maxFiles) {
+                    $complete = false;
+                    break 2;
+                }
+
+                $scanned++;
+                $content = (string) self::softCall(fn () => self::readFile($client, $entry['path']), '');
+                if ($content === '' || !str_contains($content, $needle)) {
+                    continue;
+                }
+                foreach (explode("\n", $content) as $index => $line) {
+                    if (!str_contains($line, $needle)) {
+                        continue;
+                    }
+                    $matches[] = [
+                        'path' => $entry['path'],
+                        'line' => $index + 1,
+                        'text' => trim(mb_substr($line, 0, 160)),
+                    ];
+                    if (count($matches) >= 30) {
+                        break 3;
+                    }
+                }
+            }
+        }
+
+        return ['matches' => $matches, 'scanned' => $scanned, 'skipped' => $skipped, 'complete' => $complete];
+    }
+
+    /**
+     * اندازه‌ی یک پوشه با زیرپوشه‌هایش (تا سقف مشخصی از پوشه، تا تعداد
+     * درخواست‌ها منفجر نشود).
+     *
+     * @return array{path: string, size: float, files: int, dirs: int, complete: bool, biggest: array<int, array{path: string, size: float}>}
+     */
+    public static function directorySize(CpanelClient $client, string $dir, int $maxDirs = 60): array
+    {
+        $root = self::normalizePath($dir);
+        $queue = [$root];
+        $size = 0.0;
+        $files = 0;
+        $dirs = 0;
+        $perDir = [];
+        $complete = true;
+
+        while ($queue !== []) {
+            if ($dirs >= $maxDirs) {
+                $complete = false;
+                break;
+            }
+            $current = array_shift($queue);
+            $dirs++;
+
+            foreach (self::softCall(fn () => self::listFiles($client, $current), []) as $entry) {
+                if ($entry['dir']) {
+                    $queue[] = $entry['path'];
+                    continue;
+                }
+                $entrySize = (float) ($entry['size'] ?? 0);
+                $size += $entrySize;
+                $files++;
+                $perDir[$current] = ($perDir[$current] ?? 0.0) + $entrySize;
+            }
+        }
+
+        arsort($perDir);
+        $biggest = [];
+        foreach (array_slice($perDir, 0, 8, true) as $path => $dirSize) {
+            $biggest[] = ['path' => (string) $path, 'size' => (float) $dirSize];
+        }
+
+        return ['path' => $root, 'size' => $size, 'files' => $files, 'dirs' => $dirs, 'complete' => $complete, 'biggest' => $biggest];
+    }
+
+    /**
+     * فایل‌های قدیمی‌تر از N روز در یک پوشه (بدون زیرپوشه‌ها).
+     *
+     * @return array<int, array{path: string, name: string, size: float, mtime: int}>
+     */
+    public static function oldFiles(CpanelClient $client, string $dir, int $days): array
+    {
+        $cutoff = time() - max(1, $days) * 86400;
+        $out = [];
+
+        foreach (self::listFiles($client, $dir) as $entry) {
+            if ($entry['dir'] || $entry['mtime'] === null || $entry['mtime'] >= $cutoff) {
+                continue;
+            }
+            $out[] = [
+                'path' => $entry['path'],
+                'name' => $entry['name'],
+                'size' => (float) ($entry['size'] ?? 0),
+                'mtime' => (int) $entry['mtime'],
+            ];
+        }
+
+        usort($out, static fn (array $a, array $b): int => $a['mtime'] <=> $b['mtime']);
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, array{path: string, name: string, size: float, mtime: int}> $files
+     *
+     * @return array{deleted: int, freed: float, failed: array<int, string>}
+     */
+    public static function deleteFiles(CpanelClient $client, array $files): array
+    {
+        $deleted = 0;
+        $freed = 0.0;
+        $failed = [];
+
+        foreach ($files as $file) {
+            try {
+                self::deletePath($client, $file['path']);
+                $deleted++;
+                $freed += $file['size'];
+            } catch (Throwable $e) {
+                $failed[] = $file['name'] . ' — ' . $e->getMessage();
+            }
+        }
+
+        return ['deleted' => $deleted, 'freed' => $freed, 'failed' => $failed];
+    }
+
+    // ------------------------------------------------------ سخت‌سازی سایت
+
+    /** پوشه‌هایی که معمولاً فایل کاربر داخلشان آپلود می‌شود. */
+    private const UPLOAD_DIRS = ['wp-content/uploads', 'uploads', 'upload', 'storage/app/public', 'files', 'media'];
+
+    /**
+     * سخت‌سازی پوشه‌ی سایت: بستن لیست‌شدن فایل‌ها، بستن دسترسی وب به فایل‌های
+     * حساس، و جلوگیری از اجرای PHP داخل پوشه‌های آپلود.
+     *
+     * @return array{htaccess: string, uploads: array<int, string>}
+     */
+    public static function hardenSite(CpanelClient $client, string $docroot, bool $enable): array
+    {
+        $docroot = self::normalizePath($docroot);
+        $htaccess = $docroot . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+        $touched = [];
+
+        if (!$enable) {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'HARDEN'));
+            foreach (self::uploadDirs($client, $docroot) as $dir) {
+                $guard = $dir . '/.htaccess';
+                $body = (string) self::softCall(fn () => self::readFile($client, $guard), '');
+                if (str_contains($body, 'TEAMKAN HARDEN START')) {
+                    self::saveFile($client, $guard, self::stripBlock($body, 'HARDEN'));
+                    $touched[] = $dir;
+                }
+            }
+
+            return ['htaccess' => $htaccess, 'uploads' => $touched];
+        }
+
+        $rules = implode("\n", [
+            '# TEAMKAN HARDEN START',
+            '# لیست‌شدن محتوای پوشه‌ها بسته می‌شود',
+            'Options -Indexes',
+            '# فایل‌هایی که نباید از وب دانلود شوند',
+            '<FilesMatch "(^\.(env|git|htpasswd|htaccess|npmrc|user\.ini)|\.(sql|bak|old|swp|dist|log)$)">',
+            '    Require all denied',
+            '</FilesMatch>',
+            '# TEAMKAN HARDEN END',
+            '',
+        ]);
+        self::saveFile($client, $htaccess, $rules . self::stripBlock($current, 'HARDEN'));
+
+        $guardRules = implode("\n", [
+            '# TEAMKAN HARDEN START',
+            '# هیچ فایل PHPی داخل پوشه‌ی آپلود اجرا نمی‌شود',
+            '<FilesMatch "\.(php[0-9]?|phtml|phar)$">',
+            '    Require all denied',
+            '</FilesMatch>',
+            '# TEAMKAN HARDEN END',
+            '',
+        ]);
+        foreach (self::uploadDirs($client, $docroot) as $dir) {
+            $guard = $dir . '/.htaccess';
+            $body = (string) self::softCall(fn () => self::readFile($client, $guard), '');
+            self::saveFile($client, $guard, $guardRules . self::stripBlock($body, 'HARDEN'));
+            $touched[] = $dir;
+        }
+
+        return ['htaccess' => $htaccess, 'uploads' => $touched];
+    }
+
+    /**
+     * پوشه‌های آپلودی که واقعاً وجود دارند.
+     *
+     * @return array<int, string>
+     */
+    private static function uploadDirs(CpanelClient $client, string $docroot): array
+    {
+        $names = [];
+        foreach (self::softCall(fn () => self::listFiles($client, $docroot), []) as $entry) {
+            if ($entry['dir']) {
+                $names[strtolower($entry['name'])] = $entry['path'];
+            }
+        }
+
+        $found = [];
+        foreach (self::UPLOAD_DIRS as $candidate) {
+            $first = strtolower(explode('/', $candidate)[0]);
+            if (!isset($names[$first])) {
+                continue;
+            }
+            $path = rtrim($docroot, '/') . '/' . $candidate;
+            // فقط وقتی مسیر کامل واقعاً هست (مثلاً wp-content/uploads).
+            if (self::softCall(fn () => self::listFiles($client, $path), null) !== null) {
+                $found[$path] = true;
+            }
+        }
+
+        return array_keys($found);
+    }
+
+    public static function isHardened(CpanelClient $client, string $docroot): bool
+    {
+        $current = (string) self::softCall(fn () => self::readFile($client, self::normalizePath($docroot) . '/.htaccess'), '');
+
+        return str_contains($current, 'TEAMKAN HARDEN START');
+    }
+
+    // ------------------------------------------------------- بررسی DNS واقعی
+
+    /**
+     * مقایسه‌ی رکوردهای زون روی هاست با آنچه دنیای بیرون واقعاً می‌بیند.
+     *
+     * @return array{domain: string, rows: array<int, array{type: string, name: string, zone: array<int, string>, world: array<int, string>, state: string}>, problems: array<int, string>}
+     */
+    public static function dnsCompare(CpanelClient $client, string $domain): array
+    {
+        $domain = SiteCheck::cleanDomain($domain);
+        $zone = self::softCall(fn () => self::dnsZone($client, $domain), ['records' => [], 'serial' => null, 'api2' => false]);
+
+        $wanted = [
+            ['type' => 'A', 'name' => $domain],
+            ['type' => 'A', 'name' => 'www.' . $domain],
+            ['type' => 'MX', 'name' => $domain],
+            ['type' => 'TXT', 'name' => $domain],
+            ['type' => 'NS', 'name' => $domain],
+        ];
+
+        $rows = [];
+        $problems = [];
+        foreach ($wanted as $item) {
+            $inZone = self::zoneValues($zone['records'] ?? [], $item['type'], $item['name']);
+            $inWorld = self::worldValues($item['type'], $item['name']);
+
+            if ($inZone === [] && $inWorld === []) {
+                continue;
+            }
+
+            $state = 'match';
+            if ($inZone !== [] && $inWorld === []) {
+                $state = 'missing';
+            } elseif ($inZone === [] && $inWorld !== []) {
+                $state = 'extra';
+            } elseif (array_diff($inZone, $inWorld) !== [] || array_diff($inWorld, $inZone) !== []) {
+                $state = 'differs';
+            }
+
+            $rows[] = ['type' => $item['type'], 'name' => $item['name'], 'zone' => $inZone, 'world' => $inWorld, 'state' => $state];
+
+            if ($state === 'missing') {
+                $problems[] = "رکورد {$item['type']} برای «{$item['name']}» روی هاست هست ولی از بیرون دیده نمی‌شود.";
+            } elseif ($state === 'differs') {
+                $problems[] = "رکورد {$item['type']} برای «{$item['name']}» با چیزی که دنیا می‌بیند فرق دارد.";
+            } elseif ($state === 'extra') {
+                $problems[] = "رکورد {$item['type']} برای «{$item['name']}» از بیرون دیده می‌شود ولی در زون این هاست نیست.";
+            }
+        }
+
+        if (($zone['records'] ?? []) === []) {
+            $problems[] = 'زون این دامنه روی خود هاست پیدا نشد؛ احتمالاً DNS دامنه جای دیگری (مثل کلادفلر یا ثبت‌کننده) مدیریت می‌شود.';
+        }
+
+        return ['domain' => $domain, 'rows' => $rows, 'problems' => $problems];
+    }
+
+    /**
+     * @param array<int, array{name: string, type: string, data: array<int, string>}> $records
+     *
+     * @return array<int, string>
+     */
+    private static function zoneValues(array $records, string $type, string $name): array
+    {
+        $name = strtolower(rtrim($name, '.'));
+        $out = [];
+        foreach ($records as $record) {
+            if (strtoupper($record['type']) !== $type) {
+                continue;
+            }
+            if (strtolower(rtrim($record['name'], '.')) !== $name) {
+                continue;
+            }
+            $out[] = strtolower(trim(implode(' ', $record['data'])));
+        }
+        sort($out);
+
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function worldValues(string $type, string $name): array
+    {
+        $map = ['A' => DNS_A, 'MX' => DNS_MX, 'TXT' => DNS_TXT, 'NS' => DNS_NS, 'CNAME' => DNS_CNAME];
+        $records = @dns_get_record($name, $map[$type] ?? DNS_A) ?: [];
+
+        $out = [];
+        foreach ($records as $record) {
+            $value = match ($type) {
+                'A' => (string) ($record['ip'] ?? ''),
+                'MX' => trim(($record['pri'] ?? '') . ' ' . ($record['target'] ?? '')),
+                'TXT' => (string) ($record['txt'] ?? ''),
+                'NS', 'CNAME' => (string) ($record['target'] ?? ''),
+                default => '',
+            };
+            $value = strtolower(trim($value));
+            if ($value !== '') {
+                $out[] = $value;
+            }
+        }
+        sort($out);
+
+        return array_values(array_unique($out));
+    }
+
+    // ------------------------------------------------------------ گواهی SSL
+
+    /**
+     * نصب گواهی دستی (وقتی گواهی را از جای دیگری خریده‌اید).
+     */
+    public static function installSsl(CpanelClient $client, string $domain, string $certificate, string $key, string $bundle = ''): void
+    {
+        $params = ['domain' => $domain, 'cert' => trim($certificate), 'key' => trim($key)];
+        if (trim($bundle) !== '') {
+            $params['cabundle'] = trim($bundle);
+        }
+
+        $client->uapi('SSL', 'install_ssl', $params);
+    }
+
+    public static function deleteSsl(CpanelClient $client, string $domain): void
+    {
+        $client->uapi('SSL', 'delete_ssl', ['domain' => $domain]);
+    }
+
+    // ----------------------------------------------------- محدودیت‌های PHP
+
+    /** محدودیت‌هایی که از داخل ربات می‌شود عوض کرد. */
+    public const PHP_DIRECTIVES = [
+        'memory_limit' => 'حافظه‌ی مجاز هر درخواست',
+        'upload_max_filesize' => 'حداکثر حجم فایل آپلودی',
+        'post_max_size' => 'حداکثر حجم کل درخواست',
+        'max_execution_time' => 'حداکثر زمان اجرا (ثانیه)',
+        'max_input_vars' => 'حداکثر تعداد فیلد فرم',
+        'display_errors' => 'نمایش خطاها روی صفحه',
+    ];
+
+    public static function setPhpLimit(CpanelClient $client, string $vhost, string $directive, string $value): void
+    {
+        if (!isset(self::PHP_DIRECTIVES[$directive])) {
+            throw CpanelError::config("محدودیت «{$directive}» قابل تغییر نیست.");
+        }
+
+        $client->uapi('LangPHP', 'php_ini_set_user_basic_directives', [
+            'type' => 'vhost',
+            'vhost' => $vhost,
+            'directive' => [$directive . ':' . $value],
+        ]);
+    }
+
+    // ----------------------------------------------------------- قالب کران
+
+    /**
+     * کران‌های آماده‌ی کارهای رایج.
+     *
+     * @return array<string, array{label: string, hint: string, schedule: string, command: string, needs: string}>
+     */
+    public static function cronTemplates(string $php = '/usr/local/bin/php'): array
+    {
+        return [
+            'wordpress' => [
+                'label' => '🟦 کران وردپرس (هر ۵ دقیقه)',
+                'hint' => 'وقتی سایت کم‌بازدید است، کارهای زمان‌بندی‌شده‌ی وردپرس اجرا نمی‌شوند؛ این کران خودش اجرایشان می‌کند.',
+                'schedule' => '*/5 * * * *',
+                'command' => 'cd {docroot} && ' . $php . ' -q wp-cron.php >/dev/null 2>&1',
+                'needs' => 'docroot',
+            ],
+            'laravel' => [
+                'label' => '🟥 زمان‌بند لاراول (هر دقیقه)',
+                'hint' => 'لاراول برای زمان‌بندی کارهایش دقیقاً به همین یک کران نیاز دارد.',
+                'schedule' => '* * * * *',
+                'command' => 'cd {docroot} && ' . $php . ' artisan schedule:run >/dev/null 2>&1',
+                'needs' => 'docroot',
+            ],
+            'queue' => [
+                'label' => '🟨 اجرای صف لاراول (هر ۵ دقیقه)',
+                'hint' => 'کارهای پس‌زمینه‌ی صف را جلو می‌برد بدون اینکه به daemon نیاز باشد.',
+                'schedule' => '*/5 * * * *',
+                'command' => 'cd {docroot} && ' . $php . ' artisan queue:work --stop-when-empty >/dev/null 2>&1',
+                'needs' => 'docroot',
+            ],
+            'logs' => [
+                'label' => '🧹 پاک‌کردن لاگ‌های قدیمی (هفتگی)',
+                'hint' => 'فایل‌های لاگ قدیمی‌تر از ۳۰ روز را پاک می‌کند تا فضای هاست پر نشود.',
+                'schedule' => '0 3 * * 0',
+                'command' => 'find {docroot}/logs -type f -mtime +30 -delete >/dev/null 2>&1',
+                'needs' => 'docroot',
+            ],
+            'keepalive' => [
+                'label' => '🔄 بیدار نگه‌داشتن سایت (هر ۱۰ دقیقه)',
+                'hint' => 'یک درخواست ساده به سایت می‌زند تا کش گرم بماند و سایت کند باز نشود.',
+                'schedule' => '*/10 * * * *',
+                'command' => 'curl -s -o /dev/null https://{domain}/',
+                'needs' => 'domain',
+            ],
+        ];
+    }
+
+    // -------------------------------------------------------- کلیدهای SSH
+
+    /**
+     * @return array<int, array{name: string, type: string, authorized: bool, fingerprint: string}>
+     */
+    public static function sshKeys(CpanelClient $client): array
+    {
+        $raw = $client->uapi('SSH', 'list_keys');
+        $out = [];
+
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = (string) ($row['name'] ?? ($row['file'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $authorized = $row['authorized'] ?? ($row['auth_status'] ?? null);
+            $out[] = [
+                'name' => $name,
+                'type' => (string) ($row['key_type'] ?? ($row['type'] ?? '')),
+                'authorized' => in_array((string) $authorized, ['1', 'authorized', 'true'], true),
+                'fingerprint' => (string) ($row['fingerprint'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * وارد کردن یک کلید عمومی و در همان قدم مجاز کردنش.
+     */
+    public static function importSshKey(CpanelClient $client, string $name, string $publicKey): void
+    {
+        $publicKey = trim($publicKey);
+        if (!str_starts_with($publicKey, 'ssh-') && !str_starts_with($publicKey, 'ecdsa-')) {
+            throw CpanelError::config(
+                "این کلید عمومی به نظر نمی‌رسد؛ محتوای فایل <code>id_rsa.pub</code> (که با <code>ssh-rsa</code> یا <code>ssh-ed25519</code> شروع می‌شود) را بفرستید."
+            );
+        }
+
+        $client->uapi('SSH', 'import_key', ['name' => $name, 'key' => $publicKey]);
+        $client->uapi('SSH', 'authorize_key', ['key' => $publicKey]);
+    }
+
+    public static function deleteSshKey(CpanelClient $client, string $name): void
+    {
+        $client->uapi('SSH', 'delete_key', ['name' => $name, 'type' => 'public']);
+    }
+
+    // -------------------------------------------------------- کارهای WHM
+
+    public static function whmSetQuota(CpanelClient $client, string $user, mixed $quotaMb): void
+    {
+        $quota = is_numeric($quotaMb) ? (int) $quotaMb : 0;
+        $client->whm('modifyacct', ['user' => $user, 'QUOTA' => $quota]);
+    }
+
+    /**
+     * @return array<int, array{ip: string, used: bool, dedicated: bool}>
+     */
+    public static function whmIps(CpanelClient $client): array
+    {
+        $raw = $client->whm('listips');
+        // بسته به نسخه، فهرست زیر کلید ip یا result می‌آید.
+        $rows = is_array($raw) ? ($raw['ip'] ?? ($raw['result'] ?? $raw)) : $raw;
+        $out = [];
+
+        foreach (self::normalizeList($rows) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $ip = (string) ($row['ip'] ?? ($row['public_ip'] ?? ''));
+            if ($ip === '') {
+                continue;
+            }
+            $out[] = [
+                'ip' => $ip,
+                'used' => (string) ($row['used'] ?? '0') === '1',
+                'dedicated' => (string) ($row['dedicated'] ?? '0') === '1',
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<int, array{user: string, reason: string, time: string}>
+     */
+    public static function whmSuspended(CpanelClient $client): array
+    {
+        $raw = $client->whm('listsuspended');
+        $rows = is_array($raw) ? ($raw['accts'] ?? ($raw['suspended'] ?? ($raw['account'] ?? $raw))) : $raw;
+        $out = [];
+
+        foreach (self::normalizeList($rows) as $row) {
+            if (is_string($row)) {
+                $out[] = ['user' => $row, 'reason' => '', 'time' => ''];
+                continue;
+            }
+            if (!is_array($row)) {
+                continue;
+            }
+            $user = (string) ($row['user'] ?? '');
+            if ($user === '') {
+                continue;
+            }
+            $out[] = [
+                'user' => $user,
+                'reason' => (string) ($row['reason'] ?? ''),
+                'time' => (string) ($row['time'] ?? ($row['suspendtime'] ?? '')),
+            ];
+        }
+
+        return $out;
+    }
+
+    // ------------------------------------------------------- چک‌آپ کامل
+
+    /**
+     * چند بررسی مهم را یک‌جا انجام می‌دهد و برای هرکدام وضعیت و راهکار می‌دهد.
+     *
+     * @return array{checks: array<int, array{label: string, state: string, detail: string, hint: string}>, score: int}
+     */
+    public static function healthCheck(CpanelClient $client): array
+    {
+        $checks = [];
+        $add = static function (string $label, string $state, string $detail, string $hint = '') use (&$checks): void {
+            $checks[] = ['label' => $label, 'state' => $state, 'detail' => $detail, 'hint' => $hint];
+        };
+
+        // ---- مصرف دیسک و اینود
+        foreach (self::softCall(fn () => self::resourceUsage($client), []) as $item) {
+            $id = strtolower((string) $item['id']);
+            if (!str_contains($id, 'disk') && !str_contains($id, 'inode')) {
+                continue;
+            }
+            $percent = $item['percent'];
+            if ($percent === null) {
+                continue;
+            }
+            $add(
+                (string) $item['label'],
+                $percent >= 90 ? 'bad' : ($percent >= 80 ? 'warn' : 'ok'),
+                round($percent) . '٪ پر شده',
+                $percent >= 80 ? '«📂 فایل‌ها → 🧹 پاک‌سازی هوشمند» را بزنید.' : '',
+            );
+        }
+
+        // ---- گواهی SSL
+        $soonest = null;
+        foreach (self::softCall(fn () => self::sslHosts($client), []) as $host) {
+            if (!is_numeric($host['expires'])) {
+                continue;
+            }
+            $days = (int) floor(((int) $host['expires'] - time()) / 86400);
+            if ($soonest === null || $days < $soonest[0]) {
+                $soonest = [$days, (string) $host['domain']];
+            }
+        }
+        if ($soonest === null) {
+            $add('گواهی SSL', 'warn', 'گواهی نصب‌شده‌ای پیدا نشد', '«🔒 SSL → درخواست صدور/تمدید خودکار» را بزنید.');
+        } else {
+            [$days, $domain] = $soonest;
+            $add(
+                'گواهی SSL',
+                $days < 0 ? 'bad' : ($days <= 14 ? 'warn' : 'ok'),
+                $days < 0 ? "گواهی {$domain} منقضی شده" : "نزدیک‌ترین انقضا: {$domain} تا {$days} روز دیگر",
+                $days <= 14 ? '«🔒 SSL → درخواست صدور/تمدید خودکار» را بزنید.' : '',
+            );
+        }
+
+        // ---- تازگی بکاپ
+        $newest = null;
+        foreach (self::softCall(fn () => self::listBackups($client), []) as $backup) {
+            if ($backup['time'] !== null && ($newest === null || $backup['time'] > $newest)) {
+                $newest = (int) $backup['time'];
+            }
+        }
+        if ($newest === null) {
+            $add('بکاپ', 'bad', 'هیچ بکاپی روی حساب نیست', '«💾 بکاپ → گرفتن بکاپ کامل» یا «🗓 بکاپ خودکار» را تنظیم کنید.');
+        } else {
+            $days = (int) floor((time() - $newest) / 86400);
+            $add(
+                'بکاپ',
+                $days > 30 ? 'bad' : ($days > 7 ? 'warn' : 'ok'),
+                "آخرین بکاپ {$days} روز پیش",
+                $days > 7 ? '«🔔 هشدارها → 🗓 بکاپ خودکار» را روشن کنید.' : '',
+            );
+        }
+
+        // ---- بالا بودن سایت اصلی
+        $domains = self::softCall(fn () => self::domains($client), []);
+        $main = (string) ($domains['main_domain'] ?? '');
+        if ($main !== '') {
+            $result = SiteCheck::run($main);
+            $status = (int) ($result['https']['status'] ?? 0);
+            $add(
+                'سایت اصلی',
+                $status === 0 ? 'bad' : ($status >= 400 ? 'warn' : 'ok'),
+                $status === 0 ? "{$main} از بیرون جواب نداد" : "{$main} کد {$status} داد",
+                $status === 0 || $status >= 400 ? '«🌐 دامنه‌ها → 🩺 بررسی سلامت دامنه» جزئیات را می‌گوید.' : '',
+            );
+
+            // ---- رکوردهای ایمیل
+            $records = self::softCall(fn () => self::mailRecords($main), null);
+            if (is_array($records)) {
+                $missing = [];
+                if ($records['mx'] === []) {
+                    $missing[] = 'MX';
+                }
+                if ($records['spf'] === '') {
+                    $missing[] = 'SPF';
+                }
+                if ($records['dmarc'] === '') {
+                    $missing[] = 'DMARC';
+                }
+                $add(
+                    'رکوردهای ایمیل',
+                    in_array('MX', $missing, true) ? 'bad' : ($missing === [] ? 'ok' : 'warn'),
+                    $missing === [] ? 'MX و SPF و DMARC سرجایشان هستند' : 'کم است: ' . implode('، ', $missing),
+                    $missing === [] ? '' : '«🧭 DNS → 🧩 قالب آماده» همین‌ها را یک‌جا می‌سازد.',
+                );
+            }
+        }
+
+        // ---- فایل‌های حساس داخل پوشه‌ی سایت
+        $scan = self::softCall(fn () => self::securityScan($client, 8), null);
+        if (is_array($scan)) {
+            $exposed = count($scan['exposed']);
+            $writable = count($scan['writable']);
+            $add(
+                'امنیت فایل‌ها',
+                $exposed > 0 ? 'bad' : ($writable > 0 ? 'warn' : 'ok'),
+                $exposed === 0 && $writable === 0
+                    ? 'فایل حساس و دسترسی بازی پیدا نشد'
+                    : "{$exposed} فایل حساس و {$writable} دسترسی باز",
+                $exposed > 0 || $writable > 0 ? '«📂 فایل‌ها → 🛡 گزارش امنیتی» فهرست کامل را می‌دهد.' : '',
+            );
+        }
+
+        // ---- نسخه‌ی PHP
+        foreach (self::softCall(fn () => self::phpVersions($client), []) as $vhost) {
+            if ($main !== '' && $vhost['vhost'] !== $main) {
+                continue;
+            }
+            $version = (string) $vhost['version'];
+            $old = (bool) preg_match('/php[-_]?(5|70|71|72|73|74)/i', str_replace('.', '', $version));
+            $add(
+                'نسخه‌ی PHP',
+                $old ? 'warn' : 'ok',
+                $version,
+                $old ? 'نسخه‌های قدیمی PHP دیگر وصله‌ی امنیتی نمی‌گیرند؛ «🐘 نسخه PHP → 🔧 تغییر نسخه».' : '',
+            );
+            break;
+        }
+
+        $score = 0;
+        foreach ($checks as $check) {
+            $score += match ($check['state']) {
+                'ok' => 2,
+                'warn' => 1,
+                default => 0,
+            };
+        }
+        $max = max(1, count($checks) * 2);
+
+        return ['checks' => $checks, 'score' => (int) round($score / $max * 100)];
     }
 
     /**

@@ -54,11 +54,24 @@ while (time() < $deadline) {
     }
     preg_match('/Content-Length: (\d+)/i', $head, $lengthMatch);
     $body = isset($lengthMatch[1]) && (int) $lengthMatch[1] > 0 ? (string) fread($connection, (int) $lengthMatch[1]) : '';
-    preg_match('#^POST ([^ ]+)#', $head, $pathMatch);
+    preg_match('#^(?:POST|GET) ([^ ]+)#', $head, $pathMatch);
     $path = $pathMatch[1] ?? '';
 
     if ($logPath !== '') {
         file_put_contents($logPath, json_encode(['path' => $path, 'body' => $body]) . "\n", FILE_APPEND);
+    }
+
+    // مسیر قدیمی خروجی دیتابیس، خروجی خام gzip می‌دهد نه JSON.
+    if (str_contains($path, '/getsqlbackup/')) {
+        if (str_contains($path, 'demo_shop')) {
+            $dump = (string) gzencode("-- teamkan test dump\nCREATE TABLE demo (id int);\n");
+            fwrite($connection, "HTTP/1.1 200 OK\r\nContent-Type: application/x-gzip\r\nContent-Length: "
+                . strlen($dump) . "\r\nConnection: close\r\n\r\n" . $dump);
+        } else {
+            fwrite($connection, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+        fclose($connection);
+        continue;
     }
 
     $payload = match (true) {
@@ -78,6 +91,7 @@ while (time() < $deadline) {
             ['file' => 'public_html', 'type' => 'dir', 'size' => 4096],
             ['file' => 'logs', 'type' => 'dir', 'size' => 4096],
             ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
+            ['file' => 'zz-notes.txt', 'type' => 'file', 'size' => 120, 'permissions' => '0644'],
         ]],
         // فقط برای سناریوی انتقال فایل؛ بقیه‌ی فایل‌ها خالی برمی‌گردند تا مسیر
         // دانلود خام هم مثل واقعیت تست شود.
@@ -132,6 +146,17 @@ while (time() < $deadline) {
         ]],
         str_contains($path, 'Ftp/list_sessions') => ['status' => 1, 'data' => [
             ['user' => 'deploy@example.com', 'host' => '203.0.113.9', 'pid' => '2471', 'file' => '/public_html/app.zip'],
+        ]],
+        str_contains($path, 'Email/list_filters') => ['status' => 1, 'data' => [
+            ['filtername' => 'حذف تبلیغات', 'enabled' => 1, 'filter' => 'if $header_subject: contains "viagra"'],
+            ['filtername' => 'بایگانی فاکتورها', 'enabled' => 1, 'filter' => 'if $header_from: contains "billing"'],
+        ]],
+        str_contains($path, 'EmailTrack/search') => ['status' => 1, 'data' => [
+            ['sendunixtime' => 1756900000, 'sender' => 'info@example.com', 'recipient' => 'kian@gmail.com', 'type' => 'success', 'message' => ''],
+            ['sendunixtime' => 1756900500, 'sender' => 'info@example.com', 'recipient' => 'bad@nowhere.tld', 'type' => 'failure', 'message' => 'host not found'],
+        ]],
+        str_contains($path, 'SSH/list_keys') => ['status' => 1, 'data' => [
+            ['name' => 'laptop', 'key_type' => 'ssh-ed25519', 'authorized' => 1, 'fingerprint' => 'SHA256:abcdef'],
         ]],
         str_contains($path, 'Email/list_forwarders') => ['status' => 1, 'data' => [
             ['dest' => 'info@example.com', 'forward' => 'kian@gmail.com'],

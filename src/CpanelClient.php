@@ -187,7 +187,20 @@ final class CpanelClient
             throw CpanelError::config('دانلود فایل فقط با توکن خود حساب cPanel کار می‌کند.');
         }
 
-        $url = $this->baseUrl() . '/download?file=' . rawurlencode($path);
+        return $this->getRaw('/download?file=' . rawurlencode($path));
+    }
+
+    /**
+     * درخواست GET خام روی خود cpsrvd (مسیرهای قدیمی که UAPI ندارند، مثل
+     * <code>/getsqlbackup/db.sql.gz</code>). خروجی، بایت‌های همان پاسخ است.
+     */
+    public function getRaw(string $path): string
+    {
+        if ($this->isWhm()) {
+            throw CpanelError::config('این مسیر فقط با توکن خود حساب cPanel کار می‌کند.');
+        }
+
+        $url = $this->baseUrl() . '/' . ltrim($path, '/');
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
