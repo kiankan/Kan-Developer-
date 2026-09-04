@@ -114,6 +114,14 @@ final class UpdateHandler
                 ['key' => 'email', 'prompt' => 'کدام پاسخ خودکار حذف شود؟', 'picker' => 'responders'],
             ],
         ],
+        'email_bulk_passwd' => [
+            'title' => '🔑 تغییر رمز گروهی ایمیل',
+            'scope' => 'account',
+            'back' => 'email',
+            'steps' => [
+                ['key' => 'list', 'prompt' => "هر خط یک ایمیل و رمز جدیدش:\n\n<code>info@example.com rmz-1\nsales@example.com rmz-2</code>\n\nاگر رمز ننویسید، خودم رمز قوی می‌سازم و نشانتان می‌دهم."],
+            ],
+        ],
         'email_passwd' => [
             'title' => '🔑 تغییر رمز ایمیل',
             'scope' => 'account',
@@ -726,6 +734,76 @@ final class UpdateHandler
                 ['key' => 'needle', 'prompt' => "بخشی از نام فایل را بفرستید، مثل <code>config</code> یا <code>.env</code>."],
             ],
         ],
+        'file_bulk_delete' => [
+            'title' => '🗑 حذف گروهی فایل',
+            'scope' => 'account',
+            'back' => 'files',
+            'confirm' => "⚠️ همه‌ی مسیرهای زیر حذف می‌شوند:\n<code>{paths}</code>",
+            'steps' => [
+                ['key' => 'paths', 'prompt' => "مسیرهای کامل را بفرستید، هر خط یکی:\n\n<code>/home/user/public_html/old.php\n/home/user/public_html/tmp</code>"],
+            ],
+        ],
+        'file_bulk_move' => [
+            'title' => '📦 جابه‌جایی گروهی',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'paths', 'prompt' => 'مسیرهای مبدأ را بفرستید، هر خط یکی:'],
+                ['key' => 'destination', 'prompt' => 'همه به کدام پوشه بروند؟', 'picker' => 'dirs'],
+            ],
+        ],
+        'maintenance' => [
+            'title' => '🛠 حالت تعمیر سایت',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'docroot', 'prompt' => "پوشه‌ی سایت کدام است؟\n\n(حالت تعمیر با یک <code>.htaccess</code> انجام می‌شود؛ فایل قبلی کنار گذاشته می‌شود تا موقع خاموش‌کردن دقیقاً برگردد.)", 'picker' => 'dirs'],
+                ['key' => 'state', 'prompt' => 'روشن یا خاموش؟', 'choices' => [
+                    ['🛠 روشن (سایت در دست تعمیر)', '1'],
+                    ['✅ خاموش (سایت عادی)', '0'],
+                ]],
+                ['key' => 'message', 'prompt' => 'متن صفحه‌ی تعمیر (اختیاری):', 'optional' => true, 'default' => ''],
+            ],
+        ],
+        'ip_block' => [
+            'title' => '⛔️ مسدودکردن آی‌پی',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'docroot', 'prompt' => 'روی کدام پوشه‌ی سایت اعمال شود؟', 'picker' => 'dirs'],
+                ['key' => 'ip', 'prompt' => "آی‌پی را بفرستید، مثل <code>203.0.113.10</code>.\n\n💡 برای یک بازه هم می‌شود <code>203.0.113</code> نوشت."],
+                ['key' => 'state', 'prompt' => 'مسدود شود یا آزاد؟', 'choices' => [
+                    ['⛔️ مسدود کن', '1'],
+                    ['✅ آزاد کن', '0'],
+                ]],
+            ],
+        ],
+        'dir_protect' => [
+            'title' => '🔐 رمز گذاشتن روی پوشه',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'dir', 'prompt' => "کدام پوشه با رمز محافظت شود؟\n\n(مثل پوشه‌ی مدیریت یا استیجینگ سایت.)", 'picker' => 'dirs'],
+                ['key' => 'user', 'prompt' => 'نام کاربری برای ورود:'],
+                ['key' => 'password', 'prompt' => 'رمز عبور (یا <code>/gen</code>):', 'secret' => true],
+            ],
+        ],
+        'fav_add' => [
+            'title' => '⭐ افزودن میان‌بر',
+            'scope' => 'local',
+            'back' => 'fav',
+            'steps' => [
+                ['key' => 'value', 'prompt' => "چه چیزی را میان‌بر کنم؟\n\n• یک دامنه (مثل <code>example.com</code>) → بررسی سلامتش\n• یک ایمیل → تنظیمات صندوق\n• یک مسیر (با / شروع شود) → باز کردن همان پوشه"],
+            ],
+        ],
+        'fav_del' => [
+            'title' => '🗑 حذف میان‌بر',
+            'scope' => 'local',
+            'back' => 'fav',
+            'steps' => [
+                ['key' => 'value', 'prompt' => 'کدام میان‌بر حذف شود؟', 'picker' => 'favorites'],
+            ],
+        ],
         'file_extract' => [
             'title' => '🗜 باز کردن آرشیو روی هاست',
             'scope' => 'account',
@@ -989,6 +1067,23 @@ final class UpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'fav:')) {
+            $favorite = Favorites::all()[(int) substr($data, 4)] ?? null;
+            if ($favorite === null) {
+                self::sendMenu($api, $chatId, 'fav');
+
+                return;
+            }
+
+            match ($favorite['type']) {
+                Favorites::TYPE_PATH => self::browseFiles($api, $chatId, $favorite['value']),
+                Favorites::TYPE_EMAIL => self::execute($api, $chatId, 'email_settings', ['email' => $favorite['value']]),
+                default => self::execute($api, $chatId, 'site_check', ['domain' => $favorite['value']]),
+            };
+
+            return;
+        }
+
         if (str_starts_with($data, 'h:')) {
             self::howto($api, $chatId, substr($data, 2));
 
@@ -1063,7 +1158,17 @@ final class UpdateHandler
      */
     public static function isFlowInput(string $text): bool
     {
-        return !str_starts_with($text, '/') || in_array($text, ['/skip', '/gen'], true);
+        if (!str_starts_with($text, '/')) {
+            return true;
+        }
+        if (in_array($text, ['/skip', '/gen'], true)) {
+            return true;
+        }
+
+        // یک دستور واقعی مثل /panel است: یک کلمه‌ی حرفی، بدون اسلش و نقطه‌ی
+        // بعدی. مسیرهای فایل (/home/user/public_html) هم با / شروع می‌شوند و
+        // نباید به‌جای دستور گرفته شوند، وگرنه وسط جریان‌های فایل رها می‌شویم.
+        return preg_match('#^/[a-zA-Z][a-zA-Z0-9_]*(@[A-Za-z0-9_]+)?$#', $text) !== 1;
     }
 
     private static function handleCommand(TelegramApi $api, int $chatId, string $text): void
@@ -1195,6 +1300,7 @@ final class UpdateHandler
                 [self::btn('📋 لیست حساب‌ها', 'a:emails')],
                 [self::btn('➕ افزودن', 'f:email_add'), self::btn('🗑 حذف', 'f:email_del')],
                 [self::btn('👥 ساخت گروهی', 'f:email_bulk_add'), self::btn('🗑 حذف گروهی', 'f:email_bulk_del')],
+                [self::btn('🔑 رمز گروهی', 'f:email_bulk_passwd')],
                 [self::btn('🔑 تغییر رمز', 'f:email_passwd'), self::btn('📦 سهمیه', 'f:email_quota')],
                 [self::btn('📮 فورواردها', 'a:forwarders'), self::btn('🤖 پاسخ خودکار', 'a:responders')],
                 [self::btn('🧽 پاک‌سازی Trash و Spam', 'f:mail_purge'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
@@ -1218,6 +1324,7 @@ final class UpdateHandler
                 [self::btn('🅿️ پارک دامنه', 'f:park_add'), self::btn('📶 پهنای‌باند', 'a:bandwidth')],
                 [self::btn('↪️ ریدایرکت‌ها', 'a:redirects'), self::btn('🧭 DNS', 'm:dns')],
                 [self::btn('🩺 بررسی سلامت دامنه', 'f:site_check'), self::btn('🔒 SSL', 'm:ssl')],
+                [self::btn('🛠 حالت تعمیر سایت', 'f:maintenance'), self::btn('⛔️ مسدودکردن آی‌پی', 'f:ip_block')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'files' => ["📂 <b>فایل‌های هاست</b>\n\nسورس سایت را از همین‌جا آپلود کنید: فایل (یا zip) را بفرستید، و اگر آرشیو بود همان‌جا بازش کنید.\n"
@@ -1231,6 +1338,8 @@ final class UpdateHandler
                 [self::btn('⬇️ دانلود فایل', 'f:file_download'), self::btn('⬇️ دانلود پوشه (zip)', 'f:folder_download')],
                 [self::btn('📝 ویرایش فایل', 'f:file_edit'), self::btn('📄 فایل جدید', 'f:file_create')],
                 [self::btn('🔎 پیدا کردن فایل', 'f:file_find'), self::btn('↩️ بازگردانی آخرین بکاپ', 'a:undo')],
+                [self::btn('🗑 حذف گروهی', 'f:file_bulk_delete'), self::btn('📦 جابه‌جایی گروهی', 'f:file_bulk_move')],
+                [self::btn('🔐 رمز روی پوشه', 'f:dir_protect'), self::btn('📊 مصرف پوشه‌ها', 'a:dirusage')],
                 [self::btn('🧹 پاک‌سازی هوشمند', 'a:cleanup')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1287,6 +1396,13 @@ final class UpdateHandler
                 [self::btn('💾 گرفتن بکاپ', 'h:backup')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
+            'fav' => [self::favoritesMenuText(), array_merge(
+                self::favoriteRows(),
+                [
+                    [self::btn('⭐ افزودن میان‌بر', 'f:fav_add'), self::btn('🗑 حذف میان‌بر', 'f:fav_del')],
+                    [self::btn('⬅️ بازگشت', 'menu')],
+                ],
+            )],
             'alerts' => [self::alertsMenuText(), [
                 [self::btn('💽 آستانه‌ی دیسک/اینود/SSL', 'f:alert_threshold')],
                 [self::btn('🔴 هشدار داون‌شدن سایت', 'a:togglesite'), self::btn('🛡 بکاپ قبل از تغییر', 'a:togglesafe')],
@@ -1354,7 +1470,8 @@ final class UpdateHandler
 
         $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
         $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('✨ قابلیت‌ها', 'a:features')];
-        $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('🔔 هشدارها', 'm:alerts')];
+        $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('⭐ میان‌برها', 'm:fav')];
+        $rows[] = [self::btn('🔔 هشدارها', 'm:alerts')];
         $rows[] = [self::btn('🧾 لاگ عملیات', 'a:log')];
         $rows[] = [self::btn('❓ راهنما', 'a:help')];
 
@@ -1461,6 +1578,33 @@ final class UpdateHandler
         }
 
         return $text;
+    }
+
+    private static function favoritesMenuText(): string
+    {
+        $count = count(Favorites::all());
+
+        return $count === 0
+            ? "⭐ <b>میان‌برها</b>\n\nهنوز میان‌بری نساخته‌اید.\n\nدامنه، ایمیل یا پوشه‌ای که زیاد سراغش می‌روید را اینجا اضافه کنید تا با یک دکمه بازش کنید."
+            : "⭐ <b>میان‌برها</b> ({$count})\n\nهر کدام را بزنید تا مستقیم برود سراغش.";
+    }
+
+    /**
+     * @return array<int, array<int, array<string, string>>>
+     */
+    private static function favoriteRows(): array
+    {
+        $rows = [];
+        foreach (Favorites::all() as $index => $favorite) {
+            $icon = match ($favorite['type']) {
+                Favorites::TYPE_EMAIL => '✉️',
+                Favorites::TYPE_PATH => '📂',
+                default => '🌐',
+            };
+            $rows[] = [self::btn($icon . ' ' . self::shorten($favorite['value'], 40), 'fav:' . $index)];
+        }
+
+        return $rows;
     }
 
     /**
@@ -1720,7 +1864,7 @@ final class UpdateHandler
         try {
             $text = match ($action) {
                 'ping' => Render::ping(ServerStore::client()->ping()),
-                'summary' => Render::summary(CpanelService::summary(self::accountClient())),
+                'summary' => self::summaryWithHistory(),
                 'emails' => self::emailsWithUsage(),
                 'dbs' => Render::databases(
                     CpanelService::databases(self::accountClient()),
@@ -1732,6 +1876,8 @@ final class UpdateHandler
                 ),
                 'acctfeatures' => Render::features(CpanelService::accountFeatures(self::accountClient())),
                 'bandwidth' => Render::bandwidth(CpanelService::bandwidth(self::accountClient())),
+                'dirusage' => Render::directoryUsage(CpanelService::directoryUsage(self::accountClient())),
+                'trend' => Render::usageTrend(UsageHistory::trend(), UsageHistory::days()),
                 'dbinfo' => Render::mysqlInfo(
                     CpanelService::mysqlServerInfo(self::accountClient()),
                     CpanelService::databaseInfo(self::accountClient())['prefix'],
@@ -1777,7 +1923,7 @@ final class UpdateHandler
     {
         $extra = match ($action) {
             'summary' => [
-                [self::btn('🧩 امکانات فعال حساب', 'a:acctfeatures')],
+                [self::btn('🧩 امکانات فعال حساب', 'a:acctfeatures'), self::btn('📈 روند مصرف', 'a:trend')],
                 [self::btn('📄 گزارش وضعیت (فایل)', 'a:report'), self::btn('📶 پهنای‌باند', 'a:bandwidth')],
             ],
             'acctfeatures' => [[self::btn('⬅️ خلاصه‌ی حساب', 'a:summary')]],
@@ -2193,6 +2339,18 @@ final class UpdateHandler
         }
     }
 
+    /**
+     * خلاصه‌ی حساب + ثبت یک عکس فوری از مصرف، تا «روند مصرف» فقط به تایمر
+     * هشدارها وابسته نباشد.
+     */
+    private static function summaryWithHistory(): string
+    {
+        $summary = CpanelService::summary(self::accountClient());
+        UsageHistory::record($summary['usage']);
+
+        return Render::summary($summary);
+    }
+
     private static function runAutoSslAction(): string
     {
         CpanelService::runAutoSsl(self::accountClient());
@@ -2210,7 +2368,8 @@ final class UpdateHandler
         return match ($action) {
             'emails', 'forwarders' => 'email',
             'dbs', 'dbinfo' => 'db',
-            'cleanup', 'undo' => 'files',
+            'cleanup', 'undo', 'dirusage' => 'files',
+            'trend' => null,
             'togglesite', 'togglesafe', 'reportevery' => 'alerts',
             'domains', 'redirects' => 'dom',
             'ssl', 'autossl' => 'ssl',
@@ -2478,6 +2637,14 @@ final class UpdateHandler
 
             case 'addon_domains':
                 return $simple(CpanelService::domains(self::accountClient())['addon_domains']);
+
+            case 'favorites':
+                $options = [];
+                foreach (Favorites::all() as $favorite) {
+                    $options[] = ['label' => $favorite['value'], 'value' => $favorite['value']];
+                }
+
+                return $options;
 
             case 'cleanup':
                 $options = [];
@@ -3038,6 +3205,153 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runEmailBulkPasswd(array $data): string
+    {
+        $client = self::accountClient();
+        $results = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', (string) $data['list']) ?: [] as $line) {
+            $parts = preg_split('/\s+/', trim($line)) ?: [];
+            $email = trim((string) ($parts[0] ?? ''));
+            if ($email === '') {
+                continue;
+            }
+            $password = (string) ($parts[1] ?? '') ?: CpanelService::randomPassword();
+
+            try {
+                CpanelService::setEmailPassword($client, $email, $password);
+                $results[] = ['email' => $email, 'password' => $password, 'ok' => true, 'error' => ''];
+            } catch (Throwable $e) {
+                $results[] = ['email' => $email, 'password' => '', 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return Render::bulkResult('🔑 <b>تغییر رمز گروهی</b>', $results);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileBulkDelete(array $data): string
+    {
+        $client = self::accountClient();
+        $results = [];
+
+        foreach (self::pathLines((string) $data['paths']) as $path) {
+            try {
+                if (Settings::bool(Settings::SAFE_DELETE, true)) {
+                    self::backupBeforeChange($client, $path);
+                }
+                CpanelService::deletePath($client, $path);
+                $results[] = ['email' => $path, 'ok' => true, 'error' => ''];
+            } catch (Throwable $e) {
+                $results[] = ['email' => $path, 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return Render::bulkResult('🗑 <b>حذف گروهی</b>', $results);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileBulkMove(array $data): string
+    {
+        $client = self::accountClient();
+        $destination = (string) $data['destination'];
+        $results = [];
+
+        foreach (self::pathLines((string) $data['paths']) as $path) {
+            try {
+                CpanelService::movePath($client, $path, $destination);
+                $results[] = ['email' => $path, 'ok' => true, 'error' => ''];
+            } catch (Throwable $e) {
+                $results[] = ['email' => $path, 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return Render::bulkResult('📦 <b>جابه‌جایی گروهی به ' . Format::escapeHtml($destination) . '</b>', $results);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function pathLines(string $raw): array
+    {
+        $out = [];
+        foreach (preg_split('/\r\n|\r|\n/', $raw) ?: [] as $line) {
+            $line = trim($line);
+            if ($line !== '') {
+                $out[] = $line;
+            }
+        }
+
+        return $out;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runMaintenance(array $data): string
+    {
+        $enable = (string) ($data['state'] ?? '1') === '1';
+        CpanelService::setMaintenance(
+            self::accountClient(),
+            (string) $data['docroot'],
+            $enable,
+            (string) ($data['message'] ?? ''),
+        );
+
+        return $enable
+            ? "🛠 حالت تعمیر روشن شد؛ بازدیدکننده‌ها صفحه‌ی «در دست تعمیر» را می‌بینند.\n\n💡 موتورهای جست‌وجو هم کد ۵۰۳ می‌گیرند، یعنی سایت را حذف‌شده حساب نمی‌کنند."
+            : '✅ حالت تعمیر خاموش شد و سایت به حالت عادی برگشت.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runIpBlock(array $data): string
+    {
+        $block = (string) ($data['state'] ?? '1') === '1';
+        $ips = CpanelService::blockIp(
+            self::accountClient(),
+            (string) $data['docroot'],
+            (string) $data['ip'],
+            $block,
+        );
+
+        $text = $block
+            ? '⛔️ <code>' . Format::escapeHtml((string) $data['ip']) . '</code> مسدود شد.'
+            : '✅ <code>' . Format::escapeHtml((string) $data['ip']) . '</code> آزاد شد.';
+
+        return $text . "\n\n" . ($ips === []
+            ? 'الان هیچ آی‌پی مسدودی روی این پوشه نیست.'
+            : 'آی‌پی‌های مسدود: <code>' . Format::escapeHtml(implode('، ', $ips)) . '</code>');
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDirProtect(array $data): string
+    {
+        $client = self::accountClient();
+        $dir = (string) $data['dir'];
+
+        CpanelService::protectDirectory($client, $dir, basename($dir), true);
+        CpanelService::addProtectedUser($client, $dir, (string) $data['user'], (string) $data['password']);
+
+        return '🔐 پوشه‌ی <code>' . Format::escapeHtml($dir) . "</code> با رمز محافظت شد.\n\n"
+            . 'از این به بعد مرورگر برای بازکردنش نام کاربری و رمز می‌خواهد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFavAdd(array $data): string
+    {
+        $value = trim((string) $data['value']);
+        Favorites::add(Favorites::guessType($value), $value);
+
+        return '⭐ <code>' . Format::escapeHtml($value) . '</code> به میان‌برها اضافه شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFavDel(array $data): string
+    {
+        Favorites::remove((string) $data['value']);
+
+        return '🗑 میان‌بر حذف شد.';
     }
 
     /**

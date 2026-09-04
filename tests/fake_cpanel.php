@@ -80,6 +80,10 @@ while (time() < $deadline) {
             ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
         ]],
         str_contains($path, 'Fileman/upload_files') => ['status' => 1, 'data' => ['uploads' => [['status' => 1, 'file' => 'ok']]]],
+        str_contains($path, 'ResourceUsage/get_usages') => ['status' => 1, 'data' => [
+            ['id' => 'disk_usage', 'description' => 'Disk Usage', 'usage' => 5368709120, 'maximum' => 10737418240, 'percent_used' => 50, 'formatter' => 'format_bytes'],
+            ['id' => 'inodes', 'description' => 'File Usage', 'usage' => 42000, 'maximum' => 200000, 'percent_used' => 21],
+        ]],
         str_contains($path, 'StatsBar/get_stats') => ['status' => 1, 'data' => [
             ['name' => 'hostname', 'value' => 'srv01.example.com'],
             ['name' => 'plan', 'value' => 'Business Pro'],

@@ -874,6 +874,64 @@ check('گزارش دوره‌ای: بعد از فرستادن، تا موعد ب
     Settings::set(Settings::REPORT_EVERY, 'weekly');
 });
 
+check('حالت تعمیر: بلوک نشان‌دار اضافه و بعد کامل برداشته می‌شود', function (): void {
+    $sample = "# TEAMKAN MAINTENANCE START\nRewriteEngine On\n# TEAMKAN MAINTENANCE END\nOptions -Indexes\n";
+    assertSame("Options -Indexes\n", CpanelService::stripBlock($sample, 'MAINTENANCE'));
+    assertSame('unchanged', CpanelService::stripBlock('unchanged', 'MAINTENANCE'), 'فایل بدون بلوک نباید عوض شود');
+});
+
+check('مسدودکردن آی‌پی: افزودن، تکراری‌نشدن و آزادکردن', function (): void {
+    $captured = [];
+    $empty = '{"status":1,"data":{"content":""}}';
+    $withOne = json_encode(['status' => 1, 'data' => ['content' =>
+        "# TEAMKAN BLOCKLIST START\n<RequireAll>\n    Require all granted\n    Require not ip 1.2.3.4\n</RequireAll>\n# TEAMKAN BLOCKLIST END\n",
+    ]]);
+
+    // اولین مسدودی
+    $client = new CpanelClient(cpanelServer(), fakeTransport([['body' => $empty], ['body' => '{"status":1,"data":{}}']], $captured));
+    assertSame(['1.2.3.4'], CpanelService::blockIp($client, '/home/demo/public_html', '1.2.3.4'));
+    $written = urldecode($captured[1]['body']);
+    assertTrue(str_contains($written, 'Require not ip 1.2.3.4'), 'قانون مسدودی نوشته نشد');
+
+    // همان آی‌پی دوباره → تکراری نمی‌شود
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([['body' => (string) $withOne], ['body' => '{"status":1,"data":{}}']], $captured));
+    assertSame(['1.2.3.4'], CpanelService::blockIp($client, '/home/demo/public_html', '1.2.3.4'));
+
+    // آزادکردن
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([['body' => (string) $withOne], ['body' => '{"status":1,"data":{}}']], $captured));
+    assertSame([], CpanelService::blockIp($client, '/home/demo/public_html', '1.2.3.4', false));
+    assertTrue(!str_contains(urldecode($captured[1]['body']), 'Require not ip'), 'قانون باید برداشته شود');
+});
+
+check('میان‌برها: نوعش را حدس می‌زند و تکراری نمی‌گیرد', function (): void {
+    assertSame(Favorites::TYPE_EMAIL, Favorites::guessType('info@example.com'));
+    assertSame(Favorites::TYPE_PATH, Favorites::guessType('/home/demo/public_html'));
+    assertSame(Favorites::TYPE_DOMAIN, Favorites::guessType('example.com'));
+
+    Favorites::add(Favorites::TYPE_DOMAIN, 'example.com');
+    Favorites::add(Favorites::TYPE_DOMAIN, 'example.com');
+    assertSame(1, count(Favorites::all()), 'میان‌بر تکراری نباید دوباره اضافه شود');
+
+    Favorites::remove('example.com');
+    assertSame(0, count(Favorites::all()));
+});
+
+check('تاریخچه‌ی مصرف: امروز ثبت و با دیروز مقایسه می‌شود', function (): void {
+    UsageHistory::record([
+        ['id' => 'disk_usage', 'label' => 'Disk', 'usage' => 50.0, 'maximum' => 100.0, 'percent' => 50.0, 'unit' => ''],
+        ['id' => 'inodes', 'label' => 'Inodes', 'usage' => null, 'maximum' => null, 'percent' => null, 'unit' => ''],
+    ]);
+
+    $trend = UsageHistory::trend();
+    assertSame(1, count($trend), 'منبع بدون درصد نباید ثبت شود');
+    assertSame('disk_usage', $trend[0]['id']);
+    assertSame(50.0, $trend[0]['today']);
+    assertSame(null, $trend[0]['yesterday'], 'روز اول مقایسه‌ای وجود ندارد');
+    assertTrue(UsageHistory::days() >= 1);
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {
@@ -1040,6 +1098,13 @@ check('پیام‌های داخل جریان از دستورهای جدید تف
     assertTrue(UpdateHandler::isFlowInput('/gen'), '/gen باید ورودی جریان بماند');
     assertTrue(!UpdateHandler::isFlowInput('/panel'), 'دستور معمولی باید جریان را رها کند');
     assertTrue(!UpdateHandler::isFlowInput('/emails'), 'دستور معمولی باید جریان را رها کند');
+    assertTrue(!UpdateHandler::isFlowInput('/panel@mybot'), 'دستور با نام ربات هم دستور است');
+
+    // مسیر فایل هم با / شروع می‌شود ولی دستور نیست — وگرنه هر جریانی که مسیر
+    // می‌خواهد (دانلود، ویرایش، حذف گروهی) وسط کار رها می‌شد.
+    assertTrue(UpdateHandler::isFlowInput('/home/demo/public_html'), 'مسیر پوشه باید ورودی جریان باشد');
+    assertTrue(UpdateHandler::isFlowInput('/home/demo/public_html/site.zip'), 'مسیر فایل باید ورودی جریان باشد');
+    assertTrue(UpdateHandler::isFlowInput("/home/a.txt\n/home/b.txt"), 'چند مسیر در چند خط هم ورودی است');
 });
 
 check('هر picker در جدول جریان‌ها واقعاً پیاده‌سازی شده است', function (): void {

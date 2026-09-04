@@ -669,6 +669,59 @@ final class Render
         return implode("\n", $lines);
     }
 
+    /**
+     * @param array<int, array{name: string, path: string, size: float, files: int}> $dirs
+     */
+    public static function directoryUsage(array $dirs): string
+    {
+        if ($dirs === []) {
+            return '📊 پوشه‌ای برای اندازه‌گیری پیدا نشد.';
+        }
+
+        $total = 0.0;
+        foreach ($dirs as $dir) {
+            $total += $dir['size'];
+        }
+
+        $lines = ['📊 <b>مصرف پوشه‌های هوم</b>', '', 'مجموع اندازه‌گیری‌شده: ' . Format::bytes($total), ''];
+        foreach ($dirs as $dir) {
+            $share = $total > 0 ? $dir['size'] / $total * 100 : 0.0;
+            $lines[] = '• <code>' . self::e($dir['name']) . '</code> — ' . Format::bytes($dir['size'])
+                . ' ' . Format::bar($share, 8);
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ اندازه‌ها فقط فایل‌های سطح‌اول هر پوشه‌اند، نه زیرپوشه‌ها.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{id: string, today: float, yesterday: ?float, week: ?float}> $trend
+     */
+    public static function usageTrend(array $trend, int $days): string
+    {
+        if ($trend === []) {
+            return "📈 هنوز تاریخچه‌ای ثبت نشده.\n\nربات هر روز یک‌بار مصرف را ثبت می‌کند؛ از فردا مقایسه‌ی روزانه را همین‌جا می‌بینید.";
+        }
+
+        $lines = ['📈 <b>روند مصرف</b> — ' . $days . ' روز ثبت‌شده', ''];
+        foreach ($trend as $row) {
+            $line = '• <code>' . self::e($row['id']) . '</code>: ' . Format::percent($row['today']);
+            if ($row['yesterday'] !== null) {
+                $delta = $row['today'] - $row['yesterday'];
+                $icon = $delta > 0.5 ? '🔺' : ($delta < -0.5 ? '🔻' : '▪️');
+                $line .= "  {$icon} نسبت به دیروز " . Format::percent(abs($delta));
+            }
+            if ($row['week'] !== null) {
+                $delta = $row['today'] - $row['week'];
+                $line .= '  | هفته‌ی پیش: ' . Format::percent($row['week']);
+            }
+            $lines[] = $line;
+        }
+
+        return implode("\n", $lines);
+    }
+
     public static function ssl(array $hosts): string
     {
         if ($hosts === []) {
@@ -831,6 +884,21 @@ final class Render
             'whm_terminate' => 'حذف حساب', 'whm_passwd' => 'تغییر رمز حساب', 'whm_package' => 'تغییر پلن',
             'whm_service' => 'ری‌استارت سرویس', 'whm_login' => 'ساخت لینک ورود',
             'selfhost_cron' => 'نصب کران ربات',
+            'maintenance' => 'حالت تعمیر سایت', 'ip_block' => 'مسدودکردن آی‌پی',
+            'dir_protect' => 'رمز روی پوشه', 'email_bulk_passwd' => 'تغییر رمز گروهی ایمیل',
+            'file_bulk_delete' => 'حذف گروهی فایل', 'file_bulk_move' => 'جابه‌جایی گروهی',
+            'file_download' => 'دانلود فایل', 'folder_download' => 'دانلود پوشه',
+            'file_edit' => 'ویرایش فایل', 'file_create' => 'ساخت فایل', 'file_find' => 'جست‌وجوی فایل',
+            'dns_bulk' => 'رکورد DNS گروهی', 'dns_fix' => 'اصلاح رکورد A',
+            'fav_add' => 'افزودن میان‌بر', 'fav_del' => 'حذف میان‌بر',
+            'alert_threshold' => 'تغییر آستانه‌ی هشدار', 'alerts_sent' => 'ارسال هشدار',
+            'undo_restore' => 'بازگردانی بکاپ', 'report' => 'گزارش وضعیت',
+            'search' => 'جست‌وجو', 'mail_purge' => 'پاک‌سازی Trash و Spam',
+            'responder_add' => 'تنظیم پاسخ خودکار', 'responder_del' => 'حذف پاسخ خودکار',
+            'ftp_passwd' => 'تغییر رمز FTP', 'ftp_quota' => 'تغییر سهمیه FTP', 'ftp_kill' => 'قطع نشست FTP',
+            'addon_add' => 'افزودن دامنه', 'addon_del' => 'حذف دامنه', 'park_add' => 'پارک دامنه',
+            'email_bulk_add' => 'ساخت گروهی ایمیل', 'email_bulk_del' => 'حذف گروهی ایمیل',
+            'email_settings' => 'دیدن تنظیمات ایمیل', 'site_check' => 'بررسی سلامت دامنه',
         ];
 
         $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];

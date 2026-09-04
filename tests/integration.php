@@ -853,10 +853,81 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains(tg_last_text(), 'دامنه اضافه شد'), 'گزارش گروهی نیامد');
     });
 
+    scenario('میان‌برها: افزودن، اجرا با یک دکمه و حذف', function (): void {
+        press('menu');
+        expect(in_array('m:fav', tg_last_buttons(), true), 'دکمه‌ی میان‌برها در منوی اصلی نبود');
+
+        press('m:fav');
+        expect(str_contains(tg_last_text(), 'میان‌بر'), 'صفحه‌ی میان‌برها نیامد');
+
+        press('f:fav_add');
+        send_text('/home/demo/public_html');
+        expect(count(Favorites::all()) === 1, 'میان‌بر اضافه نشد');
+
+        press('m:fav');
+        expect(in_array('fav:0', tg_last_buttons(), true), 'دکمه‌ی میان‌بر ساخته نشد');
+        press('fav:0');
+        expect(str_contains(tg_last_text(), 'public_html'), 'میان‌بر مسیر باید پوشه را باز کند');
+
+        press('m:fav');
+        press('f:fav_del');
+        press('c:0');
+        press('ok');
+        expect(Favorites::all() === [], 'میان‌بر حذف نشد');
+    });
+
+    scenario('حذف گروهی فایل، هر مسیر را جدا گزارش می‌کند', function (): void {
+        press('m:files');
+        foreach (['f:file_bulk_delete', 'f:file_bulk_move', 'f:dir_protect', 'a:dirusage'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی فایل‌ها نبود");
+        }
+
+        press('f:file_bulk_delete');
+        send_text("/home/demo/public_html/a.txt\n/home/demo/public_html/b.txt");
+        press('ok');
+        expect(str_contains(tg_last_text(), 'موفق: 2'), 'گزارش حذف گروهی درست نیست');
+    });
+
+    scenario('تغییر رمز گروهی ایمیل، رمز نداده‌شده را خودش می‌سازد', function (): void {
+        press('m:email');
+        expect(in_array('f:email_bulk_passwd', tg_last_buttons(), true), 'دکمه‌ی رمز گروهی نبود');
+
+        press('f:email_bulk_passwd');
+        send_text("info@example.com\nsales@example.com rmz-dasti");
+        $text = tg_last_text();
+        expect(str_contains($text, 'موفق: 2'), 'هر دو باید انجام شوند');
+        expect(str_contains($text, 'rmz-dasti'), 'رمز دستی باید حفظ شود');
+    });
+
+    scenario('حالت تعمیر و مسدودکردن آی‌پی از منوی دامنه‌ها', function (): void {
+        press('m:dom');
+        expect(in_array('f:maintenance', tg_last_buttons(), true), 'دکمه‌ی حالت تعمیر نبود');
+        expect(in_array('f:ip_block', tg_last_buttons(), true), 'دکمه‌ی مسدودکردن آی‌پی نبود');
+
+        press('f:maintenance');
+        press('c:1');                       // پوشه‌ی public_html
+        press('c:0');                       // روشن
+        press('skip');                      // متن پیش‌فرض
+        $saves = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'save_file_content'));
+        expect($saves !== [], 'فایل‌های حالت تعمیر نوشته نشدند');
+        expect(str_contains(tg_last_text(), 'تعمیر'), 'پیام حالت تعمیر نیامد');
+    });
+
+    scenario('روند مصرف و مصرف پوشه‌ها نمایش داده می‌شوند', function (): void {
+        press('a:summary');
+        expect(in_array('a:trend', tg_last_buttons(), true), 'دکمه‌ی روند مصرف نبود');
+
+        press('a:trend');
+        expect(str_contains(tg_last_text(), 'روند مصرف'), 'صفحه‌ی روند نیامد');
+
+        press('a:dirusage');
+        expect(str_contains(tg_last_text(), 'مصرف پوشه') || str_contains(tg_last_text(), 'پیدا نشد'), 'صفحه‌ی مصرف پوشه‌ها نیامد');
+    });
+
     scenario('لاگ عملیات، کارهای انجام‌شده را ثبت می‌کند و کلید داخلی لو نمی‌دهد', function (): void {
         press('a:log');
         $text = tg_last_text();
-        expect(str_contains($text, 'اجبار HTTPS') || str_contains($text, 'ساخت گروهی ایمیل'), 'آخرین عملیات‌ها در لاگ نیستند');
+        expect(str_contains($text, 'حالت تعمیر') || str_contains($text, 'تغییر رمز گروهی ایمیل'), 'آخرین عملیات‌ها در لاگ نیستند');
         expect(!str_contains($text, '__msg'), 'کلیدهای داخلی نباید در لاگ بیایند');
         expect(!str_contains($text, '__options'), 'فهرست دکمه‌ها نباید در لاگ بیاید');
         expect(!str_contains($text, '"action"'), 'لاگ نباید خام JSON نمایش داده شود');

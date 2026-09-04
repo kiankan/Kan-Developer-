@@ -1806,6 +1806,187 @@ final class CpanelService
     }
 
     /**
+     * حالت «تعمیر سایت»: صفحه‌ی موقت به بازدیدکننده نشان داده می‌شود.
+     *
+     * سی‌پنل برای این کار API ندارد؛ کار را با همان چیزی می‌کنیم که خود
+     * وب‌سرور می‌فهمد — یک .htaccess که همه را به maintenance.html می‌فرستد.
+     * فایل قبلی کنار گذاشته می‌شود تا خاموش‌کردنش دقیقاً برش گرداند.
+     */
+    public static function setMaintenance(CpanelClient $client, string $docroot, bool $enable, string $message = ''): void
+    {
+        $docroot = self::normalizePath($docroot);
+        $htaccess = $docroot . '/.htaccess';
+        $backup = $docroot . '/.htaccess.teamkan';
+
+        if (!$enable) {
+            $saved = self::softCall(fn () => self::readFile($client, $backup), null);
+            if (is_string($saved)) {
+                self::saveFile($client, $htaccess, $saved);
+                self::softCall(fn () => self::deletePath($client, $backup), null);
+            } else {
+                // چیزی برای برگرداندن نبود: فقط بلوک خودمان را حذف می‌کنیم.
+                $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+                self::saveFile($client, $htaccess, self::stripBlock($current, 'MAINTENANCE'));
+            }
+
+            return;
+        }
+
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+        if ($current !== '') {
+            self::saveFile($client, $backup, $current);
+        }
+
+        $body = $message !== '' ? $message : 'سایت موقتاً در دست تعمیر است. لطفاً کمی بعد دوباره سر بزنید.';
+        self::saveFile($client, $docroot . '/maintenance.html', self::maintenancePage($body));
+
+        $rules = implode("\n", [
+            '# TEAMKAN MAINTENANCE START',
+            'RewriteEngine On',
+            'RewriteCond %{REQUEST_URI} !^/maintenance\.html$',
+            'RewriteCond %{REQUEST_FILENAME} !\.(css|js|png|jpg|jpeg|gif|svg|woff2?)$',
+            'RewriteRule ^(.*)$ /maintenance.html [R=503,L]',
+            'ErrorDocument 503 /maintenance.html',
+            '# TEAMKAN MAINTENANCE END',
+            '',
+        ]);
+
+        self::saveFile($client, $htaccess, $rules . self::stripBlock($current, 'MAINTENANCE'));
+    }
+
+    public static function isMaintenanceOn(CpanelClient $client, string $docroot): bool
+    {
+        $current = (string) self::softCall(fn () => self::readFile($client, self::normalizePath($docroot) . '/.htaccess'), '');
+
+        return str_contains($current, 'TEAMKAN MAINTENANCE START');
+    }
+
+    /**
+     * مسدودکردن آی‌پی روی سطح وب‌سرور (بلوک نشان‌دار در .htaccess).
+     *
+     * @return array<int, string> فهرست آی‌پی‌های مسدود بعد از تغییر
+     */
+    public static function blockIp(CpanelClient $client, string $docroot, string $ip, bool $block = true): array
+    {
+        $htaccess = self::normalizePath($docroot) . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+
+        $ips = self::blockedIps($current);
+        $ip = trim($ip);
+        if ($block) {
+            if ($ip !== '' && !in_array($ip, $ips, true)) {
+                $ips[] = $ip;
+            }
+        } else {
+            $ips = array_values(array_filter($ips, static fn (string $existing): bool => $existing !== $ip));
+        }
+
+        $lines = [];
+        if ($ips !== []) {
+            $lines[] = '# TEAMKAN BLOCKLIST START';
+            $lines[] = '<RequireAll>';
+            $lines[] = '    Require all granted';
+            foreach ($ips as $entry) {
+                $lines[] = '    Require not ip ' . $entry;
+            }
+            $lines[] = '</RequireAll>';
+            $lines[] = '# TEAMKAN BLOCKLIST END';
+            $lines[] = '';
+        }
+        $rules = implode("\n", $lines);
+
+        self::saveFile($client, $htaccess, $rules . self::stripBlock($current, 'BLOCKLIST'));
+
+        return $ips;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public static function blockedIps(string $htaccess): array
+    {
+        preg_match_all('/Require not ip ([^\s]+)/', $htaccess, $matches);
+
+        return array_values(array_unique($matches[1] ?? []));
+    }
+
+    /**
+     * بلوک نشان‌دار خودمان را از فایل برمی‌دارد تا دوباره‌نویسی تمیز باشد.
+     */
+    public static function stripBlock(string $content, string $name): string
+    {
+        $pattern = '/# TEAMKAN ' . preg_quote($name, '/') . ' START.*?# TEAMKAN ' . preg_quote($name, '/') . " END\n?/s";
+
+        return (string) preg_replace($pattern, '', $content);
+    }
+
+    private static function maintenancePage(string $message): string
+    {
+        $safe = htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        return implode("\n", [
+            '<!doctype html>',
+            '<html lang="fa" dir="rtl">',
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            '<title>در دست تعمیر</title>',
+            '<style>body{font-family:system-ui,Tahoma,sans-serif;display:flex;min-height:100vh;'
+                . 'align-items:center;justify-content:center;margin:0;background:#f6f6f8;color:#222;'
+                . 'text-align:center;padding:2rem}div{max-width:32rem;line-height:2}h1{font-size:1.4rem}</style>',
+            '<div><h1>🛠 در دست تعمیر</h1><p>' . $safe . '</p></div>',
+            '',
+        ]);
+    }
+
+    /**
+     * محافظت با رمز روی یک پوشه (همان Directory Privacy پنل).
+     */
+    public static function protectDirectory(CpanelClient $client, string $dir, string $label, bool $enable): void
+    {
+        $client->uapi('DirectoryPrivacy', 'configure_directory_protection', [
+            'dir' => self::normalizePath($dir),
+            'label' => $label !== '' ? $label : basename($dir),
+            'enabled' => $enable ? 1 : 0,
+        ]);
+    }
+
+    public static function addProtectedUser(CpanelClient $client, string $dir, string $user, string $password): void
+    {
+        $client->uapi('DirectoryPrivacy', 'add_user', [
+            'dir' => self::normalizePath($dir),
+            'user' => $user,
+            'password' => $password,
+        ]);
+    }
+
+    /**
+     * مصرف هر پوشه‌ی سطح‌اول هوم — «چه چیزی فضا گرفته» به تفکیک پوشه.
+     *
+     * @return array<int, array{name: string, path: string, size: float, files: int}>
+     */
+    public static function directoryUsage(CpanelClient $client): array
+    {
+        $home = self::homeDir($client);
+        $out = [];
+
+        foreach (self::softCall(fn () => self::listFiles($client, $home), []) as $entry) {
+            if (!$entry['dir']) {
+                continue;
+            }
+            $children = self::softCall(fn () => self::listFiles($client, $entry['path']), []);
+            $size = 0.0;
+            foreach ($children as $child) {
+                $size += (float) ($child['size'] ?? 0);
+            }
+            $out[] = ['name' => $entry['name'], 'path' => $entry['path'], 'size' => $size, 'files' => count($children)];
+        }
+
+        usort($out, static fn (array $a, array $b): int => $b['size'] <=> $a['size']);
+
+        return array_slice($out, 0, 12);
+    }
+
+    /**
      * بزرگ‌ترین فایل‌های یک پوشه — برای وقتی فضای هاست پر شده و باید فهمید
      * چه چیزی جا گرفته است.
      *

@@ -22,8 +22,11 @@ final class Alerts
         $state = self::loadState();
         $now = time();
 
+        $usage = CpanelService::resourceUsage($client);
+        UsageHistory::record($usage);
+
         // ---- دیسک و اینود
-        foreach (CpanelService::resourceUsage($client) as $item) {
+        foreach ($usage as $item) {
             $percent = $item['percent'];
             if ($percent === null) {
                 continue;
