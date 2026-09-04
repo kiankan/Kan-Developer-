@@ -1596,6 +1596,86 @@ final class CpanelService
         $client->api2('Fileman', 'mkdir', ['path' => self::normalizePath($dir), 'name' => $name]);
     }
 
+    /**
+     * گرفتن محتوای یک فایل برای فرستادن در تلگرام.
+     *
+     * اول از خود API (که برای فایل متنی مطمئن‌تر است) و اگر نشد یا فایل
+     * باینری بود، از مسیر دانلود خام.
+     */
+    public static function downloadFile(CpanelClient $client, string $path): string
+    {
+        $path = self::normalizePath($path);
+
+        if (!self::isBinaryName($path)) {
+            $content = self::softCall(fn () => self::readFile($client, $path), null);
+            if (is_string($content) && $content !== '') {
+                return $content;
+            }
+        }
+
+        return $client->downloadPath($path);
+    }
+
+    public static function isBinaryName(string $name): bool
+    {
+        return (bool) preg_match(
+            '/\.(zip|tar|gz|tgz|bz2|rar|7z|jpe?g|png|gif|webp|ico|bmp|pdf|docx?|xlsx?|pptx?|mp[34]|avi|mkv|mov|woff2?|ttf|eot|so|bin|sqlite3?|db)$/i',
+            trim($name),
+        );
+    }
+
+    /**
+     * نوشتن محتوای یک فایل (ویرایش یا ساخت فایل تازه).
+     */
+    public static function saveFile(CpanelClient $client, string $path, string $content): void
+    {
+        $path = self::normalizePath($path);
+
+        $client->uapi('Fileman', 'save_file_content', [
+            'dir' => dirname($path),
+            'file' => basename($path),
+            'content' => $content,
+            'fallback' => 0,
+            'from_charset' => 'utf-8',
+            'to_charset' => 'utf-8',
+        ]);
+    }
+
+    /**
+     * جست‌وجوی فایل بر اساس نام، تا دو سطح پایین‌تر از مسیر داده‌شده.
+     *
+     * @return array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int, permissions: string}>
+     */
+    public static function findFiles(CpanelClient $client, string $dir, string $needle, int $limit = 25): array
+    {
+        $needle = mb_strtolower(trim($needle));
+        if ($needle === '') {
+            return [];
+        }
+
+        $found = [];
+        $queue = [[self::normalizePath($dir), 0]];
+
+        while ($queue !== [] && count($found) < $limit) {
+            [$current, $depth] = array_shift($queue);
+
+            foreach (self::softCall(fn () => self::listFiles($client, $current), []) as $entry) {
+                if (str_contains(mb_strtolower($entry['name']), $needle)) {
+                    $found[] = $entry;
+                    if (count($found) >= $limit) {
+                        break;
+                    }
+                }
+                // پوشه‌های سنگین و بی‌ربط را نمی‌گردیم تا تعداد درخواست‌ها منفجر نشود.
+                if ($entry['dir'] && $depth < 2 && !in_array($entry['name'], ['mail', 'node_modules', '.git', 'tmp', 'cache'], true)) {
+                    $queue[] = [$entry['path'], $depth + 1];
+                }
+            }
+        }
+
+        return $found;
+    }
+
     public static function readFile(CpanelClient $client, string $path): string
     {
         $raw = $client->uapi('Fileman', 'get_file_content', [

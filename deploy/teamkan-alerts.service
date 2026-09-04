@@ -1,0 +1,10 @@
+[Unit]
+Description=cPanel TeamKan — alerts and scheduled report
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/teamkan
+EnvironmentFile=/opt/teamkan/.env
+ExecStart=/usr/bin/php /opt/teamkan/alerts.php
+Nice=15

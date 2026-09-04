@@ -20,6 +20,7 @@ REPO_URL="${TEAMKAN_REPO:-https://github.com/kiankan/cpanel_teamkan.git}"
 INSTALL_DIR="/opt/teamkan"
 SERVICE_NAME="teamkan-bot"
 WEB_SERVICE_NAME="teamkan-web"
+ALERTS_NAME="teamkan-alerts"
 DEFAULT_LISTEN_PORT=2000
 ENV_FILE="$INSTALL_DIR/.env"
 BIN_PATH="/usr/local/bin/teamkan"
@@ -214,6 +215,33 @@ MemoryMax=96M
 WantedBy=multi-user.target
 EOF
 
+  # هشدارها و گزارش دوره‌ای: یک اجرای کوتاه هر ۱۵ دقیقه.
+  cat > "/etc/systemd/system/${ALERTS_NAME}.service" <<EOF
+[Unit]
+Description=cPanel TeamKan — alerts and scheduled report
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$php $INSTALL_DIR/alerts.php
+Nice=15
+EOF
+
+  cat > "/etc/systemd/system/${ALERTS_NAME}.timer" <<EOF
+[Unit]
+Description=cPanel TeamKan — run alerts every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=${ALERTS_NAME}.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
   systemctl daemon-reload
 }
 
@@ -252,6 +280,7 @@ do_install() {
   write_systemd_unit
   self_link
   systemctl enable --now "$SERVICE_NAME" "$WEB_SERVICE_NAME"
+  systemctl enable --now "${ALERTS_NAME}.timer"
   sleep 1
 
   echo ""
@@ -286,6 +315,7 @@ do_finish_update() {
     systemctl enable "$unit" >/dev/null 2>&1
     systemctl restart "$unit"
   done
+  systemctl enable --now "${ALERTS_NAME}.timer" >/dev/null 2>&1
   echo "آپدیت انجام شد و سرویس‌ها با آخرین نسخه بالا آمدند."
 }
 
@@ -319,9 +349,15 @@ do_status() {
   systemctl status "$WEB_SERVICE_NAME" --no-pager
   echo ""
   echo "صفحه‌ی وضعیت: http://$(hostname -I 2>/dev/null | awk '{print $1}'):$(listen_port)/"
+  echo ""
+  systemctl list-timers "${ALERTS_NAME}.timer" --no-pager 2>/dev/null | head -3
 }
 
-do_logs() { journalctl -u "$SERVICE_NAME" -u "$WEB_SERVICE_NAME" -f -n 100; }
+do_logs() { journalctl -u "$SERVICE_NAME" -u "$WEB_SERVICE_NAME" -u "$ALERTS_NAME" -f -n 100; }
+
+do_alerts() {
+  ( cd "$INSTALL_DIR" && "$(php_bin)" alerts.php ) && echo "بررسی هشدارها انجام شد."
+}
 
 do_code() {
   if [ ! -f "$INSTALL_DIR/cli.php" ]; then
@@ -358,8 +394,9 @@ do_uninstall() {
     echo "لغو شد."
     return
   fi
-  systemctl disable --now "$SERVICE_NAME" "$WEB_SERVICE_NAME" 2>/dev/null
-  rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/systemd/system/${WEB_SERVICE_NAME}.service"
+  systemctl disable --now "$SERVICE_NAME" "$WEB_SERVICE_NAME" "${ALERTS_NAME}.timer" 2>/dev/null
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/systemd/system/${WEB_SERVICE_NAME}.service" \
+        "/etc/systemd/system/${ALERTS_NAME}.service" "/etc/systemd/system/${ALERTS_NAME}.timer"
   systemctl daemon-reload
   rm -rf "$INSTALL_DIR"
   rm -f "$BIN_PATH"
@@ -413,7 +450,7 @@ case "${1:-menu}" in
   menu|"")          show_menu ;;
   *)
     echo "دستور نامعتبر: $1"
-    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, code, token, port, uninstall, menu"
+    echo "دستورهای معتبر: install, update, start, stop, restart, status, logs, code, token, port, alerts, uninstall, menu"
     exit 1
     ;;
 esac

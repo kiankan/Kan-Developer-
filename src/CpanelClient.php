@@ -176,6 +176,47 @@ final class CpanelClient
     }
 
     /**
+     * دانلود خام یک فایل از خود cpsrvd (مسیر /download).
+     *
+     * UAPI برای فایل‌های متنی خوب است، ولی برای فایل باینری (zip، عکس، ...)
+     * محتوای درست نمی‌دهد؛ این مسیر بایت‌ها را همان‌طور که هستند برمی‌گرداند.
+     */
+    public function downloadPath(string $path): string
+    {
+        if ($this->isWhm()) {
+            throw CpanelError::config('دانلود فایل فقط با توکن خود حساب cPanel کار می‌کند.');
+        }
+
+        $url = $this->baseUrl() . '/download?file=' . rawurlencode($path);
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['Authorization: ' . $this->authHeader()],
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
+            CURLOPT_SSL_VERIFYPEER => $this->verifySsl(),
+            CURLOPT_SSL_VERIFYHOST => $this->verifySsl() ? 2 : 0,
+        ]);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            throw CpanelError::transport($error !== '' ? $error : 'دانلود ناموفق بود');
+        }
+        if ($status === 401 || $status === 403) {
+            throw CpanelError::auth($status);
+        }
+        if ($status !== 200) {
+            throw CpanelError::http($status, (string) $body);
+        }
+
+        return (string) $body;
+    }
+
+    /**
      * WHM API نسخه‌ی ۱ (فقط روی سرورهای از نوع WHM).
      *
      * @param array<string, mixed> $params

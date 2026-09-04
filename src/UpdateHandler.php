@@ -30,6 +30,16 @@ final class UpdateHandler
     /** حداکثر حجم فایلی که تلگرام اجازه‌ی دانلودش را به ربات می‌دهد. */
     private const MAX_UPLOAD = 20 * 1024 * 1024;
 
+    /** حداکثر حجمی که ربات می‌تواند برای کاربر بفرستد. */
+    private const MAX_DOWNLOAD = 45 * 1024 * 1024;
+
+    /**
+     * فایلی که عملیات ساخته و باید بعد از پیام نتیجه فرستاده شود.
+     *
+     * @var array{name: string, content: string}|null
+     */
+    private static ?array $pendingFile = null;
+
     /**
      * تعریف جریان‌های چندمرحله‌ای.
      *
@@ -306,6 +316,17 @@ final class UpdateHandler
                 ['key' => 'domain', 'prompt' => "دامنه‌ای که باید همان سایت اصلی را نشان دهد:\n\n💡 مثلاً <code>example.net</code> که می‌خواهید همان محتوای <code>example.com</code> را بدهد."],
             ],
         ],
+        'dns_bulk' => [
+            'title' => '🧭 افزودن رکورد روی چند دامنه',
+            'scope' => 'account',
+            'back' => 'dns',
+            'confirm' => '⚠️ رکورد <b>{type}</b> با نام <code>{name}</code> روی همه‌ی دامنه‌های حساب اضافه می‌شود.',
+            'steps' => [
+                ['key' => 'type', 'prompt' => "نوع رکورد؟\n\n💡 معمول‌ترین کاربرد این کار، افزودن یک رکورد TXT تأییدیه روی همه‌ی دامنه‌هاست.", 'picker' => 'record_types'],
+                ['key' => 'name', 'prompt' => 'نام رکورد (<code>@</code> برای خود دامنه):'],
+                ['key' => 'value', 'prompt' => 'مقدار رکورد:'],
+            ],
+        ],
         'dns_fix' => [
             'title' => '🛠 اصلاح رکورد A دامنه',
             'scope' => 'account',
@@ -315,6 +336,19 @@ final class UpdateHandler
                 ['key' => 'zone', 'prompt' => 'کدام دامنه؟', 'picker' => 'zones'],
                 ['key' => 'name', 'prompt' => "کدام نام؟ (<code>@</code> برای خود دامنه، <code>www</code> برای نسخه‌ی www)"],
                 ['key' => 'ip', 'prompt' => "آی‌پی مقصد را بفرستید.\n\n💡 آی‌پی هاست را در «دامنه‌ها → لیست دامنه‌ها» می‌بینید."],
+            ],
+        ],
+        'alert_threshold' => [
+            'title' => '🔔 آستانه‌ی هشدارها',
+            'scope' => 'local',
+            'back' => 'alerts',
+            'steps' => [
+                ['key' => 'kind', 'prompt' => 'کدام هشدار؟', 'choices' => [
+                    ['💽 دیسک', Settings::ALERT_DISK],
+                    ['🔢 اینود', Settings::ALERT_INODE],
+                    ['🔒 روزهای مانده تا انقضای SSL', Settings::ALERT_SSL_DAYS],
+                ]],
+                ['key' => 'value', 'prompt' => "عدد جدید را بفرستید.\n\nبرای دیسک و اینود درصد (مثل <code>85</code>) و برای SSL تعداد روز (مثل <code>14</code>). عدد <code>0</code> یعنی این هشدار خاموش باشد."],
             ],
         ],
         'search' => [
@@ -648,6 +682,50 @@ final class UpdateHandler
                 ['key' => 'file', 'prompt' => "حالا خود فایل را همین‌جا بفرستید (به‌صورت Document، نه عکس).\n\n💡 برای سورس سایت، یک <code>zip</code> بفرستید و بعد همین‌جا بازش کنید.\n⚠️ سقف حجم در تلگرام ۲۰ مگابایت است.", 'file' => true],
             ],
         ],
+        'file_download' => [
+            'title' => '⬇️ دانلود فایل از هاست',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => "مسیر کامل فایل را بفرستید، مثل:\n<code>/home/user/public_html/index.php</code>\n\n💡 از «🗂 مرور فایل‌ها» هم می‌توانید روی فایل بزنید و دکمه‌ی دانلود را ببینید."],
+            ],
+        ],
+        'folder_download' => [
+            'title' => '⬇️ دانلود پوشه (zip)',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => "مسیر پوشه‌ای که می‌خواهید zip شود و برایتان بیاید:", 'picker' => 'dirs'],
+            ],
+        ],
+        'file_edit' => [
+            'title' => '📝 ویرایش فایل متنی',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => "مسیر کامل فایل متنی (مثل <code>.htaccess</code> یا <code>wp-config.php</code>):"],
+                ['key' => 'content', 'prompt' => "محتوای جدید فایل را بفرستید.\n\n⚠️ محتوای فعلی کامل جایگزین می‌شود — اگر «بکاپ قبل از تغییر» روشن باشد، اول یک نسخه‌ی zip گرفته می‌شود."],
+            ],
+        ],
+        'file_create' => [
+            'title' => '📄 ساخت فایل جدید',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'dir', 'prompt' => 'داخل کدام پوشه ساخته شود؟', 'picker' => 'dirs'],
+                ['key' => 'name', 'prompt' => 'نام فایل (مثل <code>robots.txt</code>):'],
+                ['key' => 'content', 'prompt' => 'محتوای فایل را بفرستید (یا <code>/skip</code> برای فایل خالی):', 'optional' => true, 'default' => ''],
+            ],
+        ],
+        'file_find' => [
+            'title' => '🔎 پیدا کردن فایل',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'dir', 'prompt' => 'از کدام پوشه شروع کنم؟', 'picker' => 'dirs'],
+                ['key' => 'needle', 'prompt' => "بخشی از نام فایل را بفرستید، مثل <code>config</code> یا <code>.env</code>."],
+            ],
+        ],
         'file_extract' => [
             'title' => '🗜 باز کردن آرشیو روی هاست',
             'scope' => 'account',
@@ -919,7 +997,8 @@ final class UpdateHandler
 
         // دکمه‌های مرورگر فایل
         if (str_starts_with($data, 'fb') || str_starts_with($data, 'ff:')
-            || str_starts_with($data, 'fx:') || str_starts_with($data, 'fd:') || $data === 'fup') {
+            || str_starts_with($data, 'fx:') || str_starts_with($data, 'fd:')
+            || str_starts_with($data, 'fg:') || $data === 'fup') {
             if (self::handleBrowseCallback($api, $chatId, $data)) {
                 return;
             }
@@ -1149,6 +1228,9 @@ final class UpdateHandler
                 [self::btn('✏️ تغییر نام', 'f:file_rename'), self::btn('📦 جابه‌جایی/کپی', 'f:file_move')],
                 [self::btn('🔐 سطح دسترسی', 'f:file_chmod'), self::btn('🗜 فشرده‌سازی', 'f:file_compress')],
                 [self::btn('📊 بزرگ‌ترین فایل‌ها', 'a:bigfiles'), self::btn('🕒 تغییرات اخیر', 'a:recentfiles')],
+                [self::btn('⬇️ دانلود فایل', 'f:file_download'), self::btn('⬇️ دانلود پوشه (zip)', 'f:folder_download')],
+                [self::btn('📝 ویرایش فایل', 'f:file_edit'), self::btn('📄 فایل جدید', 'f:file_create')],
+                [self::btn('🔎 پیدا کردن فایل', 'f:file_find'), self::btn('↩️ بازگردانی آخرین بکاپ', 'a:undo')],
                 [self::btn('🧹 پاک‌سازی هوشمند', 'a:cleanup')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1168,7 +1250,7 @@ final class UpdateHandler
             'dns' => ["🧭 <b>رکوردهای DNS</b>\n\nمشخص می‌کند دامنه به کجا اشاره کند (A برای آی‌پی، CNAME برای نام، MX برای ایمیل، TXT برای تأییدیه‌ها).", [
                 [self::btn('📄 نمایش رکوردها', 'f:dns_list')],
                 [self::btn('➕ رکورد جدید', 'f:dns_add'), self::btn('🗑 حذف رکورد', 'f:dns_del')],
-                [self::btn('🛠 اصلاح رکورد A', 'f:dns_fix')],
+                [self::btn('🛠 اصلاح رکورد A', 'f:dns_fix'), self::btn('🧭 رکورد گروهی', 'f:dns_bulk')],
                 [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
             'ssl' => ["🔒 <b>گواهی SSL</b>\n\nگواهی همان چیزی است که قفل سبز مرورگر و آدرس <code>https</code> را می‌سازد. روی اکثر هاست‌ها cPanel خودش رایگان صادر می‌کند (AutoSSL).", [
@@ -1203,6 +1285,12 @@ final class UpdateHandler
                 [self::btn('✉️ ساخت ایمیل جدید', 'h:email')],
                 [self::btn('🔒 گرفتن SSL برای دامنه', 'h:ssl')],
                 [self::btn('💾 گرفتن بکاپ', 'h:backup')],
+                [self::btn('⬅️ بازگشت', 'menu')],
+            ]],
+            'alerts' => [self::alertsMenuText(), [
+                [self::btn('💽 آستانه‌ی دیسک/اینود/SSL', 'f:alert_threshold')],
+                [self::btn('🔴 هشدار داون‌شدن سایت', 'a:togglesite'), self::btn('🛡 بکاپ قبل از تغییر', 'a:togglesafe')],
+                [self::btn('📊 گزارش دوره‌ای', 'a:reportevery')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'adm' => ["👮 <b>ادمین‌های ربات</b>\n\nهر کسی که اینجا باشد به همه‌ی امکانات ربات دسترسی دارد.", [
@@ -1266,7 +1354,8 @@ final class UpdateHandler
 
         $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
         $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('✨ قابلیت‌ها', 'a:features')];
-        $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('🧾 لاگ عملیات', 'a:log')];
+        $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('🔔 هشدارها', 'm:alerts')];
+        $rows[] = [self::btn('🧾 لاگ عملیات', 'a:log')];
         $rows[] = [self::btn('❓ راهنما', 'a:help')];
 
         return ['inline_keyboard' => $rows];
@@ -1375,6 +1464,27 @@ final class UpdateHandler
     }
 
     /**
+     * متن منوی هشدارها با مقدارهای فعلی — تا کاربر ببیند الان چه چیزی روشن است.
+     */
+    private static function alertsMenuText(): string
+    {
+        $every = match (Settings::get(Settings::REPORT_EVERY, 'weekly')) {
+            'daily' => 'روزانه',
+            'off' => 'خاموش',
+            default => 'هفتگی',
+        };
+
+        return "🔔 <b>هشدارها و گزارش خودکار</b>\n\n"
+            . "ربات هر چند دقیقه وضعیت هاست را می‌سنجد و فقط وقتی چیزی مشکل دارد پیام می‌دهد.\n\n"
+            . '💽 هشدار دیسک: ' . Settings::int(Settings::ALERT_DISK, 85) . "٪\n"
+            . '🔢 هشدار اینود: ' . Settings::int(Settings::ALERT_INODE, 85) . "٪\n"
+            . '🔒 هشدار انقضای SSL: ' . Settings::int(Settings::ALERT_SSL_DAYS, 14) . " روز مانده\n"
+            . '🔴 هشدار داون‌شدن سایت: ' . (Settings::bool(Settings::ALERT_SITE, true) ? 'روشن' : 'خاموش') . "\n"
+            . '🛡 بکاپ قبل از تغییر/حذف: ' . (Settings::bool(Settings::SAFE_DELETE, true) ? 'روشن' : 'خاموش') . "\n"
+            . '📊 گزارش دوره‌ای: ' . $every;
+    }
+
+    /**
      * وضعیت سرور فعال — چیدمان منو بر اساس همین ساخته می‌شود.
      *
      * @return array{state: string, is_whm: bool, target: string, server: array<string, mixed>|null}
@@ -1421,6 +1531,46 @@ final class UpdateHandler
 
         if ($action === 'features') {
             self::respond($api, $chatId, self::features(), self::backKeyboard());
+
+            return;
+        }
+
+        if ($action === 'togglesite' || $action === 'togglesafe') {
+            $key = $action === 'togglesite' ? Settings::ALERT_SITE : Settings::SAFE_DELETE;
+            Settings::toggle($key);
+            self::sendMenu($api, $chatId, 'alerts');
+
+            return;
+        }
+
+        if ($action === 'reportevery') {
+            $next = match (Settings::get(Settings::REPORT_EVERY, 'weekly')) {
+                'weekly' => 'daily',
+                'daily' => 'off',
+                default => 'weekly',
+            };
+            Settings::set(Settings::REPORT_EVERY, $next);
+            self::sendMenu($api, $chatId, 'alerts');
+
+            return;
+        }
+
+        if ($action === 'undo') {
+            $backup = Settings::get(Settings::LAST_BACKUP);
+            if ($backup === '') {
+                self::respond($api, $chatId, 'چیزی برای بازگردانی نیست؛ آخرین عملیات نسخه‌ی پشتیبان نداشت.', self::backKeyboard('files'));
+
+                return;
+            }
+            $api->sendChatAction($chatId);
+            try {
+                CpanelService::extractArchive(self::accountClient(), $backup, dirname($backup));
+                AuditLog::record(self::$actor, (string) (ServerStore::activeId() ?? '-'), 'undo_restore', ['backup' => $backup]);
+                $text = '↩️ نسخه‌ی پشتیبان برگردانده شد از <code>' . Format::escapeHtml($backup) . '</code>';
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+            }
+            self::respond($api, $chatId, $text, self::backKeyboard('files'));
 
             return;
         }
@@ -1840,7 +1990,7 @@ final class UpdateHandler
             if (CpanelService::isArchive((string) $entry['name'])) {
                 $rows[] = [self::btn('🗜 باز کردن همین‌جا', 'fx:' . $index)];
             }
-            $rows[] = [self::btn('🗑 حذف', 'fd:' . $index)];
+            $rows[] = [self::btn('⬇️ دانلود', 'fg:' . $index), self::btn('🗑 حذف', 'fd:' . $index)];
             $rows[] = [self::btn('⬅️ بازگشت به پوشه', 'fbr')];
 
             self::respond(
@@ -1850,6 +2000,19 @@ final class UpdateHandler
                 . ($entry['size'] !== null ? "\n💾 " . Format::bytes((float) $entry['size']) : ''),
                 ['inline_keyboard' => $rows],
             );
+
+            return true;
+        }
+
+        if (str_starts_with($data, 'fg:')) {
+            $entry = $entries[(int) substr($data, 3)] ?? null;
+            if (!is_array($entry)) {
+                self::browseFiles($api, $chatId, $dir, $page);
+
+                return true;
+            }
+            State::clear($chatId);
+            self::execute($api, $chatId, 'file_download', ['path' => (string) $entry['path']]);
 
             return true;
         }
@@ -2047,7 +2210,8 @@ final class UpdateHandler
         return match ($action) {
             'emails', 'forwarders' => 'email',
             'dbs', 'dbinfo' => 'db',
-            'cleanup' => 'files',
+            'cleanup', 'undo' => 'files',
+            'togglesite', 'togglesafe', 'reportevery' => 'alerts',
             'domains', 'redirects' => 'dom',
             'ssl', 'autossl' => 'ssl',
             'mysqlhosts' => 'db',
@@ -2554,6 +2718,16 @@ final class UpdateHandler
         }
 
         self::respond($api, $chatId, $text, self::backKeyboard(self::FLOWS[$flow]['back'] ?? null));
+
+        if (self::$pendingFile !== null) {
+            $file = self::$pendingFile;
+            self::$pendingFile = null;
+            try {
+                $api->sendDocument($chatId, $file['name'], $file['content']);
+            } catch (Throwable $e) {
+                $api->sendHtml($chatId, Render::error($e));
+            }
+        }
     }
 
     // ------------------------------------------------------- اجرای عملیات‌ها
@@ -2864,6 +3038,148 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /**
+     * دانلود یک فایل از هاست و فرستادنش در تلگرام.
+     *
+     * چون خروجی این عملیات «فایل» است نه متن، خودش پیام را می‌فرستد و به
+     * موتور جریان یک خلاصه برمی‌گرداند.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function runFileDownload(array $data): string
+    {
+        return self::deliverFile((string) $data['path']);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFolderDownload(array $data): string
+    {
+        $archive = CpanelService::compressPath(self::accountClient(), (string) $data['path']);
+
+        return self::deliverFile($archive, 'پوشه فشرده شد و فایلش را فرستادم.');
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileEdit(array $data): string
+    {
+        $client = self::accountClient();
+        $path = (string) $data['path'];
+        $backup = self::backupBeforeChange($client, $path);
+
+        CpanelService::saveFile($client, $path, (string) $data['content']);
+
+        return '✅ فایل <code>' . Format::escapeHtml($path) . '</code> ذخیره شد.' . $backup;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileCreate(array $data): string
+    {
+        $path = rtrim((string) $data['dir'], '/') . '/' . ltrim((string) $data['name'], '/');
+        CpanelService::saveFile(self::accountClient(), $path, (string) ($data['content'] ?? ''));
+
+        return '✅ فایل ساخته شد: <code>' . Format::escapeHtml($path) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileFind(array $data): string
+    {
+        $found = CpanelService::findFiles(self::accountClient(), (string) $data['dir'], (string) $data['needle']);
+
+        return Render::fileList('🔎 <b>نتیجه‌ی جست‌وجوی فایل «' . Format::escapeHtml((string) $data['needle']) . '»</b>', $found);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDnsBulk(array $data): string
+    {
+        $client = self::accountClient();
+        $domains = CpanelService::domains($client);
+        $zones = array_values(array_filter(array_merge([$domains['main_domain']], $domains['addon_domains'])));
+
+        $ok = [];
+        $failed = [];
+        foreach ($zones as $zone) {
+            try {
+                CpanelService::addDnsRecord(
+                    $client,
+                    $zone,
+                    (string) $data['name'],
+                    (string) $data['type'],
+                    preg_split('/\s+/', trim((string) $data['value'])) ?: [],
+                );
+                $ok[] = $zone;
+            } catch (Throwable $e) {
+                $failed[] = $zone . ' (' . mb_substr($e->getMessage(), 0, 60) . ')';
+            }
+        }
+
+        $text = '🧭 رکورد <b>' . Format::escapeHtml(strtoupper((string) $data['type'])) . '</b> روی ' . count($ok) . " دامنه اضافه شد.";
+        if ($ok !== []) {
+            $text .= "\n\n✅ " . Format::escapeHtml(implode('، ', $ok));
+        }
+        if ($failed !== []) {
+            $text .= "\n\n❌ " . Format::escapeHtml(implode('، ', $failed));
+        }
+
+        return $text;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runAlertThreshold(array $data): string
+    {
+        $value = trim((string) $data['value']);
+        if (!ctype_digit($value)) {
+            throw CpanelError::config('فقط عدد بفرستید (مثل <code>85</code>).');
+        }
+        Settings::set((string) $data['kind'], $value);
+
+        return '✅ آستانه ذخیره شد: <code>' . Format::escapeHtml($value) . '</code>';
+    }
+
+    /**
+     * اگر «بکاپ قبل از تغییر» روشن باشد، قبل از دست‌زدن به یک مسیر یک zip
+     * می‌گیرد و مسیرش را نگه می‌دارد تا بشود برگرداند.
+     */
+    private static function backupBeforeChange(CpanelClient $client, string $path): string
+    {
+        if (!Settings::bool(Settings::SAFE_DELETE, true)) {
+            return '';
+        }
+
+        try {
+            $archive = CpanelService::compressPath($client, $path);
+            Settings::set(Settings::LAST_BACKUP, $archive);
+
+            return "\n\n🛡 نسخه‌ی پشتیبان: <code>" . Format::escapeHtml($archive) . '</code>';
+        } catch (Throwable) {
+            // اگر نشد بکاپ گرفت، خود عملیات نباید متوقف شود.
+            return '';
+        }
+    }
+
+    /**
+     * فایل را از هاست می‌گیرد و در تلگرام می‌فرستد.
+     */
+    private static function deliverFile(string $path, string $note = ''): string
+    {
+        $client = self::accountClient();
+        $path = CpanelService::normalizePath($path);
+        $contents = CpanelService::downloadFile($client, $path);
+        $size = strlen($contents);
+
+        if ($size === 0) {
+            return '⚠️ فایل خالی بود یا خوانده نشد: <code>' . Format::escapeHtml($path) . '</code>';
+        }
+        if ($size > self::MAX_DOWNLOAD) {
+            return '⚠️ حجم فایل ' . Format::bytes((float) $size) . ' است و تلگرام اجازه‌ی فرستادن بیشتر از '
+                . Format::bytes(self::MAX_DOWNLOAD) . " را نمی‌دهد.\n\n💡 اول فشرده‌اش کنید یا تکه‌تکه بفرستید.";
+        }
+
+        self::$pendingFile = ['name' => basename($path), 'content' => $contents];
+
+        return ($note !== '' ? $note . "\n\n" : '') . '⬇️ <code>' . Format::escapeHtml($path) . '</code> — '
+            . Format::bytes((float) $size);
     }
 
     /** @param array<string, mixed> $data */

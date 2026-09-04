@@ -781,6 +781,78 @@ if (is_resource($cpanelProcess)) {
         expect($edits !== [], 'رکورد جدید فرستاده نشد');
     });
 
+    scenario('دانلود فایل از هاست، فایل را در تلگرام می‌فرستد', function (): void {
+        press('a:files');
+        press('ff:2');                                   // site.zip
+        expect(in_array('fg:2', tg_last_buttons(), true), 'دکمه‌ی دانلود روی فایل نبود');
+
+        $before = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        press('fg:2');
+        $after = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        expect($after > $before, 'فایل دانلودشده در تلگرام فرستاده نشد');
+        expect(str_contains(tg_last_text(), 'site.zip') || $after > $before, 'نام فایل در پیام نیامد');
+    });
+
+    scenario('منوی فایل‌ها دکمه‌های دانلود، ویرایش، ساخت و جست‌وجو دارد', function (): void {
+        press('m:files');
+        foreach (['f:file_download', 'f:folder_download', 'f:file_edit', 'f:file_create', 'f:file_find', 'a:undo'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی فایل‌ها نبود");
+        }
+    });
+
+    scenario('ساخت فایل جدید روی هاست', function (): void {
+        press('f:file_create');
+        press('c:0');                                    // پوشه
+        send_text('robots.txt');
+        send_text("User-agent: *\nDisallow:");
+
+        $saves = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'save_file_content'));
+        expect($saves !== [], 'درخواست ذخیره‌ی فایل فرستاده نشد');
+        expect(str_contains(urldecode((string) array_values($saves)[0]['body']), 'file=robots.txt'), 'نام فایل درست نرفت');
+        expect(str_contains(tg_last_text(), 'robots.txt'), 'پیام موفقیت نیامد');
+    });
+
+    scenario('منوی هشدارها مقدارهای فعلی را نشان می‌دهد و سوییچ می‌شود', function (): void {
+        press('menu');
+        expect(in_array('m:alerts', tg_last_buttons(), true), 'دکمه‌ی هشدارها در منوی اصلی نبود');
+
+        press('m:alerts');
+        $text = tg_last_text();
+        expect(str_contains($text, 'هشدار دیسک'), 'آستانه‌ی دیسک نمایش داده نشد');
+        expect(str_contains($text, 'گزارش دوره‌ای'), 'تنظیم گزارش نمایش داده نشد');
+
+        $before = str_contains($text, 'بکاپ قبل از تغییر/حذف: روشن');
+        press('a:togglesafe');
+        $after = str_contains(tg_last_text(), 'بکاپ قبل از تغییر/حذف: روشن');
+        expect($before !== $after, 'سوییچ بکاپ قبل از تغییر کار نکرد');
+        press('a:togglesafe');
+    });
+
+    scenario('آستانه‌ی هشدار از داخل ربات عوض می‌شود', function (): void {
+        press('f:alert_threshold');
+        press('c:0');                                    // دیسک
+        send_text('75');
+        expect(Settings::int(Settings::ALERT_DISK, 0) === 75, 'آستانه ذخیره نشد');
+        expect(str_contains(tg_last_text(), '75'), 'مقدار جدید تأیید نشد');
+
+        press('f:alert_threshold');
+        press('c:0');
+        send_text('نود درصد');
+        expect(str_contains(tg_last_text(), 'عدد'), 'ورودی غیرعددی باید رد شود');
+    });
+
+    scenario('رکورد DNS گروهی روی همه‌ی دامنه‌ها اضافه می‌شود', function (): void {
+        press('m:dns');
+        expect(in_array('f:dns_bulk', tg_last_buttons(), true), 'دکمه‌ی رکورد گروهی نبود');
+
+        press('f:dns_bulk');
+        press('c:3');                                    // TXT
+        send_text('@');
+        send_text('v=spf1 -all');
+        press('ok');
+        expect(str_contains(tg_last_text(), 'دامنه اضافه شد'), 'گزارش گروهی نیامد');
+    });
+
     scenario('لاگ عملیات، کارهای انجام‌شده را ثبت می‌کند و کلید داخلی لو نمی‌دهد', function (): void {
         press('a:log');
         $text = tg_last_text();

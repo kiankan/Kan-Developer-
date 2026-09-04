@@ -792,6 +792,88 @@ check('اصلاح رکورد A، رکورد قبلی همان نام را برم
     assertTrue($added !== [], 'رکورد جدید باید اضافه شود');
 });
 
+check('دانلود: فایل متنی از API و فایل باینری از مسیر دانلود می‌آید', function (): void {
+    assertTrue(CpanelService::isBinaryName('/home/demo/site.zip'), 'zip باید باینری شناخته شود');
+    assertTrue(CpanelService::isBinaryName('logo.PNG'), 'تشخیص باید به بزرگی/کوچکی حروف حساس نباشد');
+    assertTrue(!CpanelService::isBinaryName('/home/demo/.htaccess'), 'فایل متنی نباید باینری شناخته شود');
+
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":"RewriteEngine On"}}'], $captured));
+    assertSame('RewriteEngine On', CpanelService::downloadFile($client, '/home/demo/.htaccess'));
+    assertTrue(str_contains($captured[0]['url'], 'get_file_content'), 'فایل متنی باید از API خوانده شود');
+});
+
+check('ذخیره‌ی فایل، مسیر و نام را جدا می‌فرستد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{}}'], $captured));
+    CpanelService::saveFile($client, '/home/demo/public_html/robots.txt', "User-agent: *\nDisallow:");
+
+    $body = urldecode($captured[0]['body']);
+    assertTrue(str_contains($captured[0]['url'], 'save_file_content'), 'باید save_file_content باشد');
+    assertTrue(str_contains($body, 'dir=/home/demo/public_html'), "مسیر درست نرفت: {$body}");
+    assertTrue(str_contains($body, 'file=robots.txt'), 'نام فایل درست نرفت');
+});
+
+check('جست‌وجوی فایل، پوشه‌های سنگین را نمی‌گردد و سقف دارد', function (): void {
+    $listing = json_encode(['status' => 1, 'data' => [
+        ['file' => 'wp-config.php', 'type' => 'file', 'size' => 100],
+        ['file' => 'node_modules', 'type' => 'dir', 'size' => 4096],
+        ['file' => 'mail', 'type' => 'dir', 'size' => 4096],
+    ]]);
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => (string) $listing], $captured));
+
+    $found = CpanelService::findFiles($client, '/home/demo', 'config');
+
+    assertSame(1, count($found));
+    assertSame('wp-config.php', $found[0]['name']);
+    assertSame(1, count($captured), 'node_modules و mail نباید گشته شوند');
+});
+
+check('تنظیمات ربات: پیش‌فرض، تغییر و سوییچ', function (): void {
+    assertSame(85, Settings::int(Settings::ALERT_DISK, 0), 'آستانه‌ی پیش‌فرض دیسک');
+    assertTrue(Settings::bool(Settings::SAFE_DELETE, false), 'بکاپ قبل از تغییر پیش‌فرض روشن است');
+
+    Settings::set(Settings::ALERT_DISK, '70');
+    assertSame(70, Settings::int(Settings::ALERT_DISK, 0));
+
+    assertSame(false, Settings::toggle(Settings::SAFE_DELETE));
+    assertSame(true, Settings::toggle(Settings::SAFE_DELETE));
+});
+
+check('هشدارها: فقط وقتی از آستانه رد شود پیام می‌دهد و تکرار نمی‌کند', function (): void {
+    Settings::set(Settings::ALERT_DISK, '80');
+    Settings::set(Settings::ALERT_SSL_DAYS, '0');
+    Settings::set(Settings::ALERT_SITE, '0');
+
+    $usage = static fn (int $percent): string => (string) json_encode(['status' => 1, 'data' => [
+        ['id' => 'disk_usage', 'description' => 'Disk Usage', 'usage' => $percent, 'maximum' => 100, 'percent_used' => $percent],
+    ]]);
+
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([['body' => $usage(50)]], $captured));
+    assertSame([], Alerts::collect($client), 'زیر آستانه نباید هشداری بدهد');
+
+    $client = new CpanelClient(cpanelServer(), fakeTransport([['body' => $usage(92)]], $captured));
+    $messages = Alerts::collect($client);
+    assertSame(1, count($messages), 'بالای آستانه باید یک هشدار بدهد');
+    assertTrue(str_contains($messages[0], 'Disk Usage'), 'نام منبع باید در هشدار بیاید');
+
+    $client = new CpanelClient(cpanelServer(), fakeTransport([['body' => $usage(93)]], $captured));
+    assertSame([], Alerts::collect($client), 'هشدار تکراری نباید فوراً دوباره فرستاده شود');
+});
+
+check('گزارش دوره‌ای: بعد از فرستادن، تا موعد بعدی دوباره نمی‌رود', function (): void {
+    Settings::set(Settings::REPORT_EVERY, 'weekly');
+    assertTrue(Alerts::reportDue(), 'اولین بار باید موعدش باشد');
+    Alerts::markReportSent();
+    assertTrue(!Alerts::reportDue(), 'بلافاصله بعدش نباید دوباره موعد باشد');
+
+    Settings::set(Settings::REPORT_EVERY, 'off');
+    assertTrue(!Alerts::reportDue(), 'وقتی خاموش است هیچ‌وقت موعد نیست');
+    Settings::set(Settings::REPORT_EVERY, 'weekly');
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {
