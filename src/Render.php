@@ -947,6 +947,15 @@ final class Render
             'addon_add' => 'افزودن دامنه', 'addon_del' => 'حذف دامنه', 'park_add' => 'پارک دامنه',
             'email_bulk_add' => 'ساخت گروهی ایمیل', 'email_bulk_del' => 'حذف گروهی ایمیل',
             'email_settings' => 'دیدن تنظیمات ایمیل', 'site_check' => 'بررسی سلامت دامنه',
+            'dns_template' => 'اجرای قالب DNS', 'dns_export' => 'خروجی فایل زون',
+            'file_transfer' => 'انتقال فایل بین دو هاست', 'srv_compare' => 'مقایسه‌ی دو هاست',
+            'php_test' => 'تست زنده‌ی PHP', 'hotlink' => 'جلوگیری از هات‌لینک',
+            'schedule_op' => 'زمان‌بندی کار', 'queue_del' => 'حذف کار زمان‌بندی‌شده',
+            'mail_records' => 'بررسی رکوردهای ایمیل', 'watch_domains' => 'تنظیم دامنه‌های تحت‌نظر',
+            'backup_schedule' => 'تنظیم بکاپ خودکار', 'guest_invite' => 'ساخت دسترسی موقت',
+            'whm_bulk' => 'تعلیق/رفع تعلیق گروهی', 'export_csv' => 'خروجی CSV',
+            'whm_user' => 'انتخاب کاربر مقصد', 'whm_summary' => 'دیدن جزئیات حساب',
+            'site_copy' => 'کپی سایت',
         ];
 
         $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];
@@ -976,6 +985,288 @@ final class Render
         }
 
         return implode("\n", $out);
+    }
+
+    /**
+     * @param array{roots: array<int, string>, writable: array<int, array{path: string, perm: string, dir: bool}>, exposed: array<int, array{path: string, why: string}>, scanned: int} $report
+     */
+    public static function security(array $report): string
+    {
+        $lines = ['🛡 <b>گزارش امنیتی پوشه‌های سایت</b>', ''];
+        $lines[] = '📂 پوشه‌های بررسی‌شده: ' . $report['scanned'];
+        foreach ($report['roots'] as $root) {
+            $lines[] = '   • <code>' . self::e($root) . '</code>';
+        }
+        $lines[] = '';
+
+        if ($report['exposed'] === [] && $report['writable'] === []) {
+            $lines[] = '✅ چیز نگران‌کننده‌ای پیدا نشد؛ نه فایل حساسی داخل پوشه‌ی سایت بود و نه دسترسی بازی.';
+
+            return implode("\n", $lines);
+        }
+
+        if ($report['exposed'] !== []) {
+            $lines[] = '<b>📥 فایل‌هایی که از روی وب قابل دانلودند:</b>';
+            foreach (array_slice($report['exposed'], 0, 15) as $item) {
+                $lines[] = '• <code>' . self::e($item['path']) . '</code>';
+                $lines[] = '   ↳ ' . self::e($item['why']);
+            }
+            if (count($report['exposed']) > 15) {
+                $lines[] = '… و ' . (count($report['exposed']) - 15) . ' مورد دیگر.';
+            }
+            $lines[] = '';
+        }
+
+        if ($report['writable'] !== []) {
+            $lines[] = '<b>🔓 دسترسی «نوشتن برای همه» (۷۷۷ و مانندش):</b>';
+            foreach (array_slice($report['writable'], 0, 15) as $item) {
+                $lines[] = '• ' . ($item['dir'] ? '📁' : '📄') . ' <code>' . self::e($item['path'])
+                    . '</code> — ' . self::e($item['perm']);
+            }
+            if (count($report['writable']) > 15) {
+                $lines[] = '… و ' . (count($report['writable']) - 15) . ' مورد دیگر.';
+            }
+            $lines[] = '';
+        }
+
+        $lines[] = '<b>چه کار کنم؟</b>';
+        if ($report['exposed'] !== []) {
+            $lines[] = '• فایل‌های حساس را پاک کنید یا از پوشه‌ی سایت بیرون ببرید («📂 فایل‌ها → 🗑 حذف» یا «📦 جابه‌جایی»).';
+        }
+        if ($report['writable'] !== []) {
+            $lines[] = '• دسترسی پوشه‌ها را ۷۵۵ و فایل‌ها را ۶۴۴ بگذارید («📂 فایل‌ها → 🔐 سطح دسترسی»).';
+        }
+        $lines[] = 'ℹ️ فقط پوشه‌های سایت گشته می‌شوند؛ فایل بیرون از آن‌ها از وب دیده نمی‌شود.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{label: string, host: string, user: string, main_domain: string, cpanel: string, php: string, usage: array<int, array{label: string, percent: ?float}>, counts: array<string, int>, error: string} $left
+     * @param array{label: string, host: string, user: string, main_domain: string, cpanel: string, php: string, usage: array<int, array{label: string, percent: ?float}>, counts: array<string, int>, error: string} $right
+     */
+    public static function serverCompare(array $left, array $right): string
+    {
+        $lines = ['⚖️ <b>مقایسه‌ی دو هاست</b>', ''];
+
+        foreach ([$left, $right] as $index => $side) {
+            $lines[] = ($index === 0 ? '🅰️' : '🅱️') . ' <b>' . self::e($side['label']) . '</b>';
+            if ($side['error'] !== '') {
+                $lines[] = '   ⚠️ ' . self::e($side['error']);
+                $lines[] = '';
+                continue;
+            }
+
+            if ($side['user'] !== '') {
+                $lines[] = '   👤 کاربر: <code>' . self::e($side['user']) . '</code>';
+            }
+            if ($side['main_domain'] !== '') {
+                $lines[] = '   🌐 دامنه‌ی اصلی: <code>' . self::e($side['main_domain']) . '</code>';
+            }
+            foreach ($side['usage'] as $item) {
+                $lines[] = '   ' . self::e($item['label']) . ': ' . Format::percent($item['percent'])
+                    . ' ' . Format::bar($item['percent'], 8);
+            }
+            $counts = $side['counts'];
+            $lines[] = '   ✉️ ' . ($counts['emails'] ?? 0) . '   🗄 ' . ($counts['databases'] ?? 0)
+                . '   📁 ' . ($counts['ftp'] ?? 0) . '   🌐 ' . ($counts['subdomains'] ?? 0)
+                . '+' . ($counts['addon'] ?? 0);
+            if ($side['php'] !== '') {
+                $lines[] = '   🐘 PHP: <code>' . self::e($side['php']) . '</code>';
+            }
+            if ($side['cpanel'] !== '') {
+                $lines[] = '   🧩 cPanel: <code>' . self::e($side['cpanel']) . '</code>';
+            }
+            $lines[] = '';
+        }
+
+        $differences = [];
+        if ($left['error'] === '' && $right['error'] === '') {
+            if ($left['php'] !== $right['php'] && $left['php'] !== '' && $right['php'] !== '') {
+                $differences[] = 'نسخه‌ی PHP یکی نیست: ' . $left['php'] . ' ↔ ' . $right['php'];
+            }
+            if ($left['cpanel'] !== $right['cpanel'] && $left['cpanel'] !== '' && $right['cpanel'] !== '') {
+                $differences[] = 'نسخه‌ی cPanel یکی نیست: ' . $left['cpanel'] . ' ↔ ' . $right['cpanel'];
+            }
+            foreach (['emails' => 'تعداد ایمیل', 'databases' => 'تعداد دیتابیس', 'ftp' => 'تعداد FTP'] as $key => $title) {
+                if (($left['counts'][$key] ?? 0) !== ($right['counts'][$key] ?? 0)) {
+                    $differences[] = $title . ': ' . ($left['counts'][$key] ?? 0) . ' ↔ ' . ($right['counts'][$key] ?? 0);
+                }
+            }
+        }
+
+        if ($differences !== []) {
+            $lines[] = '<b>تفاوت‌ها:</b>';
+            foreach ($differences as $difference) {
+                $lines[] = '• ' . self::e($difference);
+            }
+        } elseif ($left['error'] === '' && $right['error'] === '') {
+            $lines[] = '✅ در موارد بالا تفاوتی نداشتند.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{rows: array<int, array{email: string, used: float, quota: mixed, percent: ?float}>, total: float, full: array<int, string>} $usage
+     */
+    public static function mailboxUsage(array $usage): string
+    {
+        if ($usage['rows'] === []) {
+            return '📊 صندوق ایمیلی روی این حساب نیست.';
+        }
+
+        $lines = [
+            '📊 <b>مصرف صندوق‌های ایمیل</b> (' . count($usage['rows']) . ')',
+            '',
+            'مجموع: ' . Format::bytes($usage['total']),
+            '',
+        ];
+
+        foreach (array_slice($usage['rows'], 0, 15) as $row) {
+            $line = '• <code>' . self::e($row['email']) . '</code> — ' . Format::bytes($row['used']);
+            if ($row['percent'] !== null) {
+                $line .= ' ' . Format::bar($row['percent'], 8) . ' ' . Format::percent($row['percent']);
+            }
+            $lines[] = $line;
+        }
+        if (count($usage['rows']) > 15) {
+            $lines[] = '… و ' . (count($usage['rows']) - 15) . ' صندوق دیگر.';
+        }
+
+        if ($usage['full'] !== []) {
+            $lines[] = '';
+            $lines[] = '⚠️ نزدیک پرشدن (بالای ۹۰٪): ' . self::e(implode('، ', $usage['full']));
+            $lines[] = '💡 «🧽 پاک‌سازی Trash و Spam» یا «📦 سهمیه» معمولاً همین‌جا حلش می‌کند.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{rows: array<int, array{name: string, size: float, users: int}>, total: float, orphans: array<int, string>} $sizes
+     */
+    public static function databaseSizes(array $sizes): string
+    {
+        if ($sizes['rows'] === []) {
+            return '📊 دیتابیسی روی این حساب نیست.';
+        }
+
+        $lines = [
+            '📊 <b>حجم دیتابیس‌ها</b> (' . count($sizes['rows']) . ')',
+            '',
+            'مجموع: ' . Format::bytes($sizes['total']),
+            '',
+        ];
+
+        $biggest = $sizes['rows'][0]['size'] ?? 0.0;
+        foreach ($sizes['rows'] as $row) {
+            $share = $biggest > 0 ? $row['size'] / $biggest * 100 : 0.0;
+            $lines[] = '• <code>' . self::e($row['name']) . '</code> — ' . Format::bytes($row['size'])
+                . ' ' . Format::bar($share, 8)
+                . ($row['users'] === 0 ? '  ⚠️ بدون کاربر' : '');
+        }
+
+        if ($sizes['orphans'] !== []) {
+            $lines[] = '';
+            $lines[] = '⚠️ این دیتابیس‌ها هیچ کاربری ندارند، یعنی هیچ سایتی نمی‌تواند به آن‌ها وصل شود:';
+            $lines[] = self::e(implode('، ', $sizes['orphans']));
+            $lines[] = '💡 یا با «🔗 وصل‌کردن کاربر به دیتابیس» کاربر بدهید، یا اگر بلااستفاده‌اند حذفشان کنید.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{domain: string, url: string, ok: bool, status: int, values: array<string, string>, error: string, cleaned: bool} $result
+     */
+    public static function phpTest(array $result): string
+    {
+        $lines = ['🧪 <b>تست زنده‌ی PHP روی ' . self::e($result['domain']) . '</b>', ''];
+
+        if (!$result['ok']) {
+            $lines[] = '❌ تست نتیجه نداد.';
+            if ($result['error'] !== '') {
+                $lines[] = '';
+                $lines[] = self::e($result['error']);
+            }
+            $lines[] = '';
+            $lines[] = '💡 اگر دامنه تازه وصل شده یا پشت کلادفلر است، ممکن است از بیرون به خود هاست نرسیده باشیم.';
+            $lines[] = $result['cleaned']
+                ? 'ℹ️ فایل تست پاک شد.'
+                : '⚠️ فایل تست پاک نشد؛ آن را دستی از پوشه‌ی سایت بردارید.';
+
+            return implode("\n", $lines);
+        }
+
+        $lines[] = '✅ وب‌سرور فایل PHP را اجرا کرد (کد ' . $result['status'] . ').';
+        $lines[] = '';
+        foreach ($result['values'] as $key => $value) {
+            $lines[] = '• ' . self::e($key) . ': <code>' . self::e($value) . '</code>';
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ این‌ها همان چیزی است که سایت واقعاً با آن اجرا می‌شود، نه آنچه در تنظیمات نوشته شده.';
+        $lines[] = $result['cleaned']
+            ? 'ℹ️ فایل تست پاک شد.'
+            : '⚠️ فایل تست پاک نشد؛ آن را دستی از پوشه‌ی سایت بردارید.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{added: array<int, string>, skipped: array<int, string>, failed: array<int, string>} $result
+     */
+    public static function dnsTemplate(string $zone, string $label, array $result): string
+    {
+        $lines = ['🧩 <b>قالب ' . self::e($label) . '</b> روی <code>' . self::e($zone) . '</code>', ''];
+
+        if ($result['added'] !== []) {
+            $lines[] = '✅ اضافه شد:';
+            foreach ($result['added'] as $record) {
+                $lines[] = '• <code>' . self::e($record) . '</code>';
+            }
+            $lines[] = '';
+        }
+        if ($result['skipped'] !== []) {
+            $lines[] = '⏭ از قبل بود و دست‌نخورده ماند:';
+            foreach ($result['skipped'] as $record) {
+                $lines[] = '• <code>' . self::e($record) . '</code>';
+            }
+            $lines[] = '';
+        }
+        if ($result['failed'] !== []) {
+            $lines[] = '❌ ساخته نشد:';
+            foreach ($result['failed'] as $record) {
+                $lines[] = '• ' . self::e($record);
+            }
+            $lines[] = '';
+        }
+
+        $lines[] = 'ℹ️ تغییر DNS معمولاً بین چند دقیقه تا چند ساعت طول می‌کشد تا همه‌جا اثر کند.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{id: string, action: string, params: array<string, string>, run_at: int, server: string, created: int}> $items
+     */
+    public static function queue(array $items): string
+    {
+        if ($items === []) {
+            return "⏳ <b>کارهای زمان‌بندی‌شده</b>\n\nصف خالی است.\n\n"
+                . '💡 می‌توانید بکاپ نصفه‌شب، خاموش‌کردن حالت تعمیر بعد از به‌روزرسانی یا گزارش وضعیت را از پیش زمان‌بندی کنید.';
+        }
+
+        $lines = ['⏳ <b>کارهای زمان‌بندی‌شده</b> (' . count($items) . ')', ''];
+        foreach ($items as $item) {
+            $lines[] = '• ' . self::e(OpQueue::label($item));
+            $lines[] = '   📅 ' . self::e(Format::timestampWithRemaining($item['run_at']))
+                . ($item['server'] !== '' ? ' — <code>' . self::e($item['server']) . '</code>' : '');
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ کارها با همان تایمری اجرا می‌شوند که هشدارها را می‌فرستد، پس تا ۱۵ دقیقه اختلاف طبیعی است.';
+
+        return implode("\n", $lines);
     }
 
     public static function error(Throwable $error): string

@@ -79,6 +79,10 @@ while (time() < $deadline) {
             ['file' => 'logs', 'type' => 'dir', 'size' => 4096],
             ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
         ]],
+        // فقط برای سناریوی انتقال فایل؛ بقیه‌ی فایل‌ها خالی برمی‌گردند تا مسیر
+        // دانلود خام هم مثل واقعیت تست شود.
+        str_contains($path, 'Fileman/get_file_content') && str_contains($body, 'notes.txt')
+            => ['status' => 1, 'data' => ['content' => 'salam-teamkan']],
         str_contains($path, 'Fileman/upload_files') => ['status' => 1, 'data' => ['uploads' => [['status' => 1, 'file' => 'ok']]]],
         str_contains($path, 'ResourceUsage/get_usages') => ['status' => 1, 'data' => [
             ['id' => 'disk_usage', 'description' => 'Disk Usage', 'usage' => 5368709120, 'maximum' => 10737418240, 'percent_used' => 50, 'formatter' => 'format_bytes'],
@@ -112,6 +116,11 @@ while (time() < $deadline) {
             'imap' => ['server' => 'mail.example.com', 'port' => 993, 'ssl' => 1],
             'smtp' => ['server' => 'mail.example.com', 'port' => 465, 'ssl' => 1],
         ]],
+        str_contains($path, 'Mysql/list_databases') => ['status' => 1, 'data' => [
+            ['database' => 'demo_shop', 'disk_usage' => 52428800, 'users' => [['user' => 'demo_admin']]],
+            ['database' => 'demo_old', 'disk_usage' => 1048576, 'users' => []],
+        ]],
+        str_contains($path, 'Mysql/list_users') => ['status' => 1, 'data' => [['user' => 'demo_admin']]],
         str_contains($path, 'Mysql/get_server_information') => ['status' => 1, 'data' => ['host' => 'localhost', 'port' => 3306, 'version' => '8.0.36']],
         str_contains($path, 'Mysql/get_restrictions') => ['status' => 1, 'data' => ['prefix' => 'demo_', 'prefixing_enabled' => 1, 'max_database_name_length' => 64]],
         str_contains($path, 'Mime/list_redirects') => ['status' => 1, 'data' => [

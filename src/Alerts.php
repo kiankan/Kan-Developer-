@@ -114,6 +114,11 @@ final class Alerts
             Settings::set(Settings::LAST_SERVER_IP, $ip);
         }
 
+        // ---- کارهای زمان‌بندی‌شده‌ای که وقتشان رسیده
+        foreach (self::runQueue($client) as $message) {
+            $messages[] = $message;
+        }
+
         // ---- بکاپ زمان‌بندی‌شده و نگه‌داشتن چند نسخه
         foreach (self::scheduledBackup($client) as $message) {
             $messages[] = $message;
@@ -189,6 +194,72 @@ final class Alerts
         self::saveState($state);
 
         return $messages;
+    }
+
+    /**
+     * کارهای زمان‌بندی‌شده‌ای که وقتشان رسیده: اجرا می‌شوند، از صف برداشته
+     * می‌شوند و نتیجه‌شان به ادمین‌ها گزارش می‌شود.
+     *
+     * @return array<int, string>
+     */
+    public static function runQueue(CpanelClient $client): array
+    {
+        $server = (string) (ServerStore::activeId() ?? '');
+        $messages = [];
+
+        foreach (OpQueue::due($server) as $item) {
+            try {
+                $messages[] = self::runQueued($client, $item);
+            } catch (Throwable $e) {
+                $messages[] = '⚠️ کار زمان‌بندی‌شده انجام نشد — ' . OpQueue::label($item) . "\n" . $e->getMessage();
+            }
+            // چه موفق چه ناموفق، کار از صف برداشته می‌شود تا هر ربع ساعت تکرار نشود.
+            OpQueue::remove($item['id']);
+        }
+
+        return $messages;
+    }
+
+    /**
+     * @param array{id: string, action: string, params: array<string, string>, run_at: int, server: string, created: int} $item
+     */
+    private static function runQueued(CpanelClient $client, array $item): string
+    {
+        $label = OpQueue::label($item);
+
+        switch ($item['action']) {
+            case 'backup':
+                CpanelService::fullBackup($client);
+
+                return '⏳ کار زمان‌بندی‌شده انجام شد — ' . $label . "\n\nفایل بکاپ در پوشه‌ی هوم ساخته می‌شود.";
+
+            case 'prune_backups':
+                $keep = max(1, (int) ($item['params']['keep'] ?? Settings::int(Settings::BACKUP_KEEP, 3)));
+                $pruned = CpanelService::pruneBackups($client, $keep);
+
+                return '⏳ کار زمان‌بندی‌شده انجام شد — ' . $label . '؛ ' . count($pruned['deleted'])
+                    . ' بکاپ قدیمی پاک شد و ' . $keep . ' نسخه‌ی آخر ماند.';
+
+            case 'maintenance_on':
+            case 'maintenance_off':
+                $docroot = (string) ($item['params']['docroot'] ?? '');
+                if ($docroot === '') {
+                    throw CpanelError::config('پوشه‌ی سایت برای این کار ثبت نشده بود.');
+                }
+                CpanelService::setMaintenance(
+                    $client,
+                    $docroot,
+                    $item['action'] === 'maintenance_on',
+                    (string) ($item['params']['message'] ?? ''),
+                );
+
+                return '⏳ کار زمان‌بندی‌شده انجام شد — ' . $label;
+
+            case 'report':
+                return "📊 <b>گزارش زمان‌بندی‌شده</b>\n\n" . Render::summary(CpanelService::summary($client));
+        }
+
+        throw CpanelError::config("کار «{$item['action']}» پشتیبانی نمی‌شود.");
     }
 
     /**

@@ -989,6 +989,169 @@ if (is_resource($cpanelProcess)) {
         expect(!str_contains($text, '"action"'), 'لاگ نباید خام JSON نمایش داده شود');
     });
 
+    scenario('گزارش امنیتی، فایل قابل‌دانلود از وب را پیدا می‌کند', function (): void {
+        press('a:security');
+        $text = tg_last_text();
+        expect(str_contains($text, 'گزارش امنیتی'), 'عنوان گزارش امنیتی نیامد');
+        expect(str_contains($text, 'site.zip'), 'آرشیو داخل پوشه‌ی سایت باید گزارش شود');
+        expect(str_contains($text, '/home/demo/public_html'), 'پوشه‌ی بررسی‌شده باید نوشته شود');
+        expect(in_array('f:file_chmod', tg_last_buttons(), true), 'دکمه‌ی اصلاح دسترسی باید کنار گزارش باشد');
+    });
+
+    scenario('مصرف صندوق‌های ایمیل، پرمصرف‌ترین را اول نشان می‌دهد', function (): void {
+        press('m:email');
+        expect(in_array('a:maildisk', tg_last_buttons(), true), 'دکمه‌ی مصرف صندوق‌ها در منوی ایمیل نبود');
+
+        press('a:maildisk');
+        $text = tg_last_text();
+        expect(str_contains($text, 'مصرف صندوق‌های ایمیل'), 'عنوان مصرف صندوق‌ها نیامد');
+        expect(str_contains($text, 'sales@example.com'), 'صندوق پرمصرف نیامد');
+        expect(mb_strpos($text, 'sales@example.com') < mb_strpos($text, 'info@example.com'), 'ترتیب باید از پرمصرف به کم‌مصرف باشد');
+    });
+
+    scenario('حجم دیتابیس‌ها، دیتابیس بی‌کاربر را هم هشدار می‌دهد', function (): void {
+        press('m:db');
+        expect(in_array('a:dbsizes', tg_last_buttons(), true), 'دکمه‌ی حجم دیتابیس‌ها در منوی دیتابیس نبود');
+
+        press('a:dbsizes');
+        $text = tg_last_text();
+        expect(str_contains($text, 'demo_shop'), 'نام دیتابیس نیامد');
+        expect(str_contains($text, 'بدون کاربر'), 'دیتابیس بی‌کاربر باید علامت بخورد');
+        expect(str_contains($text, '50 MB'), 'حجم دیتابیس درست نمایش داده نشد');
+    });
+
+    scenario('قالب آماده‌ی DNS رکوردهای استاندارد را می‌سازد', function (): void {
+        press('m:dns');
+        expect(in_array('f:dns_template', tg_last_buttons(), true), 'دکمه‌ی قالب آماده در منوی DNS نبود');
+
+        press('f:dns_template');
+        press('c:0');                                   // دامنه‌ی اصلی
+        $text = tg_last_text();
+        expect(str_contains($text, 'کدام قالب'), 'مرحله‌ی انتخاب قالب نیامد');
+        expect(count(tg_last_buttons()) >= 5, 'قالب‌ها به‌صورت دکمه نیامدند');
+
+        press('c:0');                                   // قالب گوگل
+        expect(in_array('ok', tg_last_buttons(), true), 'قبل از تغییر زون باید تأیید بگیرد');
+
+        press('ok');
+        $edits = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'mass_edit_zone'));
+        expect($edits !== [], 'رکوردی روی زون ساخته نشد');
+        $bodies = implode(' ', array_map(static fn (array $c): string => urldecode($c['body']), $edits));
+        expect(str_contains($bodies, 'SMTP.GOOGLE.COM.'), 'رکورد MX گوگل فرستاده نشد');
+        expect(str_contains($bodies, '_spf.google.com'), 'رکورد SPF گوگل فرستاده نشد');
+        expect(str_contains(tg_last_text(), 'اضافه شد'), 'نتیجه‌ی قالب گزارش نشد');
+        expect(str_contains(tg_last_text(), 'Google Workspace'), 'نام قالب در نتیجه نیامد');
+    });
+
+    scenario('خروجی فایل زون به‌صورت فایل فرستاده می‌شود', function (): void {
+        $before = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+
+        press('f:dns_export');
+        press('c:0');
+
+        $documents = array_values(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        expect(count($documents) === $before + 1, 'فایل زون فرستاده نشد');
+        expect(str_contains(tg_last_text(), 'فایل زون'), 'پیام آماده‌شدن فایل زون نیامد');
+    });
+
+    scenario('جلوگیری از هات‌لینک، بلوک نشان‌دار در .htaccess می‌گذارد', function (): void {
+        press('m:dom');
+        expect(in_array('f:hotlink', tg_last_buttons(), true), 'دکمه‌ی هات‌لینک در منوی دامنه‌ها نبود');
+
+        press('f:hotlink');
+        press('c:1');                                   // پوشه‌ی public_html
+        press('c:0');                                   // روشن
+        press('skip');                                  // بدون دامنه‌ی مجاز اضافه
+
+        $saves = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'save_file_content'));
+        $bodies = implode(' ', array_map(static fn (array $c): string => urldecode($c['body']), $saves));
+        expect(str_contains($bodies, 'TEAMKAN HOTLINK START'), 'بلوک هات‌لینک نوشته نشد');
+        expect(str_contains($bodies, 'example\.com'), 'دامنه‌ی خود حساب باید مجاز بماند');
+        expect(str_contains(tg_last_text(), 'هات‌لینک روشن شد'), 'پیام موفقیت نیامد');
+    });
+
+    scenario('تست زنده‌ی PHP از منوی PHP در دسترس است', function (): void {
+        press('m:php');
+        expect(in_array('f:php_test', tg_last_buttons(), true), 'دکمه‌ی تست زنده‌ی PHP در منوی PHP نبود');
+
+        press('f:php_test');
+        expect(str_contains(tg_last_text(), 'کدام دامنه'), 'مرحله‌ی انتخاب دامنه نیامد');
+        expect(in_array('c:0', tg_last_buttons(), true), 'دامنه‌ها باید به‌صورت دکمه بیایند');
+        send_text('/cancel');
+    });
+
+    scenario('صف کارها: ثبت، نمایش و حذف', function (): void {
+        OpQueue::clear();
+
+        press('m:alerts');
+        expect(in_array('a:queue', tg_last_buttons(), true), 'دکمه‌ی کارهای زمان‌بندی‌شده در منوی هشدارها نبود');
+
+        press('a:queue');
+        expect(str_contains(tg_last_text(), 'صف خالی است'), 'صف خالی باید توضیح داشته باشد');
+
+        press('f:schedule_op');
+        press('c:0');                                   // گرفتن بکاپ کامل
+        press('c:0');                                   // یک ساعت دیگر
+        press('skip');                                  // پوشه‌ی سایت لازم نیست
+        expect(str_contains(tg_last_text(), 'ثبت شد'), 'کار زمان‌بندی نشد');
+        expect(count(OpQueue::all()) === 1, 'کار در صف ذخیره نشد');
+        expect(OpQueue::all()[0]['action'] === 'backup', 'کار اشتباه ثبت شد');
+        expect(OpQueue::due('', time() + 7200) !== [], 'کار باید بعد از یک ساعت سررسید شود');
+
+        press('a:queue');
+        expect(str_contains(tg_last_text(), 'بکاپ کامل'), 'کار در فهرست صف نیامد');
+        expect(in_array('f:queue_del', tg_last_buttons(), true), 'دکمه‌ی حذف از صف نبود');
+
+        press('f:queue_del');
+        press('c:0');
+        expect(OpQueue::all() === [], 'کار از صف حذف نشد');
+    });
+
+    scenario('حالت تعمیر زمان‌بندی‌شده بدون پوشه‌ی سایت ثبت نمی‌شود', function (): void {
+        OpQueue::clear();
+        press('f:schedule_op');
+        press('c:2');                                   // روشن‌کردن حالت تعمیر
+        press('c:0');                                   // یک ساعت دیگر
+        press('skip');                                  // عمداً بدون پوشه
+        expect(str_contains(tg_last_text(), 'پوشه‌ی سایت'), 'باید بگوید پوشه‌ی سایت لازم است');
+        expect(OpQueue::all() === [], 'کار ناقص نباید ثبت شود');
+    });
+
+    scenario('مقایسه‌ی دو هاست و انتقال فایل بینشان', function () use ($cpanelPort): void {
+        $second = ServerStore::add([
+            'label' => 'هاست دوم',
+            'type' => 'cpanel',
+            'host' => "127.0.0.1:$cpanelPort",
+            'user' => 'demo2',
+            'token' => 'TESTTOKEN2',
+            'ssl_verify' => false,
+        ]);
+
+        press('m:srv');
+        expect(in_array('f:srv_compare', tg_last_buttons(), true), 'دکمه‌ی مقایسه در منوی سرورها نبود');
+
+        press('f:srv_compare');
+        press('c:0');
+        press('c:1');
+        $text = tg_last_text();
+        expect(str_contains($text, 'مقایسه‌ی دو هاست'), 'نتیجه‌ی مقایسه نیامد');
+        expect(str_contains($text, 'هاست دوم'), 'نام هاست دوم در مقایسه نبود');
+        expect(str_contains($text, 'example.com'), 'دامنه‌ی اصلی در مقایسه نبود');
+
+        press('f:file_transfer');
+        send_text('/home/demo/public_html/notes.txt');
+        $buttons = tg_last_buttons();
+        expect(in_array('c:0', $buttons, true), 'سرور مقصد باید به‌صورت دکمه بیاید');
+        press('c:0');                                   // هاست دوم
+        press('c:1');                                   // پوشه‌ی public_html مقصد
+
+        $uploads = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'upload_files'));
+        expect($uploads !== [], 'فایل روی سرور مقصد آپلود نشد');
+        expect(str_contains(tg_last_text(), 'منتقل شد'), 'پیام موفقیت انتقال نیامد');
+
+        ServerStore::delete($second);
+    });
+
     proc_terminate($cpanelProcess);
     proc_close($cpanelProcess);
 } else {

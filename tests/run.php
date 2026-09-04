@@ -1145,6 +1145,16 @@ check('تعریف مرحله‌های هر جریان کامل است', function
     }
 });
 
+check('هر جریان در لاگ عملیات برچسب فارسی دارد', function (): void {
+    // وگرنه کاربر در «🧾 لاگ» اسم انگلیسی جریان را می‌بیند.
+    $source = (string) file_get_contents(__DIR__ . '/../src/Render.php');
+    $body = substr($source, (int) strpos($source, 'public static function auditLog'));
+    $body = substr($body, 0, (int) strpos($body, '];'));
+    foreach (array_keys(flows()) as $flow) {
+        assertTrue(str_contains($body, "'$flow' =>"), "برچسب فارسی برای جریان $flow در لاگ تعریف نشده است");
+    }
+});
+
 check('جای‌خالی‌های متن تأیید به کلیدهای واقعی اشاره می‌کنند', function (): void {
     foreach (flows() as $name => $definition) {
         if (!isset($definition['confirm'])) {
@@ -1274,6 +1284,290 @@ check('همه‌ی دکمه‌ها به جریان/کار موجود وصل‌ا
     foreach (array_unique($menuButtons[1]) as $menu) {
         assertTrue(str_contains($source, "'$menu' => ["), "منوی $menu تعریف نشده است");
     }
+});
+
+echo "\nقالب‌های DNS، خروجی زون و گشت امنیتی\n";
+
+check('قالب Microsoft میزبان MX را از روی خود دامنه می‌سازد', function (): void {
+    $templates = CpanelService::dnsTemplates('shop.example.com');
+    $mx = $templates['microsoft']['records'][0];
+    assertSame('MX', $mx['type']);
+    assertSame('shop-example-com.mail.protection.outlook.com.', $mx['data'][1]);
+
+    $google = CpanelService::dnsTemplates('example.com')['google']['records'][0];
+    assertSame('1', $google['data'][0]);
+    assertSame('SMTP.GOOGLE.COM.', $google['data'][1]);
+
+    // DMARC باید به آدرس خود دامنه گزارش بدهد.
+    $dmarc = CpanelService::dnsTemplates('example.com')['dmarc']['records'][0];
+    assertTrue(str_contains($dmarc['data'][0], 'postmaster@example.com'), 'آدرس گزارش DMARC درست نیست');
+});
+
+check('قالب DNS رکوردی که از قبل هست را دوباره نمی‌سازد', function (): void {
+    $captured = [];
+    $zone = json_encode(['status' => 1, 'data' => [
+        ['type' => 'record', 'line_index' => 8, 'record_type' => 'SOA', 'dname_b64' => base64_encode('example.com.'),
+            'data_b64' => array_map('base64_encode', ['ns1.example.com.', 'root.example.com.', '2024010101'])],
+        ['type' => 'record', 'line_index' => 12, 'record_type' => 'MX', 'ttl' => 14400,
+            'dname_b64' => base64_encode('example.com.'),
+            'data_b64' => array_map('base64_encode', ['1', 'SMTP.GOOGLE.COM.'])],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $zone],                       // خواندن زون برای تشخیص تکراری‌ها
+        ['body' => $zone],                       // خواندن دوباره داخل addDnsRecord
+        ['body' => '{"status":1,"data":[]}'],    // ساخت رکورد SPF
+    ], $captured));
+
+    $result = CpanelService::applyDnsTemplate($client, 'example.com', 'google');
+
+    assertSame(1, count($result['skipped']), 'رکورد MX موجود باید رد شود');
+    assertSame(1, count($result['added']), 'فقط رکورد SPF باید ساخته شود');
+    assertSame([], $result['failed']);
+    assertTrue(str_contains($captured[2]['url'], 'mass_edit_zone'), 'رکورد جدید باید با mass_edit_zone ساخته شود');
+    assertTrue(str_contains(urldecode($captured[2]['body']), 'v=spf1 include:_spf.google.com'), 'مقدار SPF فرستاده نشد');
+});
+
+check('خروجی زون به قالب BIND با TXT داخل گیومه', function (): void {
+    $out = CpanelService::zoneToBind('example.com', [
+        'serial' => '2024010101',
+        'api2' => false,
+        'records' => [
+            ['line' => 1, 'name' => 'www.example.com.', 'ttl' => 300, 'type' => 'A', 'data' => ['203.0.113.10']],
+            ['line' => 2, 'name' => 'example.com.', 'ttl' => null, 'type' => 'TXT', 'data' => ['v=spf1 +mx ~all']],
+            ['line' => 3, 'name' => '', 'ttl' => 0, 'type' => 'MX', 'data' => ['10', 'mail.example.com.']],
+        ],
+    ]);
+
+    assertTrue(str_contains($out, '; zone: example.com'), 'سرصفحه‌ی زون نیامد');
+    assertTrue(str_contains($out, '; serial: 2024010101'), 'سریال زون نیامد');
+    assertTrue((bool) preg_match('/www\.example\.com\.\s+300\s+IN\s+A\s+203\.0\.113\.10/', $out), 'رکورد A درست ساخته نشد');
+    assertTrue(str_contains($out, '"v=spf1 +mx ~all"'), 'مقدار TXT باید داخل گیومه باشد');
+    assertTrue((bool) preg_match('/^@\s+14400\s+IN\s+MX\s+10 mail\.example\.com\./m', $out), 'نام خالی باید @ شود و TTL پیش‌فرض بگیرد');
+});
+
+check('تشخیص دسترسی «نوشتن برای همه»', function (): void {
+    assertTrue(CpanelService::isWorldWritable('777'));
+    assertTrue(CpanelService::isWorldWritable('666'));
+    assertTrue(!CpanelService::isWorldWritable('755'));
+    assertTrue(!CpanelService::isWorldWritable('644'));
+    assertTrue(!CpanelService::isWorldWritable('drwxr-xr-x'), 'رشته‌ی غیرعددی نباید خطرناک حساب شود');
+    assertTrue(!CpanelService::isWorldWritable(''));
+});
+
+check('فایل‌های حساس داخل پوشه‌ی سایت شناخته می‌شوند', function (): void {
+    assertTrue(CpanelService::sensitiveReason('.env') !== null);
+    assertTrue(CpanelService::sensitiveReason('.ENV') !== null, 'بزرگی و کوچکی حروف نباید مهم باشد');
+    assertTrue(CpanelService::sensitiveReason('dump.sql') !== null);
+    assertTrue(CpanelService::sensitiveReason('site.zip') !== null);
+    assertTrue(CpanelService::sensitiveReason('wp-config.php.bak') !== null);
+    assertTrue(CpanelService::sensitiveReason('index.php') === null, 'فایل معمولی نباید علامت بخورد');
+    assertTrue(CpanelService::sensitiveReason('style.css') === null);
+});
+
+check('گشت امنیتی فقط پوشه‌های سایت را می‌گردد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => json_encode(['status' => 1, 'data' => [
+            'main_domain' => ['domain' => 'example.com', 'documentroot' => '/home/demo/public_html', 'ip' => '203.0.113.7'],
+        ]])],
+        ['body' => json_encode(['status' => 1, 'data' => [
+            ['file' => '.env', 'type' => 'file', 'size' => 120, 'permissions' => '0644'],
+            ['file' => 'index.php', 'type' => 'file', 'size' => 900, 'permissions' => '0644'],
+            ['file' => 'uploads', 'type' => 'dir', 'size' => 4096, 'permissions' => '0777'],
+            ['file' => 'node_modules', 'type' => 'dir', 'size' => 4096, 'permissions' => '0755'],
+        ]])],
+    ], $captured));
+
+    $report = CpanelService::securityScan($client, 3);
+
+    assertSame(['/home/demo/public_html'], $report['roots']);
+    $exposed = array_column($report['exposed'], 'path');
+    assertTrue(in_array('/home/demo/public_html/.env', $exposed, true), 'فایل .env باید علامت بخورد');
+    $writable = array_column($report['writable'], 'path');
+    assertTrue(in_array('/home/demo/public_html/uploads', $writable, true), 'پوشه‌ی ۷۷۷ باید علامت بخورد');
+    assertTrue(!in_array('/home/demo/public_html/index.php', $exposed, true), 'فایل معمولی نباید در فهرست باشد');
+});
+
+check('دامنه‌های مجاز هات‌لینک برای regex آماده می‌شوند', function (): void {
+    $hosts = CpanelService::hotlinkHosts(['https://Example.com/path', 'www.example.com', 'cdn.example.com', '']);
+    assertSame(['example\.com', 'cdn\.example\.com'], $hosts);
+});
+
+check('بلوک هات‌لینک نشان‌دار است و با خاموش‌کردن کامل برداشته می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":{"content":"# rules\nOptions -Indexes\n"}}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    CpanelService::setHotlinkProtection($client, '/home/demo/public_html', true, ['example.com']);
+    $saved = urldecode(end($captured)['body']);
+    assertTrue(str_contains($saved, '# TEAMKAN HOTLINK START'), 'بلوک باید نشان‌دار باشد');
+    assertTrue(str_contains($saved, 'example\.com([:/]|$)'), 'الگوی دامنه باید بسته باشد تا example.com.evil.com مجاز نشود');
+    assertTrue(str_contains($saved, 'Options -Indexes'), 'محتوای قبلی .htaccess باید بماند');
+
+    // خاموش‌کردن باید فقط بلوک خودمان را بردارد.
+    $withBlock = "# TEAMKAN HOTLINK START\nRewriteEngine On\n# TEAMKAN HOTLINK END\n# rules\n";
+    assertSame("# rules\n", CpanelService::stripBlock($withBlock, 'HOTLINK'));
+});
+
+check('مصرف صندوق‌ها مرتب و جمع می‌شود', function (): void {
+    $usage = CpanelService::mailboxUsage([
+        ['email' => 'a@x.com', 'domain' => 'x.com', 'used' => 100.0, 'quota' => 0, 'percent' => 10.0],
+        ['email' => 'b@x.com', 'domain' => 'x.com', 'used' => 900.0, 'quota' => 1000, 'percent' => 95.0],
+    ]);
+
+    assertSame('b@x.com', $usage['rows'][0]['email'], 'پرمصرف‌ترین باید اول باشد');
+    assertSame(1000.0, $usage['total']);
+    assertSame(['b@x.com'], $usage['full'], 'صندوق بالای ۹۰٪ باید هشدار بگیرد');
+});
+
+check('حجم دیتابیس‌ها و دیتابیس بی‌کاربر', function (): void {
+    $sizes = CpanelService::databaseSizes([
+        ['name' => 'demo_small', 'size' => 10.0, 'users' => ['demo_a']],
+        ['name' => 'demo_big', 'size' => 500.0, 'users' => []],
+    ]);
+
+    assertSame('demo_big', $sizes['rows'][0]['name'], 'بزرگ‌ترین باید اول باشد');
+    assertSame(510.0, $sizes['total']);
+    assertSame(['demo_big'], $sizes['orphans'], 'دیتابیس بدون کاربر باید گزارش شود');
+});
+
+check('تست زنده‌ی PHP فایل موقت را می‌سازد و پاک می‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    // دامنه‌ی نامعتبر یعنی تماس بیرونی سریع شکست می‌خورد؛ چیزی که اینجا مهم
+    // است این است که فایل تست حتماً برداشته شود.
+    $result = CpanelService::phpLiveTest($client, 'invalid.invalid', '/home/demo/public_html');
+
+    assertTrue(!$result['ok'], 'تماس بیرونی نباید موفق باشد');
+    assertTrue($result['cleaned'], 'فایل تست باید پاک شود');
+    assertTrue(str_contains($captured[0]['url'], 'upload_files'), 'اول فایل تست آپلود می‌شود');
+    assertTrue(str_contains($captured[0]['body'], 'teamkan-phptest-'), 'نام فایل تست باید نشان‌دار باشد');
+    $last = end($captured);
+    assertTrue(str_contains(urldecode($last['body']), 'unlink'), 'آخرین درخواست باید پاک‌کردن فایل باشد');
+    assertTrue(str_contains(urldecode($last['body']), 'teamkan-phptest-'), 'همان فایل تست باید پاک شود');
+});
+
+check('انتقال فایل بین دو سرور، سقف حجم را رعایت می‌کند', function (): void {
+    $captured = [];
+    $source = ['body' => '{"status":1,"data":{"content":"MUHTAVA"}}'];
+    $from = new CpanelClient(cpanelServer(), fakeTransport($source, $captured));
+    $to = new CpanelClient(cpanelServer(['label' => 'مقصد']), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    $result = CpanelService::transferFile($from, '/home/demo/notes.txt', $to, '/home/other/public_html');
+    assertSame('notes.txt', $result['name']);
+    assertSame('/home/other/public_html/notes.txt', $result['destination']);
+    assertSame(7, $result['size']);
+    $upload = end($captured);
+    assertTrue(str_contains($upload['url'], 'upload_files'), 'فایل باید روی سرور مقصد آپلود شود');
+    assertTrue(str_contains($upload['body'], 'MUHTAVA'), 'محتوای فایل باید منتقل شود');
+
+    $tiny = new CpanelClient(cpanelServer(), fakeTransport($source, $captured));
+    assertThrows(
+        static fn () => CpanelService::transferFile($tiny, '/home/demo/notes.txt', $to, '/home/other', 3),
+        CpanelError::KIND_CONFIG,
+    );
+});
+
+echo "\nصف کارهای زمان‌بندی‌شده\n";
+
+check('کار ثبت می‌شود، سر وقت سررسید می‌شود و حذف می‌شود', function (): void {
+    OpQueue::clear();
+    $id = OpQueue::add('backup', time() - 10, [], 'srv-1');
+    OpQueue::add('report', time() + 3600, [], 'srv-1');
+
+    assertSame(2, count(OpQueue::all()));
+    assertSame(1, count(OpQueue::due('srv-1')), 'فقط کار سررسیدشده باید برگردد');
+    assertSame($id, OpQueue::due('srv-1')[0]['id']);
+    // کار سرور دیگر نباید روی این سرور اجرا شود.
+    assertSame(0, count(OpQueue::due('srv-2')));
+
+    assertTrue(OpQueue::remove($id));
+    assertTrue(!OpQueue::remove($id), 'حذف دوباره باید false بدهد');
+    assertSame(1, count(OpQueue::all()));
+    OpQueue::clear();
+});
+
+check('کار ناشناخته زمان‌بندی نمی‌شود و صف مرتب می‌ماند', function (): void {
+    OpQueue::clear();
+    assertThrows(static fn () => OpQueue::add('rm_rf', time() + 60), CpanelError::KIND_CONFIG);
+
+    OpQueue::add('report', time() + 7200);
+    OpQueue::add('backup', time() + 60);
+    assertSame('backup', OpQueue::all()[0]['action'], 'نزدیک‌ترین کار باید اول باشد');
+
+    $label = OpQueue::label(['id' => 'x', 'action' => 'maintenance_on', 'params' => ['docroot' => '/home/demo/public_html'],
+        'run_at' => time(), 'server' => '', 'created' => time()]);
+    assertTrue(str_contains($label, '/home/demo/public_html'), 'پوشه‌ی سایت باید در برچسب بیاید');
+    OpQueue::clear();
+});
+
+check('کار سررسیدشده اجرا و از صف برداشته می‌شود', function (): void {
+    OpQueue::clear();
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    OpQueue::add('report', time() - 60);
+    OpQueue::add('backup', time() + 86400);
+
+    $messages = Alerts::runQueue($client);
+    assertSame(1, count($messages), 'فقط کار سررسیدشده باید اجرا شود');
+    assertTrue(str_contains($messages[0], 'گزارش زمان‌بندی‌شده'), 'متن گزارش نیامد');
+    assertSame(1, count(OpQueue::all()), 'کار اجراشده باید از صف برداشته شود');
+    assertSame('backup', OpQueue::all()[0]['action'], 'کار آینده باید در صف بماند');
+    OpQueue::clear();
+});
+
+check('کار خراب هم از صف برداشته می‌شود تا تکرار نشود', function (): void {
+    OpQueue::clear();
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    // حالت تعمیر بدون پوشه‌ی سایت نمی‌تواند اجرا شود.
+    OpQueue::add('maintenance_on', time() - 60);
+    $messages = Alerts::runQueue($client);
+
+    assertSame(1, count($messages));
+    assertTrue(str_contains($messages[0], 'انجام نشد'), 'شکست باید گزارش شود');
+    assertSame([], OpQueue::all(), 'کار شکست‌خورده نباید در صف بماند');
+    OpQueue::clear();
+});
+
+check('نمایش گزارش امنیتی و صف، متن خوانا می‌دهد', function (): void {
+    $clean = Render::toPlain(Render::security(['roots' => ['/home/demo/public_html'], 'writable' => [], 'exposed' => [], 'scanned' => 2]));
+    assertTrue(str_contains($clean, 'چیز نگران‌کننده‌ای پیدا نشد'), 'گزارش تمیز باید صریح باشد');
+
+    $dirty = Render::toPlain(Render::security([
+        'roots' => ['/home/demo/public_html'],
+        'writable' => [['path' => '/home/demo/public_html/uploads', 'perm' => '777', 'dir' => true]],
+        'exposed' => [['path' => '/home/demo/public_html/.env', 'why' => 'رمز دیتابیس']],
+        'scanned' => 2,
+    ]));
+    assertTrue(str_contains($dirty, '.env'), 'فایل حساس باید در گزارش بیاید');
+    assertTrue(str_contains($dirty, '777'), 'دسترسی خطرناک باید در گزارش بیاید');
+
+    assertTrue(str_contains(Render::toPlain(Render::queue([])), 'صف خالی است'), 'صف خالی باید توضیح داشته باشد');
+});
+
+check('مقایسه‌ی دو هاست تفاوت‌ها را جدا نشان می‌دهد', function (): void {
+    $side = static fn (string $label, string $php, int $emails): array => [
+        'label' => $label, 'host' => $label, 'user' => 'demo', 'main_domain' => 'example.com',
+        'cpanel' => '118.0.12', 'php' => $php, 'usage' => [['label' => 'Disk Usage', 'percent' => 50.0]],
+        'counts' => ['emails' => $emails, 'databases' => 2, 'ftp' => 1, 'subdomains' => 1, 'addon' => 1],
+        'error' => '',
+    ];
+
+    $text = Render::toPlain(Render::serverCompare($side('هاست الف', 'ea-php74', 3), $side('هاست ب', 'ea-php82', 3)));
+    assertTrue(str_contains($text, 'ea-php74'), 'نسخه‌ی PHP هاست اول نیامد');
+    assertTrue(str_contains($text, 'نسخه‌ی PHP یکی نیست'), 'تفاوت نسخه‌ی PHP باید گزارش شود');
+    assertTrue(!str_contains($text, 'تعداد ایمیل'), 'وقتی تعداد ایمیل یکی است نباید تفاوت گزارش شود');
+
+    $broken = $side('هاست خراب', '', 0);
+    $broken['error'] = 'اتصال برقرار نشد';
+    $text = Render::toPlain(Render::serverCompare($side('هاست الف', 'ea-php82', 3), $broken));
+    assertTrue(str_contains($text, 'اتصال برقرار نشد'), 'خطای یک طرف باید نمایش داده شود');
 });
 
 echo "\nState و AuditLog\n";

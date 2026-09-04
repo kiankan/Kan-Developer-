@@ -2715,6 +2715,623 @@ final class CpanelService
         return false;
     }
 
+    // ------------------------------------------------- قالب‌های آماده‌ی DNS
+
+    /**
+     * مجموعه‌رکوردهای آماده برای کارهای رایج. به‌جای اینکه کاربر MX و SPF را
+     * دستی و با اولویت درست بنویسد، یک قالب را انتخاب می‌کند.
+     *
+     * @return array<string, array{label: string, hint: string, records: array<int, array{name: string, type: string, data: array<int, string>}>}>
+     */
+    public static function dnsTemplates(string $domain): array
+    {
+        $domain = rtrim(SiteCheck::cleanDomain($domain), '.');
+        $dotted = $domain . '.';
+        // مایکروسافت میزبان MX را از روی خود دامنه می‌سازد: example.com → example-com
+        $microsoft = str_replace('.', '-', $domain) . '.mail.protection.outlook.com.';
+
+        return [
+            'google' => [
+                'label' => '📧 Google Workspace',
+                'hint' => 'ایمیل دامنه روی جیمیل سازمانی می‌نشیند (MX + SPF).',
+                'records' => [
+                    ['name' => $dotted, 'type' => 'MX', 'data' => ['1', 'SMTP.GOOGLE.COM.']],
+                    ['name' => $dotted, 'type' => 'TXT', 'data' => ['v=spf1 include:_spf.google.com ~all']],
+                ],
+            ],
+            'microsoft' => [
+                'label' => '📧 Microsoft 365',
+                'hint' => 'ایمیل دامنه روی اوت‌لوک سازمانی (MX + SPF + autodiscover).',
+                'records' => [
+                    ['name' => $dotted, 'type' => 'MX', 'data' => ['0', $microsoft]],
+                    ['name' => $dotted, 'type' => 'TXT', 'data' => ['v=spf1 include:spf.protection.outlook.com -all']],
+                    ['name' => 'autodiscover.' . $dotted, 'type' => 'CNAME', 'data' => ['autodiscover.outlook.com.']],
+                ],
+            ],
+            'local_mail' => [
+                'label' => '📬 ایمیل روی همین هاست',
+                'hint' => 'نامه‌ها به خود سرور cPanel می‌رسند (MX + SPF).',
+                'records' => [
+                    ['name' => $dotted, 'type' => 'MX', 'data' => ['0', 'mail.' . $dotted]],
+                    ['name' => $dotted, 'type' => 'TXT', 'data' => ['v=spf1 +mx +a ~all']],
+                ],
+            ],
+            'dmarc' => [
+                'label' => '🛡 DMARC (ضدجعل ایمیل)',
+                'hint' => 'جلوی جعل آدرس ایمیل دامنه را می‌گیرد؛ حالت گزارش‌محور و بی‌خطر.',
+                'records' => [
+                    [
+                        'name' => '_dmarc.' . $dotted,
+                        'type' => 'TXT',
+                        'data' => ['v=DMARC1; p=none; rua=mailto:postmaster@' . $domain],
+                    ],
+                ],
+            ],
+            'www' => [
+                'label' => '🌐 اشاره‌ی www به دامنه',
+                'hint' => 'اگر www.دامنه بالا نمی‌آید، همین یک رکورد معمولاً کافی است.',
+                'records' => [
+                    ['name' => 'www.' . $dotted, 'type' => 'CNAME', 'data' => [$dotted]],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * قالب را روی زون می‌نشاند. رکوردی که عیناً وجود دارد دوباره ساخته نمی‌شود
+     * و اگر یکی از رکوردها رد شد، بقیه متوقف نمی‌شوند.
+     *
+     * @return array{added: array<int, string>, skipped: array<int, string>, failed: array<int, string>}
+     */
+    public static function applyDnsTemplate(CpanelClient $client, string $zone, string $template): array
+    {
+        $templates = self::dnsTemplates($zone);
+        if (!isset($templates[$template])) {
+            throw CpanelError::config("قالب DNS «{$template}» را نمی‌شناسم.");
+        }
+
+        $existing = [];
+        foreach (self::dnsZone($client, $zone)['records'] as $record) {
+            $existing[self::recordKey($record['type'], $record['name'], $record['data'])] = true;
+        }
+
+        $result = ['added' => [], 'skipped' => [], 'failed' => []];
+        foreach ($templates[$template]['records'] as $record) {
+            $label = $record['type'] . ' ' . rtrim($record['name'], '.') . ' → ' . implode(' ', $record['data']);
+            if (isset($existing[self::recordKey($record['type'], $record['name'], $record['data'])])) {
+                $result['skipped'][] = $label;
+                continue;
+            }
+            try {
+                self::addDnsRecord($client, $zone, $record['name'], $record['type'], $record['data']);
+                $result['added'][] = $label;
+            } catch (Throwable $e) {
+                $result['failed'][] = $label . ' — ' . $e->getMessage();
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * کلید یکتای یک رکورد برای تشخیص تکراری‌بودن (نقطه‌ی آخر نام و بزرگی/کوچکی
+     * حروف در DNS معنا ندارند).
+     *
+     * @param array<int, string> $data
+     */
+    private static function recordKey(string $type, string $name, array $data): string
+    {
+        $value = (string) preg_replace('/\s+/', ' ', implode(' ', $data));
+
+        return strtoupper($type) . '|' . strtolower(rtrim(trim($name), '.')) . '|' . strtolower(trim($value));
+    }
+
+    /**
+     * زون را به قالب استاندارد BIND درمی‌آورد تا بشود نگهش داشت یا روی سرور
+     * دیگری واردش کرد.
+     *
+     * @param array{serial: ?string, records: array<int, array{line: int, name: string, ttl: ?int, type: string, data: array<int, string>}>, api2: bool} $zoneData
+     */
+    public static function zoneToBind(string $zone, array $zoneData): string
+    {
+        $lines = [
+            '; zone: ' . $zone,
+            '; گرفته‌شده با ربات cPanel TeamKan — ' . gmdate('Y-m-d H:i:s') . ' UTC',
+        ];
+        if (($zoneData['serial'] ?? null) !== null) {
+            $lines[] = '; serial: ' . $zoneData['serial'];
+        }
+        $lines[] = '';
+
+        foreach ($zoneData['records'] as $record) {
+            if ($record['type'] === '' || $record['data'] === []) {
+                continue;
+            }
+            $name = trim($record['name']) !== '' ? $record['name'] : '@';
+            $ttl = ($record['ttl'] ?? null) !== null && (int) $record['ttl'] > 0 ? (string) $record['ttl'] : '14400';
+            $value = strtoupper($record['type']) === 'TXT'
+                ? self::quoteTxt($record['data'])
+                : implode(' ', $record['data']);
+            $lines[] = sprintf('%-32s %-7s IN  %-6s %s', $name, $ttl, strtoupper($record['type']), $value);
+        }
+
+        $lines[] = '';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, string> $data
+     */
+    private static function quoteTxt(array $data): string
+    {
+        $out = [];
+        foreach ($data as $chunk) {
+            $chunk = (string) $chunk;
+            $out[] = str_starts_with($chunk, '"') ? $chunk : '"' . str_replace('"', '\"', $chunk) . '"';
+        }
+
+        return implode(' ', $out);
+    }
+
+    // ------------------------------------------------------- گشت امنیتی
+
+    /** فایل‌هایی که اگر از وب قابل‌دانلود باشند دردسر می‌سازند. */
+    private const SENSITIVE_NAMES = [
+        '.env' => 'متغیرهای محیطی؛ معمولاً رمز دیتابیس و کلیدهای سرویس‌ها داخلش است',
+        '.env.bak' => 'نسخه‌ی پشتیبان متغیرهای محیطی',
+        '.git' => 'کل تاریخچه‌ی سورس از روی وب قابل بازسازی است',
+        '.svn' => 'کل سورس از روی وب قابل بازسازی است',
+        '.htpasswd' => 'رمزهای محافظت پوشه',
+        'wp-config.php.bak' => 'نسخه‌ی پشتیبان تنظیمات وردپرس (به‌صورت متن ساده دانلود می‌شود)',
+        'wp-config.php.save' => 'نسخه‌ی پشتیبان تنظیمات وردپرس',
+        'wp-config.php.old' => 'نسخه‌ی پشتیبان تنظیمات وردپرس',
+        'config.php.bak' => 'نسخه‌ی پشتیبان فایل تنظیمات',
+        'phpinfo.php' => 'اطلاعات کامل PHP و مسیرهای سرور را لو می‌دهد',
+        'info.php' => 'معمولاً همان phpinfo است',
+        'adminer.php' => 'ابزار مدیریت دیتابیس؛ اگر رمز نداشته باشد یعنی دیتابیس باز است',
+        '.ssh' => 'کلیدهای SSH',
+    ];
+
+    /** پسوندهایی که داخل پوشه‌ی سایت نباید بمانند. */
+    private const SENSITIVE_EXTENSIONS = [
+        'sql' => 'خروجی دیتابیس؛ با یک لینک ساده دانلود می‌شود',
+        'sql.gz' => 'خروجی فشرده‌ی دیتابیس',
+        'zip' => 'آرشیو سورس یا بکاپ',
+        'tar' => 'آرشیو سورس یا بکاپ',
+        'tar.gz' => 'آرشیو سورس یا بکاپ',
+        'tgz' => 'آرشیو سورس یا بکاپ',
+        'bak' => 'نسخه‌ی پشتیبان فایل',
+        'old' => 'نسخه‌ی قدیمی فایل',
+        'swp' => 'فایل موقت ویرایشگر؛ محتوای فایل اصلی را دارد',
+    ];
+
+    /**
+     * گشت امنیتی روی پوشه‌های سایت: دسترسی‌های خطرناک و فایل‌هایی که نباید از
+     * وب قابل‌دانلود باشند.
+     *
+     * فقط پوشه‌های سایت (document root) گشته می‌شوند، چون فایل بیرون از آن‌ها
+     * از وب دیده نمی‌شود.
+     *
+     * @return array{roots: array<int, string>, writable: array<int, array{path: string, perm: string, dir: bool}>, exposed: array<int, array{path: string, why: string}>, scanned: int}
+     */
+    public static function securityScan(CpanelClient $client, int $maxDirs = 24): array
+    {
+        $roots = [];
+        foreach (self::softCall(fn () => self::domainsData($client), []) as $detail) {
+            $docroot = trim((string) $detail['docroot']);
+            if ($docroot !== '') {
+                $roots[self::normalizePath($docroot)] = true;
+            }
+        }
+        if ($roots === []) {
+            $roots[self::homeDir($client) . '/public_html'] = true;
+        }
+        $roots = array_keys($roots);
+
+        $queue = [];
+        foreach ($roots as $root) {
+            $queue[] = [$root, 0];
+        }
+
+        $writable = [];
+        $exposed = [];
+        $scanned = 0;
+
+        while ($queue !== [] && $scanned < $maxDirs) {
+            [$dir, $depth] = array_shift($queue);
+            $entries = self::softCall(fn () => self::listFiles($client, $dir), []);
+            $scanned++;
+
+            foreach ($entries as $entry) {
+                if (self::isWorldWritable($entry['permissions'])) {
+                    $writable[] = ['path' => $entry['path'], 'perm' => $entry['permissions'], 'dir' => $entry['dir']];
+                }
+
+                $why = self::sensitiveReason($entry['name']);
+                if ($why !== null) {
+                    $exposed[] = ['path' => $entry['path'], 'why' => $why];
+                }
+
+                // فقط یک لایه پایین‌تر می‌رویم؛ گشتن کل سایت صدها درخواست API می‌شود.
+                if ($entry['dir'] && $depth < 1 && !in_array($entry['name'], ['node_modules', 'vendor', 'cache', '.well-known'], true)) {
+                    $queue[] = [$entry['path'], $depth + 1];
+                }
+            }
+        }
+
+        return ['roots' => $roots, 'writable' => $writable, 'exposed' => $exposed, 'scanned' => $scanned];
+    }
+
+    /**
+     * دسترسی «نوشتن برای همه» (بیت ۲ در رقم آخر) — همان چیزی که با chmod 777
+     * یا 666 ساخته می‌شود.
+     */
+    public static function isWorldWritable(string $permissions): bool
+    {
+        $clean = trim($permissions);
+        if ($clean === '' || !ctype_digit($clean)) {
+            return false;
+        }
+        $others = (int) substr($clean, -1);
+
+        return ($others & 2) === 2;
+    }
+
+    /**
+     * اگر این نام نباید داخل پوشه‌ی سایت باشد، دلیلش را برمی‌گرداند.
+     */
+    public static function sensitiveReason(string $name): ?string
+    {
+        $lower = strtolower(trim($name));
+        if ($lower === '') {
+            return null;
+        }
+        if (isset(self::SENSITIVE_NAMES[$lower])) {
+            return self::SENSITIVE_NAMES[$lower];
+        }
+        foreach (self::SENSITIVE_EXTENSIONS as $extension => $why) {
+            if (str_ends_with($lower, '.' . $extension)) {
+                return $why;
+            }
+        }
+
+        return null;
+    }
+
+    // --------------------------------------------- انتقال فایل بین دو سرور
+
+    /**
+     * یک فایل را از هاستی به هاست دیگر می‌برد. فایل از مسیر ربات عبور می‌کند،
+     * پس برای فایل‌های خیلی بزرگ مناسب نیست.
+     *
+     * @return array{name: string, size: int, destination: string}
+     */
+    public static function transferFile(
+        CpanelClient $from,
+        string $path,
+        CpanelClient $to,
+        string $destination,
+        int $maxBytes = 33554432,
+    ): array {
+        $path = self::normalizePath($path);
+        $contents = self::downloadFile($from, $path);
+        $size = strlen($contents);
+
+        if ($size === 0) {
+            throw CpanelError::config("فایل «{$path}» خالی بود یا خوانده نشد.");
+        }
+        if ($size > $maxBytes) {
+            throw CpanelError::config(
+                'حجم فایل حدود ' . round($size / 1048576, 1) . ' مگابایت است و سقف انتقال از راه ربات '
+                . round($maxBytes / 1048576) . ' مگابایت است.'
+                . "\n\n💡 اول فشرده‌اش کنید، یا فایل را تکه‌تکه بفرستید."
+            );
+        }
+
+        $destination = self::normalizePath($destination);
+        $name = basename($path);
+        self::uploadFile($to, $destination, $name, $contents);
+
+        return ['name' => $name, 'size' => $size, 'destination' => rtrim($destination, '/') . '/' . $name];
+    }
+
+    /**
+     * عکس فوری از وضعیت یک هاست، برای مقایسه‌ی کنار هم.
+     *
+     * @return array{label: string, host: string, user: string, main_domain: string, cpanel: string, php: string, usage: array<int, array{label: string, percent: ?float}>, counts: array<string, int>, error: string}
+     */
+    public static function snapshot(CpanelClient $client, string $label = ''): array
+    {
+        $snapshot = [
+            'label' => $label !== '' ? $label : $client->label(),
+            'host' => $client->label(),
+            'user' => $client->targetUser(),
+            'main_domain' => '',
+            'cpanel' => '',
+            'php' => '',
+            'usage' => [],
+            'counts' => ['emails' => 0, 'databases' => 0, 'ftp' => 0, 'subdomains' => 0, 'addon' => 0],
+            'error' => '',
+        ];
+
+        try {
+            $summary = self::summary($client);
+        } catch (Throwable $e) {
+            $snapshot['error'] = $e->getMessage();
+
+            return $snapshot;
+        }
+
+        $snapshot['user'] = (string) $summary['user'];
+        $snapshot['main_domain'] = (string) ($summary['domains']['main_domain'] ?? '');
+        $snapshot['cpanel'] = (string) ($summary['info']['cpanelversion'] ?? '');
+        $snapshot['counts'] = $summary['counts'];
+
+        foreach ($summary['usage'] as $item) {
+            $id = strtolower((string) $item['id']);
+            if (str_contains($id, 'disk') || str_contains($id, 'inode') || str_contains($id, 'bandwidth')) {
+                $snapshot['usage'][] = ['label' => (string) $item['label'], 'percent' => $item['percent']];
+            }
+        }
+
+        $main = $snapshot['main_domain'];
+        foreach (self::softCall(fn () => self::phpVersions($client), []) as $vhost) {
+            if ($main === '' || $vhost['vhost'] === $main) {
+                $snapshot['php'] = (string) $vhost['version'];
+                break;
+            }
+        }
+
+        return $snapshot;
+    }
+
+    // ------------------------------------------- مصرف صندوق‌ها و دیتابیس‌ها
+
+    /**
+     * مرتب‌سازی صندوق‌های ایمیل بر اساس مصرف، به‌علاوه‌ی مجموع و تعداد پر.
+     *
+     * @param array<int, array{email: string, domain: string, used: ?float, quota: mixed, percent: ?float}> $emails
+     *
+     * @return array{rows: array<int, array{email: string, used: float, quota: mixed, percent: ?float}>, total: float, full: array<int, string>}
+     */
+    public static function mailboxUsage(array $emails): array
+    {
+        $rows = [];
+        $total = 0.0;
+        $full = [];
+
+        foreach ($emails as $email) {
+            $used = (float) ($email['used'] ?? 0);
+            $total += $used;
+            $percent = $email['percent'] ?? null;
+            if ($percent !== null && (float) $percent >= 90) {
+                $full[] = (string) $email['email'];
+            }
+            $rows[] = [
+                'email' => (string) $email['email'],
+                'used' => $used,
+                'quota' => $email['quota'] ?? null,
+                'percent' => $percent === null ? null : (float) $percent,
+            ];
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['used'] <=> $a['used']);
+
+        return ['rows' => $rows, 'total' => $total, 'full' => $full];
+    }
+
+    /**
+     * حجم هر دیتابیس، مرتب از بزرگ به کوچک، به‌علاوه‌ی دیتابیس‌های بی‌کاربر.
+     *
+     * @param array<int, array{name: string, size: ?float, users: array<int, string>}> $databases
+     *
+     * @return array{rows: array<int, array{name: string, size: float, users: int}>, total: float, orphans: array<int, string>}
+     */
+    public static function databaseSizes(array $databases): array
+    {
+        $rows = [];
+        $total = 0.0;
+        $orphans = [];
+
+        foreach ($databases as $database) {
+            $size = (float) ($database['size'] ?? 0);
+            $total += $size;
+            $users = count($database['users'] ?? []);
+            if ($users === 0) {
+                $orphans[] = (string) $database['name'];
+            }
+            $rows[] = ['name' => (string) $database['name'], 'size' => $size, 'users' => $users];
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['size'] <=> $a['size']);
+
+        return ['rows' => $rows, 'total' => $total, 'orphans' => $orphans];
+    }
+
+    // ------------------------------------------------------ تست زنده‌ی PHP
+
+    /**
+     * یک فایل PHP موقت داخل پوشه‌ی سایت می‌گذارد، از بیرون صدایش می‌زند و بعد
+     * پاکش می‌کند. این تنها راهی است که می‌شود فهمید وب‌سرور واقعاً چه نسخه‌ای
+     * از PHP و با چه محدودیت‌هایی اجرا می‌کند (نه آنچه در تنظیمات نوشته شده).
+     *
+     * @return array{domain: string, url: string, ok: bool, status: int, values: array<string, string>, error: string, cleaned: bool}
+     */
+    public static function phpLiveTest(CpanelClient $client, string $domain, string $docroot): array
+    {
+        $domain = SiteCheck::cleanDomain($domain);
+        $docroot = self::normalizePath($docroot);
+        $name = 'teamkan-phptest-' . bin2hex(random_bytes(6)) . '.php';
+        $path = rtrim($docroot, '/') . '/' . $name;
+        $url = 'https://' . $domain . '/' . $name;
+
+        $result = ['domain' => $domain, 'url' => $url, 'ok' => false, 'status' => 0, 'values' => [], 'error' => '', 'cleaned' => false];
+
+        self::uploadFile($client, $docroot, $name, self::phpProbeSource());
+
+        try {
+            [$status, $body, $error] = self::httpGet($url);
+            if ($status === 0) {
+                // بعضی سایت‌ها هنوز SSL ندارند؛ با http هم امتحان می‌کنیم.
+                [$status, $body, $error] = self::httpGet('http://' . $domain . '/' . $name);
+                $result['url'] = 'http://' . $domain . '/' . $name;
+            }
+            $result['status'] = $status;
+
+            $decoded = json_decode($body, true);
+            if (is_array($decoded)) {
+                $values = [];
+                foreach ($decoded as $key => $value) {
+                    $values[(string) $key] = is_scalar($value) ? (string) $value : json_encode($value);
+                }
+                $result['values'] = $values;
+                $result['ok'] = true;
+            } elseif (str_contains($body, '<?php')) {
+                $result['error'] = 'سرور فایل PHP را اجرا نکرد و متن خامش را برگرداند؛ یعنی PHP روی این دامنه فعال نیست.';
+            } elseif ($error !== '') {
+                $result['error'] = $error;
+            } else {
+                $result['error'] = $status === 0
+                    ? 'دامنه از بیرون جواب نداد (DNS یا فایروال).'
+                    : 'پاسخ سرور کد ' . $status . ' بود و خروجی تست خوانده نشد.';
+            }
+        } finally {
+            // فایل تست تحت هر شرایطی باید برداشته شود.
+            $result['cleaned'] = self::softCall(function () use ($client, $path): bool {
+                self::deletePath($client, $path);
+
+                return true;
+            }, false) === true;
+        }
+
+        return $result;
+    }
+
+    /**
+     * فایل کوچکی که وضعیت واقعی PHP را به‌صورت JSON برمی‌گرداند.
+     */
+    private static function phpProbeSource(): string
+    {
+        return implode("\n", [
+            '<?php',
+            "header('Content-Type: application/json');",
+            'echo json_encode([',
+            "    'نسخه‌ی PHP' => PHP_VERSION,",
+            "    'حالت اجرا' => PHP_SAPI,",
+            "    'حافظه' => (string) ini_get('memory_limit'),",
+            "    'حداکثر زمان اجرا' => (string) ini_get('max_execution_time'),",
+            "    'حداکثر حجم آپلود' => (string) ini_get('upload_max_filesize'),",
+            "    'حداکثر حجم POST' => (string) ini_get('post_max_size'),",
+            "    'نمایش خطاها' => ini_get('display_errors') ? 'روشن' : 'خاموش',",
+            "    'MySQL' => extension_loaded('mysqli') || extension_loaded('pdo_mysql') ? 'دارد' : 'ندارد',",
+            "    'cURL' => extension_loaded('curl') ? 'دارد' : 'ندارد',",
+            "    'GD' => extension_loaded('gd') ? 'دارد' : 'ندارد',",
+            "    'zip' => extension_loaded('zip') ? 'دارد' : 'ندارد',",
+            "    'قابل نوشتن' => is_writable(__DIR__) ? 'بله' : 'خیر',",
+            '], JSON_UNESCAPED_UNICODE);',
+            '',
+        ]);
+    }
+
+    /**
+     * @return array{0: int, 1: string, 2: string}
+     */
+    private static function httpGet(string $url, int $timeout = 15): array
+    {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return [0, '', 'curl در دسترس نیست.'];
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_USERAGENT => 'cPanelTeamKan/1.0 (+php-test)',
+        ]);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        return [$status, is_string($body) ? $body : '', $error];
+    }
+
+    // ------------------------------------------------- جلوگیری از هات‌لینک
+
+    /**
+     * هات‌لینک یعنی سایت دیگری مستقیم به تصویر شما لینک بدهد و پهنای‌باند شما
+     * را خرج کند. جلویش با یک بلوک نشان‌دار در .htaccess گرفته می‌شود.
+     *
+     * @param array<int, string> $allowed دامنه‌هایی که اجازه دارند
+     */
+    public static function setHotlinkProtection(
+        CpanelClient $client,
+        string $docroot,
+        bool $enable,
+        array $allowed = [],
+        string $extensions = 'jpe?g|png|gif|webp|svg|bmp|ico|mp4|webm|pdf',
+    ): void {
+        $htaccess = self::normalizePath($docroot) . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+
+        if (!$enable) {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'HOTLINK'));
+
+            return;
+        }
+
+        $lines = [
+            '# TEAMKAN HOTLINK START',
+            'RewriteEngine On',
+            'RewriteCond %{HTTP_REFERER} !^$',
+        ];
+        foreach (self::hotlinkHosts($allowed) as $host) {
+            // پایان الگو بسته می‌شود تا example.com.evil.com هم مجاز حساب نشود.
+            $lines[] = 'RewriteCond %{HTTP_REFERER} !^https?://([^/]+\.)?' . $host . '([:/]|$) [NC]';
+        }
+        $lines[] = 'RewriteRule \.(' . $extensions . ')$ - [F,NC]';
+        $lines[] = '# TEAMKAN HOTLINK END';
+        $lines[] = '';
+
+        self::saveFile($client, $htaccess, implode("\n", $lines) . self::stripBlock($current, 'HOTLINK'));
+    }
+
+    /**
+     * دامنه‌های مجاز را برای استفاده در الگوی regex آماده می‌کند.
+     *
+     * @param array<int, string> $allowed
+     *
+     * @return array<int, string>
+     */
+    public static function hotlinkHosts(array $allowed): array
+    {
+        $hosts = [];
+        foreach ($allowed as $entry) {
+            foreach (preg_split('/[\s,]+/', (string) $entry) ?: [] as $item) {
+                $host = SiteCheck::cleanDomain((string) $item);
+                $host = (string) preg_replace('/^www\./', '', $host);
+                if ($host === '') {
+                    continue;
+                }
+                $hosts[str_replace('.', '\.', $host)] = true;
+            }
+        }
+
+        return array_keys($hosts);
+    }
+
+    public static function isHotlinkOn(CpanelClient $client, string $docroot): bool
+    {
+        $current = (string) self::softCall(fn () => self::readFile($client, self::normalizePath($docroot) . '/.htaccess'), '');
+
+        return str_contains($current, 'TEAMKAN HOTLINK START');
+    }
+
     /**
      * فراخوانی‌های «خوب‌است‌اگر‌باشد» — اگه ماژولش روی سرور نصب نباشه یا توکن
      * دسترسی نداشته باشه، کل خروجی نباید بترکه.
