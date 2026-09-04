@@ -80,6 +80,11 @@ while (time() < $deadline) {
             ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
         ]],
         str_contains($path, 'Fileman/upload_files') => ['status' => 1, 'data' => ['uploads' => [['status' => 1, 'file' => 'ok']]]],
+        str_contains($path, 'Mysql/get_restrictions') => ['status' => 1, 'data' => ['prefix' => 'demo_', 'prefixing_enabled' => 1, 'max_database_name_length' => 64]],
+        str_contains($path, 'Mime/list_redirects') => ['status' => 1, 'data' => [
+            ['sourceurl' => 'old.example.com', 'destination' => 'https://example.com', 'type' => 'permanent'],
+        ]],
+        str_contains($path, 'Mysql/list_hosts') => ['status' => 1, 'data' => [['host' => '203.0.113.10']]],
         str_contains($path, 'Email/list_forwarders') => ['status' => 1, 'data' => [
             ['dest' => 'info@example.com', 'forward' => 'kian@gmail.com'],
         ]],

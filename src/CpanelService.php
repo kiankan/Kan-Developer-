@@ -204,6 +204,105 @@ final class CpanelService
         $client->uapi('Mysql', 'delete_user', ['name' => $name]);
     }
 
+    /**
+     * محدودیت‌های MySQL این حساب — مهم‌ترینش پیشوند اجباری نام‌هاست.
+     *
+     * @return array{prefix: string, max_length: ?int}
+     */
+    public static function databaseInfo(CpanelClient $client): array
+    {
+        $raw = self::softCall(fn () => $client->uapi('Mysql', 'get_restrictions'), null);
+        $data = is_array($raw) ? $raw : [];
+
+        $prefix = (string) ($data['prefix'] ?? '');
+        if ($prefix === '' && ($data['prefixing_enabled'] ?? false)) {
+            $prefix = $client->targetUser() . '_';
+        }
+
+        return [
+            'prefix' => $prefix,
+            'max_length' => isset($data['max_database_name_length']) ? (int) $data['max_database_name_length'] : null,
+        ];
+    }
+
+    public static function setDatabaseUserPassword(CpanelClient $client, string $user, string $password): void
+    {
+        $client->uapi('Mysql', 'set_password', ['user' => $user, 'password' => $password]);
+    }
+
+    public static function renameDatabase(CpanelClient $client, string $oldName, string $newName): void
+    {
+        $client->uapi('Mysql', 'rename_database', ['oldname' => $oldName, 'newname' => $newName]);
+    }
+
+    public static function renameDatabaseUser(CpanelClient $client, string $oldName, string $newName): void
+    {
+        $client->uapi('Mysql', 'rename_user', ['oldname' => $oldName, 'newname' => $newName]);
+    }
+
+    /**
+     * بررسی و تعمیر جدول‌های خراب — همان Check/Repair پنل.
+     *
+     * @return string خلاصه‌ی نتیجه‌ای که سرور برگردانده
+     */
+    public static function repairDatabase(CpanelClient $client, string $name, bool $repair = true): string
+    {
+        $raw = $client->uapi('Mysql', $repair ? 'repair_database' : 'check_database', ['name' => $name]);
+
+        if (is_array($raw)) {
+            foreach (['message', 'status', 'result'] as $key) {
+                if (isset($raw[$key]) && is_scalar($raw[$key])) {
+                    return (string) $raw[$key];
+                }
+            }
+
+            return trim(implode(' | ', array_map(
+                static fn (mixed $value): string => is_scalar($value) ? (string) $value : '',
+                self::normalizeList($raw),
+            )));
+        }
+
+        return is_scalar($raw) ? (string) $raw : '';
+    }
+
+    public static function revokeDatabaseUser(CpanelClient $client, string $user, string $database): void
+    {
+        $client->uapi('Mysql', 'revoke_privileges_on_database', ['user' => $user, 'database' => $database]);
+    }
+
+    /**
+     * میزبان‌هایی که اجازه‌ی اتصال از راه دور به MySQL دارند.
+     *
+     * @return array<int, string>
+     */
+    public static function remoteMysqlHosts(CpanelClient $client): array
+    {
+        $raw = self::softCall(
+            fn () => self::uapiOrApi2($client, ['Mysql', 'list_hosts'], ['MysqlFE', 'listhosts']),
+            [],
+        );
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            $host = is_array($row) ? (string) ($row['host'] ?? ($row['name'] ?? '')) : (string) $row;
+            if (trim($host) !== '') {
+                $out[] = trim($host);
+            }
+        }
+
+        return $out;
+    }
+
+    public static function addRemoteMysqlHost(CpanelClient $client, string $host): void
+    {
+        self::uapiOrApi2($client, ['Mysql', 'add_host', ['host' => $host]], ['MysqlFE', 'addhost', ['host' => $host]]);
+    }
+
+    public static function deleteRemoteMysqlHost(CpanelClient $client, string $host): void
+    {
+        self::uapiOrApi2($client, ['Mysql', 'delete_host', ['host' => $host]], ['MysqlFE', 'delhost', ['host' => $host]]);
+    }
+
     public static function grantDatabaseUser(
         CpanelClient $client,
         string $user,
@@ -574,6 +673,52 @@ final class CpanelService
         ]);
     }
 
+    // ----------------------------------------------------------- ریدایرکت
+
+    /**
+     * @return array<int, array{source: string, destination: string, type: string}>
+     */
+    public static function redirects(CpanelClient $client): array
+    {
+        $raw = self::uapiOrApi2($client, ['Mime', 'list_redirects'], ['Mime', 'listredirects']);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[] = [
+                'source' => (string) ($row['sourceurl'] ?? ($row['source' ] ?? ($row['domain'] ?? ''))),
+                'destination' => (string) ($row['destination'] ?? ($row['targeturl'] ?? '')),
+                'type' => (string) ($row['type'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    public static function addRedirect(
+        CpanelClient $client,
+        string $domain,
+        string $destination,
+        string $type = 'permanent',
+        string $path = '/',
+    ): void {
+        $client->uapi('Mime', 'add_redirect', [
+            'domain' => $domain,
+            'redirect' => $destination,
+            'type' => $type === 'temporary' ? 'temporary' : 'permanent',
+            'redirect_wildcard' => 0,
+            'redirect_www' => 0,
+            'src' => $path,
+        ]);
+    }
+
+    public static function deleteRedirect(CpanelClient $client, string $source): void
+    {
+        $client->uapi('Mime', 'delete_redirect', ['sourceurl' => $source]);
+    }
+
     // ----------------------------------------------------------------- SSL
 
     /**
@@ -600,6 +745,14 @@ final class CpanelService
         }
 
         return $out;
+    }
+
+    /**
+     * درخواست صدور/تمدید خودکار گواهی برای دامنه‌های حساب.
+     */
+    public static function runAutoSsl(CpanelClient $client): void
+    {
+        $client->uapi('SSL', 'start_autossl_check');
     }
 
     // ----------------------------------------------------------------- PHP
@@ -856,7 +1009,22 @@ final class CpanelService
      */
     public static function listBackups(CpanelClient $client): array
     {
-        $raw = self::softCall(fn () => $client->uapi('Backup', 'list_backups'), []);
+        $raw = self::softCall(fn () => $client->uapi('Backup', 'list_backups'), null);
+
+        // نسخه‌هایی که این تابع را ندارند: خود پوشه‌ی هوم را نگاه می‌کنیم؛
+        // بکاپ کامل همان‌جا و با نام backup-*.tar.gz ساخته می‌شود.
+        if ($raw === null || self::normalizeList($raw) === []) {
+            $files = self::softCall(fn () => self::listFiles($client, self::homeDir($client)), []);
+            $out = [];
+            foreach ($files as $file) {
+                if ($file['dir'] || !preg_match('/^backup.*\.(tar\.gz|tar|tgz|zip)$/i', $file['name'])) {
+                    continue;
+                }
+                $out[] = ['name' => $file['name'], 'size' => $file['size'], 'time' => $file['mtime']];
+            }
+
+            return $out;
+        }
 
         $out = [];
         foreach (self::normalizeList($raw) as $row) {
@@ -877,13 +1045,28 @@ final class CpanelService
         return $out;
     }
 
+    /**
+     * ساخت بکاپ کامل.
+     *
+     * روی نسخه‌های جدید UAPI Backup را دارد؛ روی نسخه‌های قدیمی‌تر همین کار
+     * فقط با API1 قدیمی Fileman::fullbackup انجام می‌شود (ورودی‌هایش ترتیبی‌اند:
+     * مقصد، ایمیل).
+     */
     public static function fullBackup(CpanelClient $client, string $notifyEmail = ''): void
     {
-        $params = [];
-        if (trim($notifyEmail) !== '') {
-            $params['email'] = $notifyEmail;
+        $email = trim($notifyEmail);
+
+        try {
+            $client->uapi('Backup', 'fullbackup_to_homedir', $email !== '' ? ['email' => $email] : []);
+
+            return;
+        } catch (CpanelError $e) {
+            if (!self::isModuleMissing($e)) {
+                throw $e;
+            }
         }
-        $client->uapi('Backup', 'fullbackup_to_homedir', $params);
+
+        $client->api1('Fileman', 'fullbackup', ['homedir', $email]);
     }
 
     // ----------------------------------------------------------------- WHM

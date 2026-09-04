@@ -119,6 +119,96 @@ final class UpdateHandler
                 ['key' => 'name', 'prompt' => 'کدام کاربر دیتابیس حذف شود؟', 'picker' => 'dbusers'],
             ],
         ],
+        'db_passwd' => [
+            'title' => '🔑 تغییر رمز کاربر دیتابیس',
+            'scope' => 'account',
+            'back' => 'db',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام کاربر دیتابیس؟', 'picker' => 'dbusers'],
+                ['key' => 'password', 'prompt' => 'رمز جدید را بفرستید (یا <code>/gen</code>):', 'secret' => true],
+            ],
+        ],
+        'db_rename' => [
+            'title' => '✏️ تغییر نام دیتابیس',
+            'scope' => 'account',
+            'back' => 'db',
+            'confirm' => '⚠️ نام دیتابیس <code>{name}</code> به <code>{newname}</code> تغییر می‌کند. یادتان باشد فایل تنظیمات سایت (مثل wp-config.php) را هم به‌روز کنید.',
+            'steps' => [
+                ['key' => 'name', 'prompt' => 'کدام دیتابیس؟', 'picker' => 'databases'],
+                ['key' => 'newname', 'prompt' => 'نام جدید (با همان پیشوند حساب):'],
+            ],
+        ],
+        'dbuser_rename' => [
+            'title' => '✏️ تغییر نام کاربر دیتابیس',
+            'scope' => 'account',
+            'back' => 'db',
+            'confirm' => '⚠️ نام کاربر <code>{name}</code> به <code>{newname}</code> تغییر می‌کند؛ تنظیمات سایت را هم عوض کنید.',
+            'steps' => [
+                ['key' => 'name', 'prompt' => 'کدام کاربر دیتابیس؟', 'picker' => 'dbusers'],
+                ['key' => 'newname', 'prompt' => 'نام جدید (با همان پیشوند حساب):'],
+            ],
+        ],
+        'db_repair' => [
+            'title' => '🛠 بررسی و تعمیر دیتابیس',
+            'scope' => 'account',
+            'back' => 'db',
+            'steps' => [
+                ['key' => 'name', 'prompt' => "کدام دیتابیس بررسی/تعمیر شود؟\n\n💡 وقتی سایت خطای «table is marked as crashed» می‌دهد، همین کار معمولاً مشکل را حل می‌کند.", 'picker' => 'databases'],
+                ['key' => 'mode', 'prompt' => 'کدام کار؟', 'choices' => [
+                    ['🛠 تعمیر (Repair)', 'repair'],
+                    ['🔍 فقط بررسی (Check)', 'check'],
+                ]],
+            ],
+        ],
+        'db_revoke' => [
+            'title' => '🚫 گرفتن دسترسی کاربر از دیتابیس',
+            'scope' => 'account',
+            'back' => 'db',
+            'confirm' => '⚠️ دسترسی <code>{user}</code> به دیتابیس <code>{database}</code> برداشته می‌شود.',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام کاربر؟', 'picker' => 'dbusers'],
+                ['key' => 'database', 'prompt' => 'از کدام دیتابیس؟', 'picker' => 'databases'],
+            ],
+        ],
+        'mysql_host_add' => [
+            'title' => '🌍 اجازه‌ی اتصال از راه دور به MySQL',
+            'scope' => 'account',
+            'back' => 'db',
+            'steps' => [
+                ['key' => 'host', 'prompt' => "آی‌پی یا هاستی که باید اجازه‌ی اتصال داشته باشد را بفرستید.\n\nمثال: <code>203.0.113.10</code> — با <code>%</code> هم می‌شود بازه داد (مثل <code>203.0.113.%</code>).\n⚠️ فقط <code>%</code> یعنی «همه‌جا»، که امن نیست."],
+            ],
+        ],
+        'mysql_host_del' => [
+            'title' => '🗑 حذف دسترسی از راه دور',
+            'scope' => 'account',
+            'back' => 'db',
+            'confirm' => '⚠️ اجازه‌ی اتصال <code>{host}</code> به MySQL برداشته می‌شود.',
+            'steps' => [
+                ['key' => 'host', 'prompt' => 'کدام میزبان حذف شود؟', 'picker' => 'mysql_hosts'],
+            ],
+        ],
+        'redirect_add' => [
+            'title' => '↪️ افزودن ریدایرکت',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => 'کدام دامنه ریدایرکت شود؟', 'picker' => 'domains'],
+                ['key' => 'destination', 'prompt' => "آدرس مقصد را کامل بفرستید، مثل:\n<code>https://example.com/new</code>"],
+                ['key' => 'type', 'prompt' => "نوع ریدایرکت؟\n\n۳۰۱ یعنی «برای همیشه» (گوگل هم آدرس جدید را جایگزین می‌کند) و ۳۰۲ یعنی «موقت».", 'choices' => [
+                    ['↪️ دائمی (301)', 'permanent'],
+                    ['↩️ موقت (302)', 'temporary'],
+                ]],
+            ],
+        ],
+        'redirect_del' => [
+            'title' => '🗑 حذف ریدایرکت',
+            'scope' => 'account',
+            'back' => 'dom',
+            'confirm' => '⚠️ ریدایرکت <code>{source}</code> حذف می‌شود.',
+            'steps' => [
+                ['key' => 'source', 'prompt' => 'کدام ریدایرکت حذف شود؟', 'picker' => 'redirects'],
+            ],
+        ],
         'db_grant' => [
             'title' => '🔗 دادن دسترسی کاربر به دیتابیس',
             'scope' => 'account',
@@ -597,6 +687,12 @@ final class UpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'h:')) {
+            self::howto($api, $chatId, substr($data, 2));
+
+            return;
+        }
+
         // دکمه‌های مرورگر فایل
         if (str_starts_with($data, 'fb') || str_starts_with($data, 'ff:')
             || str_starts_with($data, 'fx:') || str_starts_with($data, 'fd:') || $data === 'fup') {
@@ -799,18 +895,21 @@ final class UpdateHandler
                 [self::btn('📮 فورواردها', 'a:forwarders')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'db' => ["🗄 <b>دیتابیس‌های MySQL</b>\n\nدیتابیس، کاربر دیتابیس و دسترسی‌ها.\n"
-                . "💡 برای وصل‌کردن یک سایت معمولاً سه قدم لازم است: ۱) ساخت دیتابیس ۲) ساخت کاربر ۳) دادن دسترسی کاربر به دیتابیس.", [
-                [self::btn('📋 لیست دیتابیس‌ها و کاربران', 'a:dbs')],
-                [self::btn('➕ دیتابیس جدید', 'f:db_add'), self::btn('🗑 حذف دیتابیس', 'f:db_del')],
-                [self::btn('👤 کاربر جدید', 'f:dbuser_add'), self::btn('🗑 حذف کاربر', 'f:dbuser_del')],
-                [self::btn('🔗 دادن دسترسی به کاربر', 'f:db_grant')],
+            'db' => [self::databaseMenuText(), [
+                [self::btn('📋 دیتابیس‌ها و کاربران', 'a:dbs')],
+                [self::btn('➕ دیتابیس جدید', 'f:db_add'), self::btn('👤 کاربر جدید', 'f:dbuser_add')],
+                [self::btn('🔗 وصل‌کردن کاربر به دیتابیس', 'f:db_grant')],
+                [self::btn('🔑 رمز کاربر', 'f:db_passwd'), self::btn('🚫 گرفتن دسترسی', 'f:db_revoke')],
+                [self::btn('✏️ نام دیتابیس', 'f:db_rename'), self::btn('✏️ نام کاربر', 'f:dbuser_rename')],
+                [self::btn('🛠 بررسی و تعمیر', 'f:db_repair'), self::btn('🌍 اتصال از راه دور', 'a:mysqlhosts')],
+                [self::btn('🗑 حذف دیتابیس', 'f:db_del'), self::btn('🗑 حذف کاربر', 'f:dbuser_del')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'dom' => ["🌐 <b>دامنه‌ها</b>\n\nدامنه‌ی اصلی، ادان‌دامنه‌ها، ساب‌دامنه‌ها و گواهی‌های SSL.", [
+            'dom' => ["🌐 <b>دامنه‌ها</b>\n\nدامنه‌ی اصلی حساب، دامنه‌های اضافه (ادان)، ساب‌دامنه‌ها، ریدایرکت‌ها و گواهی‌های SSL.", [
                 [self::btn('📋 لیست دامنه‌ها', 'a:domains')],
                 [self::btn('➕ ساب‌دامنه', 'f:sub_add'), self::btn('🗑 حذف ساب‌دامنه', 'f:sub_del')],
-                [self::btn('🧭 DNS', 'm:dns'), self::btn('🔒 SSL', 'a:ssl')],
+                [self::btn('↪️ ریدایرکت‌ها', 'a:redirects'), self::btn('🧭 DNS', 'm:dns')],
+                [self::btn('🔒 SSL', 'm:ssl')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'files' => ["📂 <b>فایل‌های هاست</b>\n\nسورس سایت را از همین‌جا آپلود کنید: فایل (یا zip) را بفرستید، و اگر آرشیو بود همان‌جا بازش کنید.\n"
@@ -836,6 +935,11 @@ final class UpdateHandler
                 [self::btn('➕ رکورد جدید', 'f:dns_add'), self::btn('🗑 حذف رکورد', 'f:dns_del')],
                 [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
+            'ssl' => ["🔒 <b>گواهی SSL</b>\n\nگواهی همان چیزی است که قفل سبز مرورگر و آدرس <code>https</code> را می‌سازد. روی اکثر هاست‌ها cPanel خودش رایگان صادر می‌کند (AutoSSL).", [
+                [self::btn('📋 گواهی‌های نصب‌شده', 'a:ssl')],
+                [self::btn('🔄 درخواست صدور/تمدید خودکار', 'a:autossl')],
+                [self::btn('⬅️ بازگشت', 'm:dom')],
+            ]],
             'php' => ["🐘 <b>نسخه‌ی PHP</b>\n\nنسخه‌ی PHP هر دامنه را جدا می‌شود عوض کرد (MultiPHP).", [
                 [self::btn('📋 نسخه‌ی هر دامنه', 'a:php')],
                 [self::btn('🔧 تغییر نسخه', 'f:php_set')],
@@ -854,6 +958,15 @@ final class UpdateHandler
                 [self::btn('🖥 وضعیت سرور', 'a:whmstatus'), self::btn('♻️ ری‌استارت سرویس', 'f:whm_service')],
                 [self::btn('📦 پلن‌ها', 'a:whmpkgs'), self::btn('💀 حذف حساب', 'f:whm_terminate')],
                 [self::btn('🎯 انتخاب کاربر مقصد', 'f:whm_user')],
+                [self::btn('⬅️ بازگشت', 'menu')],
+            ]],
+            'howto' => ["🧭 <b>کارهای رایج</b>\n\nنمی‌دانید از کجا شروع کنید؟ کاری که می‌خواهید انجام دهید را بزنید تا قدم‌به‌قدم بگویم.", [
+                [self::btn('🌐 راه‌اندازی یک سایت جدید', 'h:site')],
+                [self::btn('📤 گذاشتن سورس روی هاست', 'h:upload')],
+                [self::btn('🗄 ساخت دیتابیس و وصل‌کردنش', 'h:db')],
+                [self::btn('✉️ ساخت ایمیل جدید', 'h:email')],
+                [self::btn('🔒 گرفتن SSL برای دامنه', 'h:ssl')],
+                [self::btn('💾 گرفتن بکاپ', 'h:backup')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'adm' => ["👮 <b>ادمین‌های ربات</b>\n\nهر کسی که اینجا باشد به همه‌ی امکانات ربات دسترسی دارد.", [
@@ -916,7 +1029,8 @@ final class UpdateHandler
         }
 
         $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
-        $rows[] = [self::btn('✨ قابلیت‌ها', 'a:features'), self::btn('🧾 لاگ عملیات', 'a:log')];
+        $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('✨ قابلیت‌ها', 'a:features')];
+        $rows[] = [self::btn('🧾 لاگ عملیات', 'a:log')];
         $rows[] = [self::btn('❓ راهنما', 'a:help')];
 
         return ['inline_keyboard' => $rows];
@@ -1001,6 +1115,30 @@ final class UpdateHandler
     }
 
     /**
+     * متن منوی دیتابیس با اطلاعات زنده‌ی همان حساب (پیشوند اجباری نام‌ها) —
+     * چون بیشترین سردرگمی کاربرها سر همین پیشوند است.
+     */
+    private static function databaseMenuText(): string
+    {
+        $text = "🗄 <b>دیتابیس‌های MySQL</b>\n\n"
+            . "برای وصل‌کردن یک سایت به دیتابیس سه قدم لازم است:\n"
+            . "۱) ساخت دیتابیس  ۲) ساخت کاربر  ۳) وصل‌کردن کاربر به دیتابیس\n"
+            . 'بعد همان سه مقدار (نام دیتابیس، نام کاربر، رمز) را در فایل تنظیمات سایت می‌گذارید.';
+
+        try {
+            $info = CpanelService::databaseInfo(self::accountClient());
+            if ($info['prefix'] !== '') {
+                $text .= "\n\n💡 روی این هاست نام دیتابیس و کاربر باید با <code>"
+                    . Format::escapeHtml($info['prefix']) . '</code> شروع شود.';
+            }
+        } catch (Throwable) {
+            // اطلاعات زنده اختیاری است؛ نبودنش نباید منو را خراب کند.
+        }
+
+        return $text;
+    }
+
+    /**
      * وضعیت سرور فعال — چیدمان منو بر اساس همین ساخته می‌شود.
      *
      * @return array{state: string, is_whm: bool, target: string, server: array<string, mixed>|null}
@@ -1047,6 +1185,44 @@ final class UpdateHandler
 
         if ($action === 'features') {
             self::respond($api, $chatId, self::features(), self::backKeyboard());
+
+            return;
+        }
+
+        if ($action === 'redirects') {
+            $api->sendChatAction($chatId);
+            try {
+                $text = Render::redirects(CpanelService::redirects(self::accountClient()));
+                $keyboard = ['inline_keyboard' => [
+                    [self::btn('➕ افزودن ریدایرکت', 'f:redirect_add'), self::btn('🗑 حذف', 'f:redirect_del')],
+                    [self::btn('⬅️ بازگشت', 'm:dom')],
+                ]];
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $keyboard = self::backKeyboard('dom');
+            }
+            self::respond($api, $chatId, $text, $keyboard);
+
+            return;
+        }
+
+        if ($action === 'mysqlhosts') {
+            $api->sendChatAction($chatId);
+            try {
+                $hosts = CpanelService::remoteMysqlHosts(self::accountClient());
+                $text = $hosts === []
+                    ? "🌍 <b>اتصال از راه دور به MySQL</b>\n\nهیچ میزبانی اجازه‌ی اتصال از بیرون ندارد.\n\n💡 اگر می‌خواهید از کامپیوتر خودتان یا یک سرور دیگر مستقیم به دیتابیس وصل شوید، آی‌پی‌اش را اینجا اضافه کنید."
+                    : "🌍 <b>میزبان‌های مجاز برای اتصال از راه دور</b>\n\n"
+                        . implode("\n", array_map(static fn (string $host): string => '• <code>' . Format::escapeHtml($host) . '</code>', $hosts));
+                $keyboard = ['inline_keyboard' => [
+                    [self::btn('➕ افزودن میزبان', 'f:mysql_host_add'), self::btn('🗑 حذف', 'f:mysql_host_del')],
+                    [self::btn('⬅️ بازگشت', 'm:db')],
+                ]];
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $keyboard = self::backKeyboard('db');
+            }
+            self::respond($api, $chatId, $text, $keyboard);
 
             return;
         }
@@ -1110,6 +1286,7 @@ final class UpdateHandler
                     CpanelService::installedPhpVersions(self::accountClient()),
                 ),
                 'backups' => Render::backups(CpanelService::listBackups(self::accountClient())),
+                'autossl' => self::runAutoSslAction(),
                 'whmaccts' => Render::whmAccounts(CpanelService::whmAccounts(self::whmClient())),
                 'whmstatus' => Render::whmStatus(CpanelService::whmServerStatus(self::whmClient())),
                 'whmpkgs' => '📦 <b>پلن‌ها</b>' . "\n\n" . implode("\n", array_map(
@@ -1123,6 +1300,89 @@ final class UpdateHandler
         }
 
         self::respond($api, $chatId, $text, self::backKeyboard(self::sectionOf($action)));
+    }
+
+    /**
+     * راهنمای گام‌به‌گام کارهای رایج: هر قدم یک دکمه است که مستقیم می‌برد به
+     * همان بخش.
+     */
+    private static function howto(TelegramApi $api, int $chatId, string $topic): void
+    {
+        [$text, $rows] = match ($topic) {
+            'site' => [
+                "🌐 <b>راه‌اندازی یک سایت جدید</b>\n\n"
+                . "۱️⃣ دامنه یا ساب‌دامنه را بسازید (اگر دامنه‌ی اصلی است، همین حالا آماده است)\n"
+                . "۲️⃣ سورس سایت را به‌صورت zip در پوشه‌ی سایت آپلود و بازش کنید\n"
+                . "۳️⃣ دیتابیس و کاربر بسازید و کاربر را به دیتابیس وصل کنید\n"
+                . "۴️⃣ اطلاعات دیتابیس را در فایل تنظیمات سایت بگذارید (مثل wp-config.php)\n"
+                . "۵️⃣ نسخه‌ی PHP مناسب را انتخاب کنید و SSL بگیرید",
+                [
+                    [self::btn('۱ ➕ ساب‌دامنه', 'f:sub_add')],
+                    [self::btn('۲ 📂 آپلود سورس', 'm:files')],
+                    [self::btn('۳ 🗄 دیتابیس', 'm:db')],
+                    [self::btn('۵ 🐘 نسخه PHP', 'm:php'), self::btn('🔒 SSL', 'm:ssl')],
+                ],
+            ],
+            'upload' => [
+                "📤 <b>گذاشتن سورس روی هاست</b>\n\n"
+                . "۱️⃣ «مرور فایل‌ها» را بزنید و بروید داخل پوشه‌ی سایت (معمولاً <code>public_html</code>)\n"
+                . "۲️⃣ «آپلود در همین پوشه» را بزنید\n"
+                . "۳️⃣ فایل <code>zip</code> سورس را همین‌جا در تلگرام بفرستید\n"
+                . "۴️⃣ بعد از آپلود، دکمه‌ی «باز کردن آرشیو» را بزنید\n\n"
+                . '⚠️ سقف حجم فایل در تلگرام ۲۰ مگابایت است.',
+                [[self::btn('🗂 شروع: مرور فایل‌ها', 'a:files')]],
+            ],
+            'db' => [
+                "🗄 <b>ساخت دیتابیس و وصل‌کردنش به سایت</b>\n\n"
+                . "۱️⃣ یک دیتابیس بسازید (نامش باید با پیشوند حساب شروع شود)\n"
+                . "۲️⃣ یک کاربر دیتابیس با رمز قوی بسازید (<code>/gen</code> برایتان می‌سازد)\n"
+                . "۳️⃣ کاربر را با دسترسی کامل به دیتابیس وصل کنید\n"
+                . "۴️⃣ نام دیتابیس، نام کاربر و رمز را در تنظیمات سایت بگذارید\n\n"
+                . '💡 اگر سایت خطای «table is marked as crashed» داد، از «بررسی و تعمیر» استفاده کنید.',
+                [
+                    [self::btn('۱ ➕ دیتابیس جدید', 'f:db_add')],
+                    [self::btn('۲ 👤 کاربر جدید', 'f:dbuser_add')],
+                    [self::btn('۳ 🔗 وصل‌کردن', 'f:db_grant')],
+                ],
+            ],
+            'email' => [
+                "✉️ <b>ساخت ایمیل جدید</b>\n\n"
+                . "۱️⃣ «افزودن» را بزنید، دامنه را انتخاب و بخش قبل از @ را بنویسید\n"
+                . "۲️⃣ رمز بگذارید (<code>/gen</code> رمز قوی می‌سازد) و سهمیه را انتخاب کنید\n"
+                . "۳️⃣ برای ورود به ایمیل، از وبمیل هاست یا هر برنامه‌ای با همان آدرس و رمز استفاده کنید\n\n"
+                . '💡 اگر می‌خواهید نامه‌ها به ایمیل دیگری هم برود، «فورواردها» را ببینید.',
+                [
+                    [self::btn('➕ ساخت ایمیل', 'f:email_add')],
+                    [self::btn('📮 فورواردها', 'a:forwarders')],
+                ],
+            ],
+            'ssl' => [
+                "🔒 <b>گرفتن SSL برای دامنه</b>\n\n"
+                . "۱️⃣ مطمئن شوید دامنه به همین هاست اشاره می‌کند (رکورد A درست باشد)\n"
+                . "۲️⃣ «درخواست صدور/تمدید خودکار» را بزنید تا cPanel گواهی رایگان بگیرد\n"
+                . "۳️⃣ چند دقیقه بعد، «گواهی‌های نصب‌شده» را ببینید\n\n"
+                . '💡 اگر دامنه تازه وصل شده، ممکن است چند ساعت طول بکشد تا صادر شود.',
+                [
+                    [self::btn('🧭 بررسی رکوردهای DNS', 'f:dns_list')],
+                    [self::btn('🔄 درخواست AutoSSL', 'a:autossl'), self::btn('📋 گواهی‌ها', 'a:ssl')],
+                ],
+            ],
+            'backup' => [
+                "💾 <b>گرفتن بکاپ</b>\n\n"
+                . "۱️⃣ «گرفتن بکاپ کامل» را بزنید؛ فایل بکاپ در پوشه‌ی هوم ساخته می‌شود\n"
+                . "۲️⃣ ساختش بسته به حجم حساب چند دقیقه طول می‌کشد\n"
+                . "۳️⃣ بعد از آماده‌شدن، از «بکاپ‌های موجود» ببینیدش و از فایل‌منیجر دانلودش کنید\n\n"
+                . '💡 اگر ایمیل بدهید، پایان کار به شما اطلاع داده می‌شود.',
+                [
+                    [self::btn('💾 گرفتن بکاپ کامل', 'f:backup_run')],
+                    [self::btn('📋 بکاپ‌های موجود', 'a:backups')],
+                ],
+            ],
+            default => ['این راهنما را نمی‌شناسم.', []],
+        };
+
+        $rows[] = [self::btn('⬅️ بازگشت', 'm:howto'), self::btn('🏠 منوی اصلی', 'menu')];
+        self::respond($api, $chatId, $text, ['inline_keyboard' => $rows]);
     }
 
     // ------------------------------------------------------- فایل‌های هاست
@@ -1368,6 +1628,15 @@ final class UpdateHandler
         self::respond($api, $chatId, $text, ['inline_keyboard' => $rows]);
     }
 
+    private static function runAutoSslAction(): string
+    {
+        CpanelService::runAutoSsl(self::accountClient());
+        AuditLog::record(self::$actor, (string) (ServerStore::activeId() ?? '-'), 'autossl', []);
+
+        return "🔄 درخواست صدور/تمدید خودکار گواهی فرستاده شد.\n\n"
+            . 'چند دقیقه تا چند ساعت طول می‌کشد؛ بعد از «گواهی‌های نصب‌شده» نتیجه را ببینید.';
+    }
+
     /**
      * هر «کار» زیرمجموعه‌ی کدام منوست — برای اینکه دکمه‌ی بازگشت درست باشد.
      */
@@ -1376,7 +1645,9 @@ final class UpdateHandler
         return match ($action) {
             'emails', 'forwarders' => 'email',
             'dbs' => 'db',
-            'domains', 'ssl' => 'dom',
+            'domains', 'redirects' => 'dom',
+            'ssl', 'autossl' => 'ssl',
+            'mysqlhosts' => 'db',
             'files' => 'files',
             'ftps' => 'ftp',
             'crons' => 'cron',
@@ -1617,6 +1888,23 @@ final class UpdateHandler
                 }
 
                 return $simple(array_values(array_unique($dirs)));
+
+            case 'mysql_hosts':
+                return $simple(CpanelService::remoteMysqlHosts(self::accountClient()));
+
+            case 'redirects':
+                $options = [];
+                foreach (CpanelService::redirects(self::accountClient()) as $redirect) {
+                    if ($redirect['source'] === '') {
+                        continue;
+                    }
+                    $options[] = [
+                        'label' => $redirect['source'] . ' → ' . $redirect['destination'],
+                        'value' => $redirect['source'],
+                    ];
+                }
+
+                return $options;
 
             case 'record_types':
                 return $simple(['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'NS']);
@@ -2138,6 +2426,88 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbPasswd(array $data): string
+    {
+        CpanelService::setDatabaseUserPassword(self::accountClient(), (string) $data['user'], (string) $data['password']);
+
+        return '✅ رمز کاربر <code>' . Format::escapeHtml((string) $data['user']) . '</code> عوض شد.'
+            . "\n\n💡 یادتان باشد رمز جدید را در فایل تنظیمات سایت هم بگذارید.";
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbRename(array $data): string
+    {
+        CpanelService::renameDatabase(self::accountClient(), (string) $data['name'], (string) $data['newname']);
+
+        return '✅ دیتابیس حالا <code>' . Format::escapeHtml((string) $data['newname']) . '</code> است.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbuserRename(array $data): string
+    {
+        CpanelService::renameDatabaseUser(self::accountClient(), (string) $data['name'], (string) $data['newname']);
+
+        return '✅ کاربر دیتابیس حالا <code>' . Format::escapeHtml((string) $data['newname']) . '</code> است.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbRepair(array $data): string
+    {
+        $repair = (string) ($data['mode'] ?? 'repair') !== 'check';
+        $result = CpanelService::repairDatabase(self::accountClient(), (string) $data['name'], $repair);
+
+        return ($repair ? '🛠 تعمیر' : '🔍 بررسی') . ' <code>' . Format::escapeHtml((string) $data['name']) . '</code> انجام شد.'
+            . ($result !== '' ? "\n\n<code>" . Format::escapeHtml(mb_substr($result, 0, 500)) . '</code>' : '');
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbRevoke(array $data): string
+    {
+        CpanelService::revokeDatabaseUser(self::accountClient(), (string) $data['user'], (string) $data['database']);
+
+        return '🚫 دسترسی <code>' . Format::escapeHtml((string) $data['user']) . '</code> از <code>'
+            . Format::escapeHtml((string) $data['database']) . '</code> برداشته شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runMysqlHostAdd(array $data): string
+    {
+        CpanelService::addRemoteMysqlHost(self::accountClient(), (string) $data['host']);
+
+        return '✅ <code>' . Format::escapeHtml((string) $data['host']) . '</code> حالا می‌تواند از راه دور به MySQL وصل شود.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runMysqlHostDel(array $data): string
+    {
+        CpanelService::deleteRemoteMysqlHost(self::accountClient(), (string) $data['host']);
+
+        return '🗑 دسترسی از راه دور <code>' . Format::escapeHtml((string) $data['host']) . '</code> حذف شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runRedirectAdd(array $data): string
+    {
+        CpanelService::addRedirect(
+            self::accountClient(),
+            (string) $data['domain'],
+            (string) $data['destination'],
+            (string) ($data['type'] ?? 'permanent'),
+        );
+
+        return '✅ <code>' . Format::escapeHtml((string) $data['domain']) . '</code> به <code>'
+            . Format::escapeHtml((string) $data['destination']) . '</code> ریدایرکت شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runRedirectDel(array $data): string
+    {
+        CpanelService::deleteRedirect(self::accountClient(), (string) $data['source']);
+
+        return '🗑 ریدایرکت حذف شد.';
     }
 
     /** @param array<string, mixed> $data */

@@ -582,6 +582,38 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains($text, 'WHM'), 'باید توضیح دهد کارهای سطح سرور با WHM ممکن است');
     });
 
+    scenario('منوی دیتابیس، پیشوند اجباری همان هاست را نشان می‌دهد', function (): void {
+        press('m:db');
+        $text = tg_last_text();
+        $buttons = tg_last_buttons();
+        expect(str_contains($text, 'demo_'), 'پیشوند زنده‌ی حساب باید نمایش داده شود');
+        expect(str_contains($text, 'سه قدم'), 'باید توضیح دهد وصل‌کردن دیتابیس چند قدم است');
+        foreach (['f:db_add', 'f:dbuser_add', 'f:db_grant', 'f:db_passwd', 'f:db_repair', 'a:mysqlhosts'] as $expected) {
+            expect(in_array($expected, $buttons, true), "دکمه‌ی $expected در منوی دیتابیس نبود");
+        }
+    });
+
+    scenario('ریدایرکت‌ها و میزبان‌های راه دور نمایش داده می‌شوند', function (): void {
+        press('a:redirects');
+        expect(str_contains(tg_last_text(), 'old.example.com'), 'ریدایرکت نمایش داده نشد');
+        expect(in_array('f:redirect_add', tg_last_buttons(), true), 'دکمه‌ی افزودن ریدایرکت نبود');
+
+        press('a:mysqlhosts');
+        expect(str_contains(tg_last_text(), '203.0.113.10'), 'میزبان راه دور نمایش داده نشد');
+    });
+
+    scenario('راهنمای کارهای رایج، قدم‌ها را با دکمه نشان می‌دهد', function (): void {
+        press('m:howto');
+        $buttons = tg_last_buttons();
+        expect(in_array('h:site', $buttons, true), 'راهنمای راه‌اندازی سایت نبود');
+
+        press('h:db');
+        $text = tg_last_text();
+        expect(str_contains($text, '۱️⃣'), 'قدم‌ها باید شماره‌گذاری شده باشند');
+        expect(in_array('f:db_add', tg_last_buttons(), true), 'دکمه‌ی قدم اول باید مستقیم به همان بخش برود');
+        expect(in_array('m:howto', tg_last_buttons(), true), 'دکمه‌ی بازگشت به راهنما باید باشد');
+    });
+
     scenario('لاگ عملیات، کار انجام‌شده را ثبت کرده است', function (): void {
         press('a:log');
         expect(str_contains(tg_last_text(), 'email_del'), 'عملیات حذف در لاگ نیست');

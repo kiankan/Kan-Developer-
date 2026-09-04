@@ -127,6 +127,23 @@ final class CpanelClient
     }
 
     /**
+     * API1 — قدیمی‌ترین گویش cPanel که ورودی‌هایش ترتیبی‌اند (arg-0، arg-1، ...).
+     * فقط برای چند تابع قدیمی که هنوز معادل جدید ندارند (مثل بکاپ کامل روی
+     * نسخه‌های قدیمی) لازم می‌شود.
+     *
+     * @param array<int, string> $args
+     */
+    public function api1(string $module, string $function, array $args = []): mixed
+    {
+        $params = [];
+        foreach (array_values($args) as $index => $value) {
+            $params['arg-' . $index] = $value;
+        }
+
+        return $this->jsonApiCpanel(1, $module, $function, $params);
+    }
+
+    /**
      * آپلود فایل با UAPI (multipart/form-data).
      *
      * @param array<string, mixed> $params

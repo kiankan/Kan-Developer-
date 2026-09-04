@@ -249,6 +249,25 @@ final class Render
         return implode("\n", $lines);
     }
 
+    /**
+     * @param array<int, array{source: string, destination: string, type: string}> $redirects
+     */
+    public static function redirects(array $redirects): string
+    {
+        if ($redirects === []) {
+            return "↪️ هیچ ریدایرکتی تعریف نشده.\n\nریدایرکت یعنی هر کسی آدرس اول را باز کرد، خودکار به آدرس دوم برود.";
+        }
+
+        $lines = ['↪️ <b>ریدایرکت‌ها</b> (' . count($redirects) . ')', ''];
+        foreach ($redirects as $redirect) {
+            $type = str_contains(strtolower($redirect['type']), 'perm') ? '301 دائمی' : '302 موقت';
+            $lines[] = '• <code>' . self::e($redirect['source']) . '</code> → <code>'
+                . self::e($redirect['destination']) . "</code>\n   ({$type})";
+        }
+
+        return implode("\n", $lines);
+    }
+
     public static function ssl(array $hosts): string
     {
         if ($hosts === []) {

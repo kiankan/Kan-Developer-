@@ -525,6 +525,88 @@ check('افزودن رکورد روی مسیر API2 فیلد درست هر نو�
     }
 });
 
+check('بکاپ کامل روی نسخه‌های قدیمی با API1 گرفته می‌شود', function (): void {
+    $missing = '{"status":0,"errors":["Failed to load module “Backup”"]}';
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $missing],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":{"result":"ok"}}}'],
+    ], $captured));
+
+    CpanelService::fullBackup($client, 'me@example.com');
+
+    assertSame(2, count($captured), 'باید بعد از شکست UAPI سراغ API1 برود');
+    $body = urldecode($captured[1]['body']);
+    assertTrue(str_contains($body, 'cpanel_jsonapi_apiversion=1'), "باید API1 باشد: {$body}");
+    assertTrue(str_contains($body, 'cpanel_jsonapi_func=fullbackup'), 'تابع باید fullbackup باشد');
+    assertTrue(str_contains($body, 'arg-0=homedir'), 'مقصد بکاپ باید هوم باشد');
+    assertTrue(str_contains($body, 'arg-1=me@example.com'), 'ایمیل اطلاع‌رسانی باید ارسال شود');
+});
+
+check('بکاپ: خطاهای واقعی پنهان نمی‌شوند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(
+        ['body' => '{"status":0,"errors":["Backups are disabled by your hosting provider."]}'],
+        $captured,
+    ));
+
+    $error = assertThrows(static fn () => CpanelService::fullBackup($client), CpanelError::KIND_API);
+    assertTrue(str_contains($error->getMessage(), 'disabled'), 'پیام واقعی باید به کاربر برسد');
+    assertSame(1, count($captured), 'خطای غیرمرتبط نباید تلاش دوباره کند');
+});
+
+check('فهرست بکاپ‌ها: اگر تابعش نبود، پوشه‌ی هوم اسکن می‌شود', function (): void {
+    $captured = [];
+    $files = json_encode(['status' => 1, 'data' => [
+        ['file' => 'backup-9.3.2026_demo.tar.gz', 'type' => 'file', 'size' => 1048576, 'mtime' => 1756900000],
+        ['file' => 'public_html', 'type' => 'dir', 'size' => 4096],
+        ['file' => 'notes.txt', 'type' => 'file', 'size' => 10],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["Failed to load module “Backup”"]}'],
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],
+        ['body' => (string) $files],
+    ], $captured));
+
+    $backups = CpanelService::listBackups($client);
+
+    assertSame(1, count($backups), 'فقط فایل‌های بکاپ باید برگردند');
+    assertSame('backup-9.3.2026_demo.tar.gz', $backups[0]['name']);
+});
+
+check('تعمیر دیتابیس، تابع درست را صدا می‌زند', function (): void {
+    foreach ([[true, 'repair_database'], [false, 'check_database']] as [$repair, $expected]) {
+        $captured = [];
+        $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"message":"OK"}}'], $captured));
+        $result = CpanelService::repairDatabase($client, 'demo_shop', $repair);
+
+        assertTrue(str_contains($captured[0]['url'], $expected), "باید {$expected} صدا زده شود");
+        assertSame('OK', $result);
+    }
+});
+
+check('ریدایرکت با نوع درست ساخته می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{}}'], $captured));
+    CpanelService::addRedirect($client, 'example.com', 'https://new.example.com', 'temporary');
+
+    $body = urldecode($captured[0]['body']);
+    assertTrue(str_contains($captured[0]['url'], 'Mime/add_redirect'), 'باید Mime::add_redirect باشد');
+    assertTrue(str_contains($body, 'type=temporary'), "نوع ریدایرکت درست نرفت: {$body}");
+    assertTrue(str_contains($body, 'redirect=https://new.example.com'), 'مقصد ارسال نشد');
+});
+
+check('میزبان‌های راه دور MySQL روی نسخه‌های قدیمی از API2 خوانده می‌شوند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["Failed to load module “Mysql”"]}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{"host":"203.0.113.10"}]}}'],
+    ], $captured));
+
+    assertSame(['203.0.113.10'], CpanelService::remoteMysqlHosts($client));
+    assertTrue(str_contains($captured[1]['body'], 'cpanel_jsonapi_module=MysqlFE'), 'باید MysqlFE صدا زده شود');
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {
