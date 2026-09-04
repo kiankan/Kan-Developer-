@@ -127,6 +127,38 @@ final class CpanelClient
     }
 
     /**
+     * آپلود فایل با UAPI (multipart/form-data).
+     *
+     * @param array<string, mixed> $params
+     */
+    public function uploadFile(string $module, string $function, array $params, string $fieldName, string $fileName, string $contents): mixed
+    {
+        if ($this->isWhm()) {
+            throw CpanelError::config(
+                'آپلود فایل فقط با توکن خود حساب cPanel کار می‌کند؛ برای این هاست یک سرور از نوع cpanel اضافه کنید.'
+            );
+        }
+
+        $boundary = '----teamkan' . bin2hex(random_bytes(12));
+        $body = '';
+        foreach ($params as $key => $value) {
+            $body .= "--{$boundary}\r\n"
+                . 'Content-Disposition: form-data; name="' . $key . "\"\r\n\r\n"
+                . self::scalar($value) . "\r\n";
+        }
+        $body .= "--{$boundary}\r\n"
+            . 'Content-Disposition: form-data; name="' . $fieldName . '"; filename="' . str_replace('"', '', $fileName) . "\"\r\n"
+            . "Content-Type: application/octet-stream\r\n\r\n"
+            . $contents . "\r\n"
+            . "--{$boundary}--\r\n";
+
+        $url = $this->baseUrl() . '/execute/' . rawurlencode($module) . '/' . rawurlencode($function);
+        $decoded = $this->sendRaw($url, $body, 'multipart/form-data; boundary=' . $boundary);
+
+        return $this->unwrapUapi($decoded, "{$module}::{$function}");
+    }
+
+    /**
      * WHM API نسخه‌ی ۱ (فقط روی سرورهای از نوع WHM).
      *
      * @param array<string, mixed> $params
@@ -289,11 +321,18 @@ final class CpanelClient
      */
     private function send(string $url, array $params): array
     {
-        $body = self::buildQuery($params);
+        return $this->sendRaw($url, self::buildQuery($params), 'application/x-www-form-urlencoded');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sendRaw(string $url, string $body, string $contentType): array
+    {
         $headers = [
             'Authorization: ' . $this->authHeader(),
             'Accept: application/json',
-            'Content-Type: application/x-www-form-urlencoded',
+            'Content-Type: ' . $contentType,
         ];
 
         $response = ($this->transport ?? self::curlTransport(...))($url, $body, $headers, $this->verifySsl());

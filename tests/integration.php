@@ -73,6 +73,8 @@ function tg_calls(): array
 }
 
 /**
+ * پیام‌های تازه‌ی ربات.
+ *
  * @return array<int, array{method: string, params: array<string, mixed>}>
  */
 function tg_messages(): array
@@ -80,10 +82,29 @@ function tg_messages(): array
     return array_values(array_filter(tg_calls(), static fn (array $call): bool => $call['method'] === 'sendMessage'));
 }
 
+/**
+ * هر چیزی که کاربر در نهایت روی صفحه می‌بیند — چه پیام تازه، چه ویرایش پیام
+ * قبلی (ربات تا جای ممکن همان پیام را ویرایش می‌کند).
+ *
+ * @return array<int, array{method: string, params: array<string, mixed>}>
+ */
+function tg_screens(): array
+{
+    return array_values(array_filter(
+        tg_calls(),
+        static fn (array $call): bool => in_array($call['method'], ['sendMessage', 'editMessageText'], true),
+    ));
+}
+
+function tg_edits(): int
+{
+    return count(array_filter(tg_calls(), static fn (array $call): bool => $call['method'] === 'editMessageText'));
+}
+
 function tg_last_text(): string
 {
-    $messages = tg_messages();
-    $last = end($messages);
+    $screens = tg_screens();
+    $last = end($screens);
 
     return $last === false ? '' : (string) ($last['params']['text'] ?? '');
 }
@@ -93,8 +114,8 @@ function tg_last_text(): string
  */
 function tg_last_buttons(): array
 {
-    $messages = tg_messages();
-    $last = end($messages);
+    $screens = tg_screens();
+    $last = end($screens);
     if ($last === false || !isset($last['params']['reply_markup'])) {
         return [];
     }
@@ -117,6 +138,17 @@ function send_text(string $text, int $from = 555): void
         'chat' => ['id' => 555],
         'from' => ['id' => $from],
         'text' => $text,
+    ]);
+}
+
+function send_document(string $name, int $size = 2048, int $from = 555): void
+{
+    global $api;
+    UpdateHandler::handle($api, [
+        'message_id' => random_int(1, 999),
+        'chat' => ['id' => 555],
+        'from' => ['id' => $from],
+        'document' => ['file_id' => 'FILE123', 'file_name' => $name, 'file_size' => $size],
     ]);
 }
 
@@ -173,12 +205,16 @@ scenario('کد نصب درست، فرستنده را مالک می‌کند و �
     expect(Admins::claimCode() !== $code, 'کد نصب باید یک‌بارمصرف باشد');
 });
 
-scenario('/start منوی اصلی را با دکمه‌های شیشه‌ای می‌فرستد', function (): void {
+scenario('نصب تازه: منو فقط سرورها و راهنما را نشان می‌دهد', function (): void {
     send_text('/start');
     $buttons = tg_last_buttons();
     expect($buttons !== [], 'هیچ دکمه‌ای فرستاده نشد');
-    foreach (['a:summary', 'm:email', 'm:db', 'm:srv', 'm:whm'] as $expected) {
-        expect(in_array($expected, $buttons, true), "دکمه‌ی $expected در منوی اصلی نبود");
+    expect(in_array('m:srv', $buttons, true), 'دکمه‌ی سرورها باید باشد');
+    expect(in_array('a:help', $buttons, true), 'دکمه‌ی راهنما باید باشد');
+
+    // تا وقتی هاستی تعریف نشده، دکمه‌ای که فقط خطا می‌دهد نباید نشان داده شود.
+    foreach (['a:summary', 'm:email', 'm:db', 'm:whm', 'm:files'] as $unexpected) {
+        expect(!in_array($unexpected, $buttons, true), "دکمه‌ی $unexpected نباید در نصب تازه باشد");
     }
 });
 
@@ -188,6 +224,10 @@ scenario('غیر ادمین هیچ پاسخی نمی‌گیرد', function (): v
 });
 
 scenario('منوی ایمیل دکمه‌های عملیات را دارد', function (): void {
+    // برای دیدن منوهای سطح حساب، اول یک هاست تعریف می‌کنیم.
+    $temp = ServerStore::add(['label' => 'موقت', 'type' => 'cpanel', 'host' => '127.0.0.1:1', 'user' => 'u', 'token' => 't']);
+    ServerStore::setActive($temp);
+
     press('m:email');
     $buttons = tg_last_buttons();
     foreach (['a:emails', 'f:email_add', 'f:email_del', 'f:email_passwd', 'menu'] as $expected) {
@@ -195,7 +235,66 @@ scenario('منوی ایمیل دکمه‌های عملیات را دارد', fun
     }
 });
 
+scenario('هاست اشتراکی: دکمه‌های سطح حساب می‌آیند و WHM نه', function (): void {
+    press('menu');
+    $buttons = tg_last_buttons();
+    foreach (['a:summary', 'm:email', 'm:db', 'm:files', 'm:cron'] as $expected) {
+        expect(in_array($expected, $buttons, true), "دکمه‌ی $expected برای هاست cPanel باید باشد");
+    }
+    expect(!in_array('m:whm', $buttons, true), 'روی هاست cPanel نباید منوی WHM بیاید');
+});
+
+scenario('سرور WHM: اول فقط کارهای سطح سرور، بعد از انتخاب کاربر هم سطح حساب', function (): void {
+    foreach (array_keys(ServerStore::all()) as $id) {
+        ServerStore::delete($id);
+    }
+    $whm = ServerStore::add(['label' => 'WHM تستی', 'type' => 'whm', 'host' => '127.0.0.1:1', 'user' => 'root', 'token' => 't']);
+    ServerStore::setActive($whm);
+
+    press('menu');
+    $buttons = tg_last_buttons();
+    expect(in_array('m:whm', $buttons, true), 'منوی WHM باید باشد');
+    expect(in_array('f:whm_user', $buttons, true), 'دکمه‌ی انتخاب کاربر مقصد باید باشد');
+    expect(!in_array('m:email', $buttons, true), 'تا کاربر مقصد انتخاب نشده، کارهای سطح حساب نباید بیایند');
+
+    ServerStore::setAsUser($whm, 'ali');
+    press('menu');
+    $buttons = tg_last_buttons();
+    expect(in_array('m:email', $buttons, true), 'بعد از انتخاب کاربر مقصد، کارهای سطح حساب باید بیایند');
+    expect(in_array('m:whm', $buttons, true), 'منوی WHM هم باید بماند');
+
+    ServerStore::delete($whm);
+});
+
+scenario('هر منو دکمه‌ی بازگشت دارد', function (): void {
+    $temp = ServerStore::add(['label' => 'موقت', 'type' => 'cpanel', 'host' => '127.0.0.1:1', 'user' => 'u', 'token' => 't']);
+    ServerStore::setActive($temp);
+
+    foreach (['email', 'db', 'dom', 'files', 'ftp', 'cron', 'dns', 'php', 'backup', 'srv', 'adm'] as $menu) {
+        press('m:' . $menu);
+        $buttons = tg_last_buttons();
+        $hasBack = in_array('menu', $buttons, true) || count(array_filter($buttons, static fn (string $b): bool => str_starts_with($b, 'm:'))) > 0;
+        expect($hasBack, "منوی $menu دکمه‌ی بازگشت ندارد");
+    }
+
+    ServerStore::delete($temp);
+});
+
+scenario('دکمه‌ها همان پیام را ویرایش می‌کنند، نه اینکه پیام تازه بفرستند', function (): void {
+    send_text('/panel');            // یک صفحه می‌سازیم
+    $before = count(tg_messages());
+    press('m:srv');
+    press('menu');
+    press('a:help');
+    expect(count(tg_messages()) === $before, 'زدن دکمه نباید پیام تازه بسازد');
+    expect(tg_edits() >= 3, 'هر دکمه باید همان پیام را ویرایش کند');
+});
+
 scenario('افزودن سرور: نوع اتصال با دکمه پرسیده می‌شود', function (): void {
+    foreach (array_keys(ServerStore::all()) as $id) {
+        ServerStore::delete($id);
+    }
+
     press('f:srv_add');
     expect(str_contains(tg_last_text(), 'اسم دلخواه'), 'مرحله‌ی اول باید اسم سرور را بپرسد');
 
@@ -410,6 +509,77 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains($text, 'کدام رکورد'), 'مرحله‌ی انتخاب رکورد نیامد');
         expect(count(tg_last_buttons()) >= 1, 'رکوردی به‌صورت دکمه نیامد');
         send_text('/cancel');
+    });
+
+    scenario('مرور فایل‌های هاست با دکمه انجام می‌شود', function (): void {
+        press('a:files');
+        $text = tg_last_text();
+        $buttons = tg_last_buttons();
+        expect(str_contains($text, '/home/demo'), 'مسیر پوشه‌ی هوم باید نمایش داده شود');
+        expect(in_array('fb:0', $buttons, true), 'پوشه‌ها باید دکمه شوند');
+        expect(in_array('ff:2', $buttons, true), 'فایل‌ها هم باید دکمه شوند');
+        expect(in_array('fup', $buttons, true), 'دکمه‌ی آپلود در همین پوشه باید باشد');
+        expect(in_array('m:files', $buttons, true), 'دکمه‌ی بازگشت باید باشد');
+    });
+
+    scenario('ورود به پوشه و برگشتن به پوشه‌ی بالاتر', function (): void {
+        // فهرست مرتب می‌شود (اول پوشه‌ها، الفبایی)، پس public_html دکمه‌ی دوم است.
+        press('fb:1');
+        expect(str_contains(tg_last_text(), '/home/demo/public_html'), 'باید وارد public_html شود');
+
+        press('fbu');
+        expect(str_contains(tg_last_text(), '📂 <b>/home/demo</b>'), 'دکمه‌ی «پوشه‌ی بالاتر» باید برگرداند');
+    });
+
+    scenario('روی فایل آرشیو، دکمه‌ی باز کردن پیشنهاد می‌شود', function (): void {
+        press('ff:2');
+        $buttons = tg_last_buttons();
+        expect(str_contains(tg_last_text(), 'site.zip'), 'نام فایل باید نشان داده شود');
+        expect(in_array('fx:2', $buttons, true), 'برای zip باید دکمه‌ی باز کردن بیاید');
+        expect(in_array('fd:2', $buttons, true), 'دکمه‌ی حذف باید بیاید');
+        press('fbr');
+    });
+
+    scenario('آپلود سورس: فایل تلگرام روی هاست گذاشته می‌شود', function (): void {
+        press('fup');
+        expect(str_contains(tg_last_text(), 'فایل'), 'باید فایل بخواهد');
+
+        send_text('یک متن به‌جای فایل');
+        expect(str_contains(tg_last_text(), 'Document'), 'متن به‌جای فایل باید رد شود');
+
+        send_document('site.zip', 2048);
+
+        $uploads = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'upload_files'));
+        expect($uploads !== [], 'درخواست آپلود به cPanel نرفت');
+        $body = (string) (array_values($uploads)[0]['body'] ?? '');
+        expect(str_contains($body, 'filename="site.zip"'), 'نام فایل در بدنه‌ی multipart نبود');
+        expect(str_contains($body, 'FAKE-ARCHIVE-CONTENT'), 'محتوای فایل ارسال نشد');
+        expect(str_contains($body, 'name="dir"'), 'مسیر مقصد ارسال نشد');
+        expect(str_contains(tg_last_text(), 'آپلود شد'), 'پیام موفقیت نیامد');
+        expect(in_array('fx:0', tg_last_buttons(), true), 'برای آرشیو باید دکمه‌ی باز کردن بیاید');
+    });
+
+    scenario('باز کردن آرشیو، fileop استخراج را صدا می‌زند', function (): void {
+        press('fx:0');
+        $extracts = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains(urldecode($c['body']), 'op=extract'));
+        expect($extracts !== [], 'درخواست استخراج فرستاده نشد');
+        expect(str_contains(tg_last_text(), 'آرشیو باز شد'), 'پیام موفقیت استخراج نیامد');
+    });
+
+    scenario('فورواردهای ایمیل و بکاپ‌ها نمایش داده می‌شوند', function (): void {
+        press('a:forwarders');
+        expect(str_contains(tg_last_text(), 'info@example.com'), 'فوروارد نمایش داده نشد');
+        expect(in_array('f:fwd_add', tg_last_buttons(), true), 'دکمه‌ی افزودن فوروارد نبود');
+
+        press('a:backups');
+        expect(str_contains(tg_last_text(), 'backup-9.3.2026'), 'بکاپ نمایش داده نشد');
+    });
+
+    scenario('صفحه‌ی قابلیت‌ها متناسب با نوع هاست است', function (): void {
+        press('a:features');
+        $text = tg_last_text();
+        expect(str_contains($text, 'cPanel'), 'باید بگوید قابلیت‌های هاست cPanel');
+        expect(str_contains($text, 'WHM'), 'باید توضیح دهد کارهای سطح سرور با WHM ممکن است');
     });
 
     scenario('لاگ عملیات، کار انجام‌شده را ثبت کرده است', function (): void {

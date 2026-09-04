@@ -642,7 +642,240 @@ final class CpanelService
         $client->uapi('LangPHP', 'php_set_vhost_lang_version', ['vhost' => $vhost, 'version' => $version]);
     }
 
+    // ----------------------------------------------------------- فایل‌ها
+
+    /**
+     * فهرست فایل‌ها و پوشه‌های یک مسیر.
+     *
+     * @return array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int}>
+     */
+    public static function listFiles(CpanelClient $client, string $dir): array
+    {
+        $dir = self::normalizePath($dir);
+        $raw = self::uapiOrApi2(
+            $client,
+            ['Fileman', 'list_files', ['dir' => $dir, 'include_mime' => 0]],
+            ['Fileman', 'listfiles', ['dir' => $dir, 'types' => 'dir|file']],
+        );
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = (string) ($row['file'] ?? ($row['filename'] ?? ($row['name'] ?? '')));
+            if ($name === '' || $name === '.' || $name === '..') {
+                continue;
+            }
+            $type = strtolower((string) ($row['type'] ?? ''));
+            $out[] = [
+                'name' => $name,
+                'path' => rtrim($dir, '/') . '/' . $name,
+                'dir' => $type === 'dir' || $type === 'directory' || (bool) ($row['isdir'] ?? false),
+                'size' => self::numberOrNull($row['size'] ?? ($row['humansize'] ?? null)),
+                'mtime' => isset($row['mtime']) ? (int) $row['mtime'] : null,
+            ];
+        }
+
+        usort($out, static function (array $a, array $b): int {
+            if ($a['dir'] !== $b['dir']) {
+                return $a['dir'] ? -1 : 1;
+            }
+
+            return strcasecmp($a['name'], $b['name']);
+        });
+
+        return $out;
+    }
+
+    /**
+     * فرستادن یک فایل به هاست (همان چیزی که در تلگرام آپلود شده).
+     */
+    public static function uploadFile(CpanelClient $client, string $dir, string $name, string $contents): void
+    {
+        $client->uploadFile(
+            'Fileman',
+            'upload_files',
+            ['dir' => self::normalizePath($dir), 'overwrite' => 1],
+            'file-1',
+            $name,
+            $contents,
+        );
+    }
+
+    /**
+     * باز کردن آرشیو (zip/tar.gz) روی خود هاست — قدم آخر «سورس را بگذار روی هاست».
+     */
+    public static function extractArchive(CpanelClient $client, string $archivePath, string $destination = ''): void
+    {
+        $archivePath = self::normalizePath($archivePath);
+        $destination = $destination === '' ? dirname($archivePath) : self::normalizePath($destination);
+
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'extract',
+            'sourcefiles' => $archivePath,
+            'destfiles' => $destination,
+            'doubledecode' => 0,
+        ]);
+    }
+
+    public static function deletePath(CpanelClient $client, string $path): void
+    {
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'unlink',
+            'sourcefiles' => self::normalizePath($path),
+            'doubledecode' => 0,
+        ]);
+    }
+
+    public static function makeDirectory(CpanelClient $client, string $dir, string $name): void
+    {
+        $client->api2('Fileman', 'mkdir', ['path' => self::normalizePath($dir), 'name' => $name]);
+    }
+
+    public static function readFile(CpanelClient $client, string $path): string
+    {
+        $raw = $client->uapi('Fileman', 'get_file_content', [
+            'dir' => dirname(self::normalizePath($path)),
+            'file' => basename($path),
+        ]);
+
+        if (is_array($raw)) {
+            return (string) ($raw['content'] ?? '');
+        }
+
+        return (string) $raw;
+    }
+
+    /**
+     * پوشه‌ی هوم حساب — نقطه‌ی شروع مرور فایل‌ها.
+     */
+    public static function homeDir(CpanelClient $client): string
+    {
+        $info = self::softCall(fn () => $client->uapi('Variables', 'get_user_information'), null);
+        if (is_array($info) && trim((string) ($info['home'] ?? '')) !== '') {
+            return self::normalizePath((string) $info['home']);
+        }
+
+        $user = $client->targetUser();
+
+        return $user !== '' ? "/home/{$user}" : '/home';
+    }
+
+    public static function isArchive(string $name): bool
+    {
+        return (bool) preg_match('/\.(zip|tar|tgz|tar\.gz|tar\.bz2|gz|bz2|rar|7z)$/i', trim($name));
+    }
+
+    /**
+     * مسیرها همیشه مطلق و بدون اسلش اضافه.
+     */
+    public static function normalizePath(string $path): string
+    {
+        $path = trim($path);
+        $path = (string) preg_replace('#/+#', '/', $path);
+        $path = rtrim($path, '/');
+
+        return $path === '' ? '/' : $path;
+    }
+
+    // ------------------------------------------------------ فورواردر ایمیل
+
+    /**
+     * @return array<int, array{from: string, to: string}>
+     */
+    public static function emailForwarders(CpanelClient $client, string $domain = ''): array
+    {
+        $params = $domain !== '' ? ['domain' => $domain] : [];
+        $raw = self::uapiOrApi2($client, ['Email', 'list_forwarders', $params], ['Email', 'listforwards', $params]);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[] = [
+                'from' => (string) ($row['dest'] ?? ($row['forward'] ?? '')),
+                'to' => (string) ($row['forward'] ?? ($row['dest'] ?? '')),
+            ];
+        }
+
+        // UAPI کلیدها را برعکس API2 می‌دهد؛ با نگاه‌کردن به «@» درستش می‌کنیم.
+        foreach ($out as $index => $row) {
+            if (!str_contains($row['from'], '@') && str_contains($row['to'], '@')) {
+                $out[$index] = ['from' => $row['to'], 'to' => $row['from']];
+            }
+        }
+
+        return $out;
+    }
+
+    public static function addForwarder(CpanelClient $client, string $address, string $destination): void
+    {
+        [$local, $domain] = self::splitEmail($address);
+        self::uapiOrApi2(
+            $client,
+            ['Email', 'add_forwarder', ['domain' => $domain, 'email' => $local, 'fwdopt' => 'fwd', 'fwdemail' => $destination]],
+            ['Email', 'addforward', ['domain' => $domain, 'email' => $local, 'fwdopt' => 'fwd', 'fwdemail' => $destination]],
+        );
+    }
+
+    public static function deleteForwarder(CpanelClient $client, string $address, string $destination): void
+    {
+        self::uapiOrApi2(
+            $client,
+            ['Email', 'delete_forwarder', ['address' => $address, 'forwarder' => $destination]],
+            ['Email', 'delforward', ['emaildest' => $destination, 'email' => $address]],
+        );
+    }
+
+    /**
+     * ایمیلی که خروجی کران‌ها به آن فرستاده می‌شود.
+     */
+    public static function cronEmail(CpanelClient $client): string
+    {
+        $raw = self::softCall(fn () => self::uapiOrApi2($client, ['Cron', 'get_email'], ['Cron', 'get_email']), null);
+        if (is_array($raw)) {
+            return (string) ($raw['email'] ?? ($raw[0]['email'] ?? ''));
+        }
+
+        return (string) $raw;
+    }
+
+    public static function setCronEmail(CpanelClient $client, string $email): void
+    {
+        self::uapiOrApi2($client, ['Cron', 'set_email', ['email' => $email]], ['Cron', 'set_email', ['email' => $email]]);
+    }
+
     // --------------------------------------------------------------- بکاپ
+
+    /**
+     * بکاپ‌هایی که روی حساب موجودند.
+     *
+     * @return array<int, array{name: string, size: ?float, time: ?int}>
+     */
+    public static function listBackups(CpanelClient $client): array
+    {
+        $raw = self::softCall(fn () => $client->uapi('Backup', 'list_backups'), []);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (is_string($row)) {
+                $out[] = ['name' => $row, 'size' => null, 'time' => null];
+                continue;
+            }
+            if (!is_array($row)) {
+                continue;
+            }
+            $out[] = [
+                'name' => (string) ($row['file'] ?? ($row['name'] ?? '')),
+                'size' => self::numberOrNull($row['size'] ?? null),
+                'time' => isset($row['time']) ? (int) $row['time'] : null,
+            ];
+        }
+
+        return $out;
+    }
 
     public static function fullBackup(CpanelClient $client, string $notifyEmail = ''): void
     {
@@ -745,6 +978,16 @@ final class CpanelService
         }
 
         return array_values(array_filter($out));
+    }
+
+    public static function whmChangePackage(CpanelClient $client, string $user, string $package): void
+    {
+        $client->whm('changepackage', ['user' => $user, 'pkg' => $package]);
+    }
+
+    public static function whmRestartService(CpanelClient $client, string $service): void
+    {
+        $client->whm('restartservice', ['service' => $service]);
     }
 
     /**

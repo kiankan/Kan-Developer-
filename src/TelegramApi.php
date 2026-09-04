@@ -57,7 +57,7 @@ final class TelegramApi
         return is_array($result) ? $result : [];
     }
 
-    public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null, ?string $parseMode = null): void
+    public function sendMessage(int $chatId, string $text, ?array $replyMarkup = null, ?string $parseMode = null): ?int
     {
         $params = ['chat_id' => $chatId, 'text' => $text];
         if ($replyMarkup !== null) {
@@ -66,20 +66,98 @@ final class TelegramApi
         if ($parseMode !== null) {
             $params['parse_mode'] = $parseMode;
         }
-        $this->call('sendMessage', $params);
+        $result = $this->call('sendMessage', $params);
+
+        return is_array($result) && isset($result['message_id']) ? (int) $result['message_id'] : null;
     }
 
     /**
      * پیام HTML که اگه از سقف ۴۰۹۶ کاراکتری تلگرام بلندتر باشه، خودکار تکه
      * می‌شه؛ کیبورد فقط به آخرین تکه می‌چسبه.
+     *
+     * @return int|null شناسه‌ی آخرین پیام فرستاده‌شده (برای ویرایش‌های بعدی)
      */
-    public function sendHtml(int $chatId, string $html, ?array $replyMarkup = null): void
+    public function sendHtml(int $chatId, string $html, ?array $replyMarkup = null): ?int
     {
         $chunks = Render::chunks($html);
         $last = count($chunks) - 1;
+        $messageId = null;
         foreach ($chunks as $index => $chunk) {
-            $this->sendMessage($chatId, $chunk, $index === $last ? $replyMarkup : null, 'HTML');
+            $messageId = $this->sendMessage($chatId, $chunk, $index === $last ? $replyMarkup : null, 'HTML');
         }
+
+        return $messageId;
+    }
+
+    /**
+     * ویرایش همان پیام، به‌جای فرستادن پیام جدید — تا با هر دکمه چت پر نشود.
+     *
+     * @return bool اگر false برگشت یعنی نشد ویرایش کرد و باید پیام تازه فرستاد
+     */
+    public function editHtml(int $chatId, int $messageId, string $html, ?array $replyMarkup = null): bool
+    {
+        $params = [
+            'chat_id' => $chatId,
+            'message_id' => $messageId,
+            'text' => $html,
+            'parse_mode' => 'HTML',
+        ];
+        if ($replyMarkup !== null) {
+            $params['reply_markup'] = json_encode($replyMarkup);
+        }
+
+        try {
+            $this->call('editMessageText', $params);
+
+            return true;
+        } catch (Throwable $e) {
+            // «not modified» یعنی همین حالا هم همان چیزی که می‌خواستیم روی
+            // صفحه است؛ خطا نیست.
+            return str_contains($e->getMessage(), 'not modified');
+        }
+    }
+
+    /**
+     * اطلاعات یک فایل آپلودشده در تلگرام (برای دانلود و فرستادنش به هاست).
+     *
+     * @return array{file_path: string, file_size: int}
+     */
+    public function getFile(string $fileId): array
+    {
+        $result = $this->call('getFile', ['file_id' => $fileId]);
+        $path = is_array($result) ? (string) ($result['file_path'] ?? '') : '';
+        if ($path === '') {
+            throw new RuntimeException('تلگرام مسیر فایل را برنگرداند.');
+        }
+
+        return ['file_path' => $path, 'file_size' => (int) ($result['file_size'] ?? 0)];
+    }
+
+    /**
+     * دانلود محتوای فایل از تلگرام.
+     */
+    public function downloadFile(string $filePath): string
+    {
+        $url = self::baseUrl() . '/file/bot' . $this->token . '/' . ltrim($filePath, '/');
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 120,
+        ]);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            throw new RuntimeException("دانلود فایل از تلگرام نشد: $error");
+        }
+        if ($status !== 200) {
+            throw new RuntimeException("دانلود فایل از تلگرام نشد (HTTP $status).");
+        }
+
+        return (string) $body;
     }
 
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void

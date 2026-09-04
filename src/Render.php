@@ -189,6 +189,66 @@ final class Render
         return implode("\n", $lines);
     }
 
+    /**
+     * @param array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int}> $entries
+     */
+    public static function files(string $dir, array $entries): string
+    {
+        $lines = ['📂 <b>' . self::e($dir) . '</b>'];
+        if ($entries === []) {
+            $lines[] = '';
+            $lines[] = 'این پوشه خالی است.';
+
+            return implode("\n", $lines);
+        }
+
+        $dirs = count(array_filter($entries, static fn (array $entry): bool => $entry['dir']));
+        $lines[] = $dirs . ' پوشه، ' . (count($entries) - $dirs) . ' فایل';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{from: string, to: string}> $forwarders
+     */
+    public static function forwarders(array $forwarders): string
+    {
+        if ($forwarders === []) {
+            return "📮 هیچ فورواردی تعریف نشده.\n\nفوروارد یعنی هر ایمیلی که به یک آدرس می‌رسد، خودکار به آدرس دیگری هم فرستاده شود.";
+        }
+
+        $lines = ['📮 <b>فورواردهای ایمیل</b> (' . count($forwarders) . ')', ''];
+        foreach ($forwarders as $forwarder) {
+            $lines[] = '• <code>' . self::e($forwarder['from']) . '</code> ← ' . self::e($forwarder['to']);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{name: string, size: ?float, time: ?int}> $backups
+     */
+    public static function backups(array $backups): string
+    {
+        if ($backups === []) {
+            return '💾 بکاپی روی این حساب پیدا نشد. با «گرفتن بکاپ کامل» یکی بسازید.';
+        }
+
+        $lines = ['💾 <b>بکاپ‌های موجود</b> (' . count($backups) . ')', ''];
+        foreach ($backups as $backup) {
+            $line = '• <code>' . self::e($backup['name']) . '</code>';
+            if ($backup['size'] !== null) {
+                $line .= ' — ' . Format::bytes($backup['size']);
+            }
+            $lines[] = $line;
+            if ($backup['time'] !== null) {
+                $lines[] = '   📅 ' . self::e(Format::timestampWithRemaining($backup['time']));
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
     public static function ssl(array $hosts): string
     {
         if ($hosts === []) {

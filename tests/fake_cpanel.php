@@ -73,6 +73,19 @@ while (time() < $deadline) {
             'sub_domains' => ['shop.example.com'],
             'parked_domains' => [],
         ]],
+        str_contains($path, 'Variables/get_user_information') && false => [],
+        str_contains($path, 'Fileman/list_files') => ['status' => 1, 'data' => [
+            ['file' => 'public_html', 'type' => 'dir', 'size' => 4096],
+            ['file' => 'logs', 'type' => 'dir', 'size' => 4096],
+            ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
+        ]],
+        str_contains($path, 'Fileman/upload_files') => ['status' => 1, 'data' => ['uploads' => [['status' => 1, 'file' => 'ok']]]],
+        str_contains($path, 'Email/list_forwarders') => ['status' => 1, 'data' => [
+            ['dest' => 'info@example.com', 'forward' => 'kian@gmail.com'],
+        ]],
+        str_contains($path, 'Backup/list_backups') => ['status' => 1, 'data' => [
+            ['file' => 'backup-9.3.2026_00-00-00_demo.tar.gz', 'size' => 10485760, 'time' => 1756900000],
+        ]],
         str_contains($path, 'DNS/parse_zone') => ['status' => 1, 'data' => [
             ['type' => 'record', 'line_index' => 8, 'record_type' => 'SOA', 'dname_b64' => base64_encode('example.com.'),
                 'data_b64' => $b64(['ns1.example.com.', 'root.example.com.', '2024010101'])],

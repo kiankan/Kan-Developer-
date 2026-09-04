@@ -19,6 +19,18 @@ final class UpdateHandler
     private static string $actor = 'unknown';
 
     /**
+     * پیامی که «صفحه‌ی» فعلی ربات است. تا جای ممکن همین پیام ویرایش می‌شود
+     * تا با هر دکمه یک پیام تازه به چت اضافه نشود.
+     */
+    private static ?int $screen = null;
+
+    /** وضعیت مرور فایل‌ها (جریان نیست، فقط یک صفحه‌ی زنده است). */
+    private const BROWSE = '__browse';
+
+    /** حداکثر حجم فایلی که تلگرام اجازه‌ی دانلودش را به ربات می‌دهد. */
+    private const MAX_UPLOAD = 20 * 1024 * 1024;
+
+    /**
      * تعریف جریان‌های چندمرحله‌ای.
      *
      * scope: account = نیازمند حساب cPanel (روی WHM باید کاربر مقصد ست باشد)،
@@ -37,6 +49,7 @@ final class UpdateHandler
         'email_add' => [
             'title' => '✉️ افزودن حساب ایمیل',
             'scope' => 'account',
+            'back' => 'email',
             'steps' => [
                 ['key' => 'domain', 'prompt' => 'ایمیل روی کدام دامنه ساخته شود؟', 'picker' => 'domains'],
                 ['key' => 'local', 'prompt' => 'بخش قبل از @ را بفرستید (مثل <code>info</code>):'],
@@ -47,6 +60,7 @@ final class UpdateHandler
         'email_passwd' => [
             'title' => '🔑 تغییر رمز ایمیل',
             'scope' => 'account',
+            'back' => 'email',
             'steps' => [
                 ['key' => 'email', 'prompt' => 'کدام حساب ایمیل؟', 'picker' => 'emails'],
                 ['key' => 'password', 'prompt' => 'رمز جدید را بفرستید (یا <code>/gen</code>):', 'secret' => true],
@@ -55,6 +69,7 @@ final class UpdateHandler
         'email_quota' => [
             'title' => '📦 تغییر سهمیه‌ی ایمیل',
             'scope' => 'account',
+            'back' => 'email',
             'steps' => [
                 ['key' => 'email', 'prompt' => 'کدام حساب ایمیل؟', 'picker' => 'emails'],
                 ['key' => 'quota', 'prompt' => 'سهمیه‌ی جدید:', 'choices' => self::QUOTA_CHOICES],
@@ -63,6 +78,7 @@ final class UpdateHandler
         'email_del' => [
             'title' => '🗑 حذف حساب ایمیل',
             'scope' => 'account',
+            'back' => 'email',
             'confirm' => '⚠️ حساب <code>{email}</code> و همه‌ی پیام‌هایش برای همیشه حذف می‌شود.',
             'steps' => [
                 ['key' => 'email', 'prompt' => 'کدام حساب ایمیل حذف شود؟', 'picker' => 'emails'],
@@ -71,6 +87,7 @@ final class UpdateHandler
         'db_add' => [
             'title' => '🗄 ساخت دیتابیس',
             'scope' => 'account',
+            'back' => 'db',
             'steps' => [
                 ['key' => 'name', 'prompt' => "نام دیتابیس را بفرستید.\n\n💡 در cPanel نام باید با پیشوند حساب باشد، مثل <code>user_shop</code>."],
             ],
@@ -78,6 +95,7 @@ final class UpdateHandler
         'db_del' => [
             'title' => '🗑 حذف دیتابیس',
             'scope' => 'account',
+            'back' => 'db',
             'confirm' => '⚠️ دیتابیس <code>{name}</code> و تمام داده‌هایش برای همیشه حذف می‌شود.',
             'steps' => [
                 ['key' => 'name', 'prompt' => 'کدام دیتابیس حذف شود؟', 'picker' => 'databases'],
@@ -86,6 +104,7 @@ final class UpdateHandler
         'dbuser_add' => [
             'title' => '👤 ساخت کاربر دیتابیس',
             'scope' => 'account',
+            'back' => 'db',
             'steps' => [
                 ['key' => 'name', 'prompt' => 'نام کاربر را بفرستید (با پیشوند حساب، مثل <code>user_shop</code>):'],
                 ['key' => 'password', 'prompt' => 'رمز عبور را بفرستید (یا <code>/gen</code>):', 'secret' => true],
@@ -94,6 +113,7 @@ final class UpdateHandler
         'dbuser_del' => [
             'title' => '🗑 حذف کاربر دیتابیس',
             'scope' => 'account',
+            'back' => 'db',
             'confirm' => '⚠️ کاربر <code>{name}</code> حذف می‌شود و دسترسی‌هایش از بین می‌رود.',
             'steps' => [
                 ['key' => 'name', 'prompt' => 'کدام کاربر دیتابیس حذف شود؟', 'picker' => 'dbusers'],
@@ -102,6 +122,7 @@ final class UpdateHandler
         'db_grant' => [
             'title' => '🔗 دادن دسترسی کاربر به دیتابیس',
             'scope' => 'account',
+            'back' => 'db',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام کاربر دیتابیس؟', 'picker' => 'dbusers'],
                 ['key' => 'database', 'prompt' => 'روی کدام دیتابیس؟', 'picker' => 'databases'],
@@ -115,6 +136,7 @@ final class UpdateHandler
         'sub_add' => [
             'title' => '➕ افزودن ساب‌دامنه',
             'scope' => 'account',
+            'back' => 'dom',
             'steps' => [
                 ['key' => 'rootdomain', 'prompt' => 'روی کدام دامنه؟', 'picker' => 'zones'],
                 ['key' => 'subdomain', 'prompt' => 'فقط بخش ساب‌دامنه را بفرستید (مثل <code>shop</code>):'],
@@ -124,6 +146,7 @@ final class UpdateHandler
         'sub_del' => [
             'title' => '🗑 حذف ساب‌دامنه',
             'scope' => 'account',
+            'back' => 'dom',
             'confirm' => '⚠️ ساب‌دامنه‌ی <code>{domain}</code> حذف می‌شود (فایل‌های پوشه‌اش باقی می‌مانند).',
             'steps' => [
                 ['key' => 'domain', 'prompt' => 'کدام ساب‌دامنه حذف شود؟', 'picker' => 'subdomains'],
@@ -132,6 +155,7 @@ final class UpdateHandler
         'ftp_add' => [
             'title' => '📁 افزودن حساب FTP',
             'scope' => 'account',
+            'back' => 'ftp',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'نام کاربری FTP را بفرستید (مثل <code>deploy@example.com</code> یا فقط <code>deploy</code>):'],
                 ['key' => 'password', 'prompt' => 'رمز عبور را بفرستید (یا <code>/gen</code>):', 'secret' => true],
@@ -142,6 +166,7 @@ final class UpdateHandler
         'ftp_del' => [
             'title' => '🗑 حذف حساب FTP',
             'scope' => 'account',
+            'back' => 'ftp',
             'confirm' => '⚠️ حساب FTP <code>{user}</code> حذف می‌شود (فایل‌ها پاک نمی‌شوند).',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب FTP حذف شود؟', 'picker' => 'ftp'],
@@ -150,6 +175,7 @@ final class UpdateHandler
         'cron_add' => [
             'title' => '⏰ افزودن کران‌جاب',
             'scope' => 'account',
+            'back' => 'cron',
             'steps' => [
                 ['key' => 'schedule', 'prompt' => "هر چند وقت یک‌بار اجرا شود؟\n\nمی‌توانید زمان‌بندی دلخواه را هم با ۵ فیلد استاندارد کران بفرستید، مثل <code>*/10 * * * *</code>.", 'choices' => [
                     ['هر دقیقه', '* * * * *'],
@@ -166,6 +192,7 @@ final class UpdateHandler
         'cron_del' => [
             'title' => '🗑 حذف کران‌جاب',
             'scope' => 'account',
+            'back' => 'cron',
             'confirm' => '⚠️ کران‌جاب انتخاب‌شده حذف می‌شود.',
             'steps' => [
                 ['key' => 'key', 'prompt' => 'کدام کران‌جاب حذف شود؟', 'picker' => 'cron'],
@@ -174,6 +201,7 @@ final class UpdateHandler
         'dns_list' => [
             'title' => '🧭 نمایش رکوردهای DNS',
             'scope' => 'account',
+            'back' => 'dns',
             'steps' => [
                 ['key' => 'zone', 'prompt' => 'رکوردهای کدام دامنه؟', 'picker' => 'zones'],
             ],
@@ -181,6 +209,7 @@ final class UpdateHandler
         'dns_add' => [
             'title' => '➕ افزودن رکورد DNS',
             'scope' => 'account',
+            'back' => 'dns',
             'steps' => [
                 ['key' => 'zone', 'prompt' => 'روی کدام دامنه؟', 'picker' => 'zones'],
                 ['key' => 'type', 'prompt' => 'نوع رکورد؟', 'picker' => 'record_types'],
@@ -197,6 +226,7 @@ final class UpdateHandler
         'dns_del' => [
             'title' => '🗑 حذف رکورد DNS',
             'scope' => 'account',
+            'back' => 'dns',
             'confirm' => '⚠️ رکورد شماره‌ی <code>{line}</code> از زون <code>{zone}</code> حذف می‌شود.',
             'steps' => [
                 ['key' => 'zone', 'prompt' => 'از کدام دامنه؟', 'picker' => 'zones'],
@@ -206,6 +236,7 @@ final class UpdateHandler
         'php_set' => [
             'title' => '🐘 تغییر نسخه‌ی PHP دامنه',
             'scope' => 'account',
+            'back' => 'php',
             'steps' => [
                 ['key' => 'vhost', 'prompt' => 'کدام دامنه؟', 'picker' => 'vhosts'],
                 ['key' => 'version', 'prompt' => 'کدام نسخه‌ی PHP؟', 'picker' => 'php_versions'],
@@ -214,6 +245,7 @@ final class UpdateHandler
         'backup_run' => [
             'title' => '💾 گرفتن بکاپ کامل',
             'scope' => 'account',
+            'back' => 'backup',
             'confirm' => '⚠️ ساخت بکاپ کامل شروع می‌شود؛ بسته به حجم حساب، فضای هوم و مقداری CPU مصرف می‌کند.',
             'steps' => [
                 ['key' => 'email', 'prompt' => 'ایمیل برای اطلاع‌رسانی پایان بکاپ (اختیاری):', 'optional' => true, 'default' => ''],
@@ -222,6 +254,7 @@ final class UpdateHandler
         'whm_user' => [
             'title' => '🎯 انتخاب کاربر مقصد',
             'scope' => 'local',
+            'back' => 'whm',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب را مدیریت می‌کنید؟', 'picker' => 'whm_accounts'],
             ],
@@ -229,6 +262,7 @@ final class UpdateHandler
         'whm_summary' => [
             'title' => '🔍 جزئیات حساب',
             'scope' => 'whm',
+            'back' => 'whm',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب؟', 'picker' => 'whm_accounts'],
             ],
@@ -236,6 +270,7 @@ final class UpdateHandler
         'whm_suspend' => [
             'title' => '⛔️ تعلیق حساب',
             'scope' => 'whm',
+            'back' => 'whm',
             'confirm' => '⚠️ حساب <code>{user}</code> معلق می‌شود؛ سایت‌ها و ایمیل‌هایش از کار می‌افتند.',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب معلق شود؟', 'picker' => 'whm_accounts'],
@@ -245,6 +280,7 @@ final class UpdateHandler
         'whm_unsuspend' => [
             'title' => '✅ رفع تعلیق حساب',
             'scope' => 'whm',
+            'back' => 'whm',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب از تعلیق دربیاید؟', 'picker' => 'whm_accounts'],
             ],
@@ -252,6 +288,7 @@ final class UpdateHandler
         'whm_passwd' => [
             'title' => '🔑 تغییر رمز حساب',
             'scope' => 'whm',
+            'back' => 'whm',
             'confirm' => '⚠️ رمز حساب <code>{user}</code> عوض می‌شود (رمز دیتابیس‌ها و FTP همان حساب هم می‌تواند تغییر کند).',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب؟', 'picker' => 'whm_accounts'],
@@ -261,6 +298,7 @@ final class UpdateHandler
         'whm_login' => [
             'title' => '🔐 لینک ورود یک‌بارمصرف',
             'scope' => 'whm',
+            'back' => 'whm',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'برای کدام حساب لینک ساخته شود؟', 'picker' => 'whm_accounts'],
             ],
@@ -268,6 +306,7 @@ final class UpdateHandler
         'whm_create' => [
             'title' => '🆕 ساخت حساب جدید',
             'scope' => 'whm',
+            'back' => 'whm',
             'confirm' => '⚠️ حساب <code>{username}</code> با دامنه‌ی <code>{domain}</code> ساخته می‌شود.',
             'steps' => [
                 ['key' => 'username', 'prompt' => 'نام کاربری حساب جدید:'],
@@ -279,15 +318,107 @@ final class UpdateHandler
         'whm_terminate' => [
             'title' => '💀 حذف کامل حساب',
             'scope' => 'whm',
+            'back' => 'whm',
             'confirm' => '⚠️ حساب <code>{user}</code> با تمام سایت‌ها، ایمیل‌ها و دیتابیس‌هایش برای همیشه حذف می‌شود. این کار برگشت‌پذیر نیست.',
             'steps' => [
                 ['key' => 'user', 'prompt' => 'کدام حساب حذف شود؟', 'picker' => 'whm_accounts'],
                 ['key' => 'confirm_user', 'prompt' => 'برای اطمینان، دقیقاً همان نام کاربری را تایپ کنید:'],
             ],
         ],
+        'file_upload' => [
+            'title' => '⬆️ آپلود فایل روی هاست',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'dir', 'prompt' => 'فایل کجا آپلود شود؟', 'picker' => 'dirs'],
+                ['key' => 'file', 'prompt' => "حالا خود فایل را همین‌جا بفرستید (به‌صورت Document، نه عکس).\n\n💡 برای سورس سایت، یک <code>zip</code> بفرستید و بعد همین‌جا بازش کنید.\n⚠️ سقف حجم در تلگرام ۲۰ مگابایت است.", 'file' => true],
+            ],
+        ],
+        'file_extract' => [
+            'title' => '🗜 باز کردن آرشیو روی هاست',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => "مسیر کامل فایل آرشیو را بفرستید، مثل:\n<code>/home/user/public_html/site.zip</code>"],
+                ['key' => 'dest', 'prompt' => 'کجا باز شود؟ (خالی = کنار خود فایل)', 'optional' => true, 'default' => ''],
+            ],
+        ],
+        'file_mkdir' => [
+            'title' => '📁 ساخت پوشه',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'dir', 'prompt' => 'پوشه‌ی جدید داخل کدام مسیر ساخته شود؟', 'picker' => 'dirs'],
+                ['key' => 'name', 'prompt' => 'نام پوشه‌ی جدید:'],
+            ],
+        ],
+        'file_delete' => [
+            'title' => '🗑 حذف فایل یا پوشه',
+            'scope' => 'account',
+            'back' => 'files',
+            'confirm' => '⚠️ <code>{path}</code> برای همیشه از هاست حذف می‌شود.',
+            'steps' => [
+                ['key' => 'path', 'prompt' => 'مسیر کامل فایل یا پوشه‌ای که باید حذف شود:'],
+            ],
+        ],
+        'fwd_add' => [
+            'title' => '📮 افزودن فوروارد ایمیل',
+            'scope' => 'account',
+            'back' => 'email',
+            'steps' => [
+                ['key' => 'address', 'prompt' => 'ایمیلی که پیام‌ها به آن می‌رسد (مبدأ)، مثل <code>info@example.com</code>:'],
+                ['key' => 'destination', 'prompt' => 'ایمیلی که پیام‌ها به آن فرستاده شود (مقصد):'],
+            ],
+        ],
+        'fwd_del' => [
+            'title' => '🗑 حذف فوروارد',
+            'scope' => 'account',
+            'back' => 'email',
+            'confirm' => '⚠️ فوروارد <code>{address}</code> ← <code>{destination}</code> حذف می‌شود.',
+            'steps' => [
+                ['key' => 'address', 'prompt' => 'آدرس مبدأ فوروارد:'],
+                ['key' => 'destination', 'prompt' => 'آدرس مقصد همان فوروارد:'],
+            ],
+        ],
+        'cron_email' => [
+            'title' => '📧 ایمیل خروجی کران',
+            'scope' => 'account',
+            'back' => 'cron',
+            'steps' => [
+                ['key' => 'email', 'prompt' => "خروجی کران‌جاب‌ها به کدام ایمیل فرستاده شود؟\n\n(برای خاموش‌کردن ایمیل، یک فاصله بفرستید.)"],
+            ],
+        ],
+        'whm_package' => [
+            'title' => '📦 تغییر پلن حساب',
+            'scope' => 'whm',
+            'back' => 'whm',
+            'confirm' => '⚠️ پلن حساب <code>{user}</code> به <code>{package}</code> تغییر می‌کند (سهمیه‌هایش عوض می‌شود).',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام حساب؟', 'picker' => 'whm_accounts'],
+                ['key' => 'package', 'prompt' => 'کدام پلن؟', 'picker' => 'whm_plans'],
+            ],
+        ],
+        'whm_service' => [
+            'title' => '♻️ ری‌استارت سرویس سرور',
+            'scope' => 'whm',
+            'back' => 'whm',
+            'confirm' => '⚠️ سرویس <code>{service}</code> روی کل سرور ری‌استارت می‌شود؛ چند لحظه قطعی خواهد داشت.',
+            'steps' => [
+                ['key' => 'service', 'prompt' => 'کدام سرویس ری‌استارت شود؟', 'choices' => [
+                    ['🌐 وب‌سرور (Apache)', 'httpd'],
+                    ['✉️ ایمیل (Exim)', 'exim'],
+                    ['📥 دریافت ایمیل (Dovecot)', 'dovecot'],
+                    ['🗄 دیتابیس (MySQL)', 'mysql'],
+                    ['📁 FTP', 'ftpserver'],
+                    ['🧭 DNS (named)', 'named'],
+                    ['🖥 خود cPanel', 'cpsrvd'],
+                ]],
+            ],
+        ],
         'selfhost_cron' => [
             'title' => '🧩 اجرای ربات با کران روی همین هاست',
             'scope' => 'account',
+            'back' => 'srv',
             'confirm' => '⚠️ یک کران‌جاب هر دقیقه‌ای روی این حساب ساخته می‌شود که <code>{path}/poll.php</code> را اجرا کند.',
             'steps' => [
                 ['key' => 'php_bin', 'prompt' => "مسیر PHP روی آن هاست کدام است؟", 'choices' => [
@@ -302,6 +433,7 @@ final class UpdateHandler
         'admin_add' => [
             'title' => '👮 افزودن ادمین',
             'scope' => 'local',
+            'back' => 'adm',
             'steps' => [
                 ['key' => 'id', 'prompt' => "آیدی عددی تلگرام فرد را بفرستید.\n\n💡 هر کسی می‌تواند آیدی خودش را از ربات @userinfobot بگیرد."],
             ],
@@ -309,6 +441,7 @@ final class UpdateHandler
         'admin_del' => [
             'title' => '🗑 حذف ادمین',
             'scope' => 'local',
+            'back' => 'adm',
             'confirm' => '⚠️ دسترسی ادمین <code>{id}</code> به این ربات قطع می‌شود.',
             'steps' => [
                 ['key' => 'id', 'prompt' => 'کدام ادمین حذف شود؟', 'picker' => 'admins'],
@@ -317,6 +450,7 @@ final class UpdateHandler
         'srv_add' => [
             'title' => '➕ افزودن سرور',
             'scope' => 'local',
+            'back' => 'srv',
             'steps' => [
                 ['key' => 'label', 'prompt' => 'یک اسم دلخواه برای این سرور بفرستید (مثل <code>هاست اصلی</code>):'],
                 ['key' => 'type', 'prompt' => 'توکن از کجاست؟', 'choices' => [
@@ -338,6 +472,7 @@ final class UpdateHandler
         'srv_use' => [
             'title' => '🔀 انتخاب سرور فعال',
             'scope' => 'local',
+            'back' => 'srv',
             'steps' => [
                 ['key' => 'id', 'prompt' => 'کدام سرور فعال شود؟', 'picker' => 'servers'],
             ],
@@ -345,6 +480,7 @@ final class UpdateHandler
         'srv_del' => [
             'title' => '🗑 حذف سرور',
             'scope' => 'local',
+            'back' => 'srv',
             'confirm' => '⚠️ سرور <code>{id}</code> از فهرست حذف می‌شود (روی خود سرور چیزی تغییر نمی‌کند).',
             'steps' => [
                 ['key' => 'id', 'prompt' => 'کدام سرور از فهرست حذف شود؟', 'picker' => 'removable_servers'],
@@ -358,8 +494,9 @@ final class UpdateHandler
         $fromId = $message['from']['id'] ?? null;
         $messageId = $message['message_id'] ?? null;
         $text = trim((string) ($message['text'] ?? ''));
+        $document = is_array($message['document'] ?? null) ? $message['document'] : null;
 
-        if ($chatId === null || $text === '') {
+        if ($chatId === null || ($text === '' && $document === null)) {
             return;
         }
 
@@ -376,15 +513,33 @@ final class UpdateHandler
         }
         self::$actor = 'tg:' . $fromId;
 
+        // پاسخ به پیام متنی، «صفحه‌»ی جریان جاری را ویرایش می‌کند (اگر باشد).
+        $current = State::get((int) $chatId);
+        $screen = $current['data']['__msg'] ?? null;
+        self::$screen = is_numeric($screen) ? (int) $screen : null;
+
+        if ($document !== null) {
+            self::handleDocument($api, (int) $chatId, $document);
+
+            return;
+        }
+
         if ($text === '/cancel') {
             State::clear((int) $chatId);
-            $api->sendHtml((int) $chatId, '❌ عملیات لغو شد.', self::mainKeyboard());
+            self::respond($api, (int) $chatId, '❌ عملیات لغو شد.', self::mainKeyboard());
+
+            return;
+        }
+
+        // وسط مرور فایل‌ها، متن تایپ‌شده یعنی «برو به این مسیر».
+        if ($current !== null && $current['flow'] === self::BROWSE && !str_starts_with($text, '/')) {
+            self::browseFiles($api, (int) $chatId, $text);
 
             return;
         }
 
         // اگر وسط یک جریان چندمرحله‌ای هستیم، این پیام جواب همان مرحله است.
-        $state = State::get((int) $chatId);
+        $state = $current;
         if ($state !== null && self::isFlowInput($text)) {
             self::continueFlow($api, (int) $chatId, $state, $text, is_int($messageId) ? $messageId : null);
 
@@ -414,9 +569,13 @@ final class UpdateHandler
         self::$actor = 'tg:' . $fromId;
         $chatId = (int) $chatId;
 
+        // دکمه‌ها همان پیام خودشان را ویرایش می‌کنند، نه اینکه پیام تازه بفرستند.
+        $screen = $callbackQuery['message']['message_id'] ?? null;
+        self::$screen = is_numeric($screen) ? (int) $screen : null;
+
         if ($data === 'no') {
             State::clear($chatId);
-            $api->sendHtml($chatId, '❌ عملیات لغو شد.', self::mainKeyboard());
+            self::respond($api, $chatId, '❌ عملیات لغو شد.', self::mainKeyboard());
 
             return;
         }
@@ -424,7 +583,7 @@ final class UpdateHandler
         if ($data === 'ok') {
             $state = State::get($chatId);
             if ($state === null || $state['step'] !== -1) {
-                $api->sendHtml($chatId, 'چیزی برای تأیید در انتظار نیست.', self::mainKeyboard());
+                self::respond($api, $chatId, 'چیزی برای تأیید در انتظار نیست.', self::mainKeyboard());
 
                 return;
             }
@@ -436,6 +595,14 @@ final class UpdateHandler
 
         if ($data === 'noop') {
             return;
+        }
+
+        // دکمه‌های مرورگر فایل
+        if (str_starts_with($data, 'fb') || str_starts_with($data, 'ff:')
+            || str_starts_with($data, 'fx:') || str_starts_with($data, 'fd:') || $data === 'fup') {
+            if (self::handleBrowseCallback($api, $chatId, $data)) {
+                return;
+            }
         }
 
         // انتخاب یکی از دکمه‌های یک مرحله، صفحه‌ی بعدی فهرست، یا رد کردن مرحله
@@ -454,7 +621,7 @@ final class UpdateHandler
         if ($data === 'skip') {
             $state = State::get($chatId);
             if ($state === null || $state['step'] < 0) {
-                $api->sendHtml($chatId, 'چیزی برای رد کردن در جریان نیست.', self::mainKeyboard());
+                self::respond($api, $chatId, 'چیزی برای رد کردن در جریان نیست.', self::mainKeyboard());
 
                 return;
             }
@@ -509,7 +676,7 @@ final class UpdateHandler
         switch ($command) {
             case '/start':
             case '/help':
-                $api->sendHtml($chatId, self::welcome(), self::mainKeyboard());
+                self::respond($api, $chatId, self::welcome(), self::mainKeyboard());
 
                 return;
             case '/panel':
@@ -589,15 +756,28 @@ final class UpdateHandler
                 self::sendMenu($api, $chatId, 'adm');
 
                 return;
+            case '/files':
+                self::runAction($api, $chatId, 'files');
+
+                return;
+            case '/backup':
+                self::sendMenu($api, $chatId, 'backup');
+
+                return;
+            case '/features':
+                self::runAction($api, $chatId, 'features');
+
+                return;
         }
 
         if (str_starts_with($text, '/')) {
-            $api->sendHtml($chatId, 'این دستور را نمی‌شناسم. از منوی زیر استفاده کنید:', self::mainKeyboard());
+            self::respond($api, $chatId, 'این دستور را نمی‌شناسم. از منوی زیر استفاده کنید:', self::mainKeyboard());
 
             return;
         }
 
-        $api->sendHtml(
+        self::respond(
+            $api,
             $chatId,
             'برای مدیریت، یکی از دکمه‌های زیر را بزنید (یا <code>/panel</code> را بفرستید):',
             self::mainKeyboard(),
@@ -612,60 +792,76 @@ final class UpdateHandler
         $header = self::serverHeader($server);
 
         [$text, $keyboard] = match ($menu) {
-            'email' => ['✉️ <b>مدیریت ایمیل</b>', [
+            'email' => ["✉️ <b>مدیریت ایمیل</b>\n\nحساب‌های ایمیل این هاست: ساخت، حذف، رمز، سهمیه و فورواردها.", [
                 [self::btn('📋 لیست حساب‌ها', 'a:emails')],
                 [self::btn('➕ افزودن', 'f:email_add'), self::btn('🗑 حذف', 'f:email_del')],
                 [self::btn('🔑 تغییر رمز', 'f:email_passwd'), self::btn('📦 سهمیه', 'f:email_quota')],
+                [self::btn('📮 فورواردها', 'a:forwarders')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'db' => ['🗄 <b>مدیریت دیتابیس</b>', [
+            'db' => ["🗄 <b>دیتابیس‌های MySQL</b>\n\nدیتابیس، کاربر دیتابیس و دسترسی‌ها.\n"
+                . "💡 برای وصل‌کردن یک سایت معمولاً سه قدم لازم است: ۱) ساخت دیتابیس ۲) ساخت کاربر ۳) دادن دسترسی کاربر به دیتابیس.", [
                 [self::btn('📋 لیست دیتابیس‌ها و کاربران', 'a:dbs')],
                 [self::btn('➕ دیتابیس جدید', 'f:db_add'), self::btn('🗑 حذف دیتابیس', 'f:db_del')],
                 [self::btn('👤 کاربر جدید', 'f:dbuser_add'), self::btn('🗑 حذف کاربر', 'f:dbuser_del')],
                 [self::btn('🔗 دادن دسترسی به کاربر', 'f:db_grant')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'dom' => ['🌐 <b>مدیریت دامنه‌ها</b>', [
+            'dom' => ["🌐 <b>دامنه‌ها</b>\n\nدامنه‌ی اصلی، ادان‌دامنه‌ها، ساب‌دامنه‌ها و گواهی‌های SSL.", [
                 [self::btn('📋 لیست دامنه‌ها', 'a:domains')],
                 [self::btn('➕ ساب‌دامنه', 'f:sub_add'), self::btn('🗑 حذف ساب‌دامنه', 'f:sub_del')],
                 [self::btn('🧭 DNS', 'm:dns'), self::btn('🔒 SSL', 'a:ssl')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'ftp' => ['📁 <b>مدیریت FTP</b>', [
+            'files' => ["📂 <b>فایل‌های هاست</b>\n\nسورس سایت را از همین‌جا آپلود کنید: فایل (یا zip) را بفرستید، و اگر آرشیو بود همان‌جا بازش کنید.\n"
+                . '⚠️ سقف فایل در تلگرام ۲۰ مگابایت است؛ برای سورس‌های بزرگ‌تر آن را تکه یا zip کنید.', [
+                [self::btn('🗂 مرور فایل‌ها', 'a:files')],
+                [self::btn('⬆️ آپلود فایل', 'f:file_upload'), self::btn('🗜 باز کردن آرشیو', 'f:file_extract')],
+                [self::btn('📁 پوشه‌ی جدید', 'f:file_mkdir'), self::btn('🗑 حذف فایل/پوشه', 'f:file_delete')],
+                [self::btn('⬅️ بازگشت', 'menu')],
+            ]],
+            'ftp' => ["📁 <b>حساب‌های FTP</b>\n\nبرای وصل‌شدن با نرم‌افزارهایی مثل FileZilla.", [
                 [self::btn('📋 لیست حساب‌ها', 'a:ftps')],
                 [self::btn('➕ افزودن', 'f:ftp_add'), self::btn('🗑 حذف', 'f:ftp_del')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'cron' => ['⏰ <b>مدیریت کران‌جاب</b>', [
+            'cron' => ["⏰ <b>کران‌جاب‌ها</b>\n\nدستورهایی که سرور خودکار و سر وقت اجرا می‌کند (مثل کران وردپرس یا بکاپ روزانه).", [
                 [self::btn('📋 لیست کران‌جاب‌ها', 'a:crons')],
                 [self::btn('➕ افزودن', 'f:cron_add'), self::btn('🗑 حذف', 'f:cron_del')],
+                [self::btn('📧 ایمیل خروجی کران', 'f:cron_email')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'dns' => ['🧭 <b>مدیریت DNS</b>', [
+            'dns' => ["🧭 <b>رکوردهای DNS</b>\n\nمشخص می‌کند دامنه به کجا اشاره کند (A برای آی‌پی، CNAME برای نام، MX برای ایمیل، TXT برای تأییدیه‌ها).", [
                 [self::btn('📄 نمایش رکوردها', 'f:dns_list')],
                 [self::btn('➕ رکورد جدید', 'f:dns_add'), self::btn('🗑 حذف رکورد', 'f:dns_del')],
-                [self::btn('⬅️ بازگشت', 'menu')],
+                [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
-            'php' => ['🐘 <b>نسخه‌ی PHP</b>', [
+            'php' => ["🐘 <b>نسخه‌ی PHP</b>\n\nنسخه‌ی PHP هر دامنه را جدا می‌شود عوض کرد (MultiPHP).", [
                 [self::btn('📋 نسخه‌ی هر دامنه', 'a:php')],
                 [self::btn('🔧 تغییر نسخه', 'f:php_set')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'whm' => ['🖥 <b>مدیریت سرور (WHM)</b>', [
+            'backup' => ["💾 <b>بکاپ</b>\n\nبکاپ کامل حساب در پوشه‌ی هوم ساخته می‌شود و بعد می‌توانید دانلودش کنید.", [
+                [self::btn('📋 بکاپ‌های موجود', 'a:backups')],
+                [self::btn('💾 گرفتن بکاپ کامل', 'f:backup_run')],
+                [self::btn('⬅️ بازگشت', 'menu')],
+            ]],
+            'whm' => ["🖥 <b>مدیریت سرور (WHM)</b>\n\nکارهای سطح سرور: حساب‌ها، پلن‌ها و سرویس‌ها.", [
                 [self::btn('👥 لیست حساب‌ها', 'a:whmaccts'), self::btn('🔍 جزئیات حساب', 'f:whm_summary')],
                 [self::btn('⛔️ تعلیق', 'f:whm_suspend'), self::btn('✅ رفع تعلیق', 'f:whm_unsuspend')],
                 [self::btn('🆕 ساخت حساب', 'f:whm_create'), self::btn('🔑 تغییر رمز', 'f:whm_passwd')],
-                [self::btn('🔐 لینک ورود', 'f:whm_login'), self::btn('💀 حذف حساب', 'f:whm_terminate')],
-                [self::btn('🖥 وضعیت سرور', 'a:whmstatus'), self::btn('📦 پلن‌ها', 'a:whmpkgs')],
+                [self::btn('🔐 لینک ورود', 'f:whm_login'), self::btn('📦 تغییر پلن', 'f:whm_package')],
+                [self::btn('🖥 وضعیت سرور', 'a:whmstatus'), self::btn('♻️ ری‌استارت سرویس', 'f:whm_service')],
+                [self::btn('📦 پلن‌ها', 'a:whmpkgs'), self::btn('💀 حذف حساب', 'f:whm_terminate')],
                 [self::btn('🎯 انتخاب کاربر مقصد', 'f:whm_user')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'adm' => ['👮 <b>ادمین‌های ربات</b>', [
+            'adm' => ["👮 <b>ادمین‌های ربات</b>\n\nهر کسی که اینجا باشد به همه‌ی امکانات ربات دسترسی دارد.", [
                 [self::btn('📋 لیست ادمین‌ها', 'a:admins')],
                 [self::btn('➕ افزودن ادمین', 'f:admin_add'), self::btn('🗑 حذف ادمین', 'f:admin_del')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
-            'srv' => ['🖥 <b>سرورها</b>', array_merge(
+            'srv' => ["🖥 <b>سرورها</b>\n\nهر تعداد هاست cPanel یا سرور WHM می‌توانید اضافه کنید و بینشان جابه‌جا شوید.", array_merge(
                 [[self::btn('📋 لیست سرورها', 'a:servers'), self::btn('🔌 تست اتصال', 'a:ping')]],
                 self::serverPickerRows(),
                 [
@@ -677,24 +873,53 @@ final class UpdateHandler
             default => ['🛠 <b>پنل مدیریت cPanel</b>', self::mainKeyboard()['inline_keyboard']],
         };
 
-        $api->sendHtml($chatId, $header . "\n\n" . $text, ['inline_keyboard' => $keyboard]);
+        self::respond($api, $chatId, $header . "\n\n" . $text, ['inline_keyboard' => $keyboard]);
     }
 
     /**
+     * منوی اصلی، متناسب با وضعیت:
+     *   - تازه‌نصب (بدون سرور): فقط راهنما و سرورها
+     *   - حساب cPanel: فقط کارهای سطح حساب
+     *   - WHM بدون کاربر مقصد: فقط کارهای سطح سرور
+     *   - WHM با کاربر مقصد: هر دو
+     * یعنی هیچ دکمه‌ای که روی این سرور کار نمی‌کند اصلاً نشان داده نمی‌شود.
+     *
      * @return array{inline_keyboard: array<int, array<int, array<string, string>>>}
      */
     private static function mainKeyboard(): array
     {
-        return ['inline_keyboard' => [
-            [self::btn('📊 خلاصه‌ی حساب', 'a:summary'), self::btn('🌐 دامنه‌ها', 'm:dom')],
-            [self::btn('✉️ ایمیل‌ها', 'm:email'), self::btn('🗄 دیتابیس‌ها', 'm:db')],
-            [self::btn('📁 FTP', 'm:ftp'), self::btn('⏰ کران‌جاب', 'm:cron')],
-            [self::btn('🧭 DNS', 'm:dns'), self::btn('🐘 نسخه PHP', 'm:php')],
-            [self::btn('🔒 SSL', 'a:ssl'), self::btn('💾 بکاپ کامل', 'f:backup_run')],
-            [self::btn('🖥 WHM', 'm:whm'), self::btn('⚙️ سرورها', 'm:srv')],
-            [self::btn('👮 ادمین‌ها', 'm:adm'), self::btn('🧾 لاگ عملیات', 'a:log')],
-            [self::btn('❓ راهنما', 'a:help')],
-        ]];
+        $context = self::context();
+
+        if ($context['state'] === 'none') {
+            return ['inline_keyboard' => [
+                [self::btn('⚙️ افزودن سرور / هاست', 'm:srv')],
+                [self::btn('❓ راهنما', 'a:help')],
+            ]];
+        }
+
+        $rows = [];
+
+        if ($context['is_whm']) {
+            $rows[] = [self::btn('🖥 مدیریت سرور (WHM)', 'm:whm'), self::btn('👥 حساب‌ها', 'a:whmaccts')];
+            $rows[] = [self::btn(
+                $context['target'] !== '' ? '🎯 کاربر مقصد: ' . $context['target'] : '🎯 انتخاب کاربر مقصد',
+                'f:whm_user',
+            )];
+        }
+
+        if ($context['state'] === 'cpanel' || $context['state'] === 'whm_ready') {
+            $rows[] = [self::btn('📊 خلاصه‌ی حساب', 'a:summary'), self::btn('🌐 دامنه‌ها', 'm:dom')];
+            $rows[] = [self::btn('✉️ ایمیل‌ها', 'm:email'), self::btn('🗄 دیتابیس‌ها', 'm:db')];
+            $rows[] = [self::btn('📂 فایل‌ها', 'm:files'), self::btn('📁 FTP', 'm:ftp')];
+            $rows[] = [self::btn('⏰ کران‌جاب', 'm:cron'), self::btn('🧭 DNS', 'm:dns')];
+            $rows[] = [self::btn('🐘 نسخه PHP', 'm:php'), self::btn('💾 بکاپ', 'm:backup')];
+        }
+
+        $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
+        $rows[] = [self::btn('✨ قابلیت‌ها', 'a:features'), self::btn('🧾 لاگ عملیات', 'a:log')];
+        $rows[] = [self::btn('❓ راهنما', 'a:help')];
+
+        return ['inline_keyboard' => $rows];
     }
 
     /**
@@ -740,18 +965,105 @@ final class UpdateHandler
         return ['text' => $text, 'callback_data' => $data];
     }
 
+    /**
+     * پاسخ ربات: اگر صفحه‌ای برای ویرایش داریم همان را به‌روز می‌کنیم، وگرنه
+     * پیام تازه می‌فرستیم. متن‌های خیلی بلند (که در یک پیام جا نمی‌شوند)
+     * همیشه به‌صورت پیام تازه می‌روند.
+     *
+     * @param array<string, mixed>|null $keyboard
+     */
+    private static function respond(TelegramApi $api, int $chatId, string $html, ?array $keyboard = null): void
+    {
+        $chunks = Render::chunks($html);
+
+        if (self::$screen !== null && count($chunks) === 1
+            && $api->editHtml($chatId, self::$screen, $chunks[0], $keyboard)) {
+            return;
+        }
+
+        self::$screen = $api->sendHtml($chatId, $html, $keyboard);
+    }
+
+    /**
+     * دکمه‌ی بازگشت — هر صفحه‌ای باید راه برگشت داشته باشد.
+     *
+     * @return array{inline_keyboard: array<int, array<int, array<string, string>>>}
+     */
+    private static function backKeyboard(?string $section = null): array
+    {
+        $row = [];
+        if ($section !== null && $section !== 'menu') {
+            $row[] = self::btn('⬅️ بازگشت', 'm:' . $section);
+        }
+        $row[] = self::btn('🏠 منوی اصلی', 'menu');
+
+        return ['inline_keyboard' => [$row]];
+    }
+
+    /**
+     * وضعیت سرور فعال — چیدمان منو بر اساس همین ساخته می‌شود.
+     *
+     * @return array{state: string, is_whm: bool, target: string, server: array<string, mixed>|null}
+     */
+    private static function context(): array
+    {
+        $server = ServerStore::active();
+        if ($server === null) {
+            return ['state' => 'none', 'is_whm' => false, 'target' => '', 'server' => null];
+        }
+
+        $isWhm = ($server['type'] ?? '') === CpanelClient::TYPE_WHM;
+        $target = trim((string) ($server['as_user'] ?? ''));
+
+        return [
+            'state' => $isWhm ? ($target !== '' ? 'whm_ready' : 'whm') : 'cpanel',
+            'is_whm' => $isWhm,
+            'target' => $target,
+            'server' => $server,
+        ];
+    }
+
     // ------------------------------------------------------------ کارها
 
     private static function runAction(TelegramApi $api, int $chatId, string $action): void
     {
         if ($action === 'help') {
-            $api->sendHtml($chatId, self::welcome(), self::mainKeyboard());
+            self::respond($api, $chatId, self::welcome(), self::mainKeyboard());
 
             return;
         }
 
         if ($action === 'servers') {
-            $api->sendHtml($chatId, Render::servers(ServerStore::all(), ServerStore::activeId()), self::mainKeyboard());
+            self::respond($api, $chatId, Render::servers(ServerStore::all(), ServerStore::activeId()), self::backKeyboard('srv'));
+
+            return;
+        }
+
+        if ($action === 'files') {
+            self::browseFiles($api, $chatId);
+
+            return;
+        }
+
+        if ($action === 'features') {
+            self::respond($api, $chatId, self::features(), self::backKeyboard());
+
+            return;
+        }
+
+        if ($action === 'forwarders') {
+            $api->sendChatAction($chatId);
+            try {
+                $text = Render::forwarders(CpanelService::emailForwarders(self::accountClient()));
+                $keyboard = ['inline_keyboard' => [
+                    [self::btn('➕ افزودن فوروارد', 'f:fwd_add'), self::btn('🗑 حذف فوروارد', 'f:fwd_del')],
+                    [self::btn('⬅️ بازگشت', 'm:email')],
+                ]];
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $keyboard = self::backKeyboard('email');
+            }
+            self::respond($api, $chatId, $text, $keyboard);
 
             return;
         }
@@ -764,7 +1076,7 @@ final class UpdateHandler
             foreach (Admins::fromFile() as $adminId) {
                 $lines[] = '• <code>' . $adminId . '</code>';
             }
-            $api->sendHtml($chatId, implode("\n", $lines), self::mainKeyboard());
+            self::respond($api, $chatId, implode("\n", $lines), self::backKeyboard('adm'));
 
             return;
         }
@@ -774,7 +1086,7 @@ final class UpdateHandler
             $text = $lines === []
                 ? '🧾 هنوز عملیاتی ثبت نشده.'
                 : "🧾 <b>آخرین عملیات‌ها</b>\n\n<code>" . Format::escapeHtml(implode("\n", $lines)) . '</code>';
-            $api->sendHtml($chatId, $text, self::mainKeyboard());
+            self::respond($api, $chatId, $text, self::backKeyboard());
 
             return;
         }
@@ -797,6 +1109,7 @@ final class UpdateHandler
                     CpanelService::phpVersions(self::accountClient()),
                     CpanelService::installedPhpVersions(self::accountClient()),
                 ),
+                'backups' => Render::backups(CpanelService::listBackups(self::accountClient())),
                 'whmaccts' => Render::whmAccounts(CpanelService::whmAccounts(self::whmClient())),
                 'whmstatus' => Render::whmStatus(CpanelService::whmServerStatus(self::whmClient())),
                 'whmpkgs' => '📦 <b>پلن‌ها</b>' . "\n\n" . implode("\n", array_map(
@@ -809,7 +1122,271 @@ final class UpdateHandler
             $text = Render::error($e);
         }
 
-        $api->sendHtml($chatId, $text, self::mainKeyboard());
+        self::respond($api, $chatId, $text, self::backKeyboard(self::sectionOf($action)));
+    }
+
+    // ------------------------------------------------------- فایل‌های هاست
+
+    /**
+     * مرور فایل‌های هاست: هر پوشه یک صفحه است که همان‌جا ویرایش می‌شود.
+     */
+    private static function browseFiles(TelegramApi $api, int $chatId, ?string $dir = null, int $page = 0): void
+    {
+        $api->sendChatAction($chatId);
+
+        try {
+            $client = self::accountClient();
+            $target = ($dir !== null && trim($dir) !== '')
+                ? CpanelService::normalizePath($dir)
+                : CpanelService::homeDir($client);
+            $entries = CpanelService::listFiles($client, $target);
+        } catch (Throwable $e) {
+            self::respond($api, $chatId, Render::error($e), self::backKeyboard('files'));
+
+            return;
+        }
+
+        $perPage = 8;
+        $pages = max(1, (int) ceil(count($entries) / $perPage));
+        $page = max(0, min($page, $pages - 1));
+
+        $rows = [];
+        foreach (array_slice($entries, $page * $perPage, $perPage, true) as $index => $entry) {
+            $icon = $entry['dir'] ? '📁' : '📄';
+            $rows[] = [self::btn($icon . ' ' . self::shorten($entry['name'], 40), ($entry['dir'] ? 'fb:' : 'ff:') . $index)];
+        }
+
+        $nav = [];
+        if ($target !== '/' ) {
+            $nav[] = self::btn('⬆️ پوشه‌ی بالاتر', 'fbu');
+        }
+        if ($page > 0) {
+            $nav[] = self::btn('◀️ قبلی', 'fbp:' . ($page - 1));
+        }
+        if ($page < $pages - 1) {
+            $nav[] = self::btn('بعدی ▶️', 'fbp:' . ($page + 1));
+        }
+        if ($nav !== []) {
+            $rows[] = $nav;
+        }
+
+        $rows[] = [self::btn('⬆️ آپلود در همین پوشه', 'fup'), self::btn('🔄 تازه‌سازی', 'fbr')];
+        $rows[] = [self::btn('⬅️ بازگشت', 'm:files'), self::btn('🏠 منوی اصلی', 'menu')];
+
+        State::set($chatId, self::BROWSE, -3, [
+            'dir' => $target,
+            'entries' => $entries,
+            'page' => $page,
+            '__msg' => self::$screen,
+        ]);
+
+        $text = Render::files($target, $entries)
+            . "\n\n💡 می‌توانید مسیر دلخواه را هم مستقیم تایپ کنید.";
+        self::respond($api, $chatId, $text, ['inline_keyboard' => $rows]);
+
+        $state = State::get($chatId);
+        if ($state !== null) {
+            State::set($chatId, self::BROWSE, -3, $state['data'] + ['__msg' => self::$screen]);
+        }
+    }
+
+    /**
+     * دکمه‌های داخل مرورگر فایل.
+     */
+    private static function handleBrowseCallback(TelegramApi $api, int $chatId, string $data): bool
+    {
+        $state = State::get($chatId);
+        $browse = ($state !== null && $state['flow'] === self::BROWSE) ? $state['data'] : null;
+        $dir = is_array($browse) ? (string) ($browse['dir'] ?? '') : '';
+        $entries = is_array($browse) && is_array($browse['entries'] ?? null) ? $browse['entries'] : [];
+        $page = is_array($browse) ? (int) ($browse['page'] ?? 0) : 0;
+
+        if ($data === 'fbr') {
+            self::browseFiles($api, $chatId, $dir, $page);
+
+            return true;
+        }
+
+        if ($data === 'fbu') {
+            self::browseFiles($api, $chatId, $dir === '' ? null : dirname($dir));
+
+            return true;
+        }
+
+        if (str_starts_with($data, 'fbp:')) {
+            self::browseFiles($api, $chatId, $dir, (int) substr($data, 4));
+
+            return true;
+        }
+
+        if (str_starts_with($data, 'fb:')) {
+            $entry = $entries[(int) substr($data, 3)] ?? null;
+            self::browseFiles($api, $chatId, is_array($entry) ? (string) $entry['path'] : $dir);
+
+            return true;
+        }
+
+        if (str_starts_with($data, 'ff:')) {
+            $index = (int) substr($data, 3);
+            $entry = $entries[$index] ?? null;
+            if (!is_array($entry)) {
+                self::browseFiles($api, $chatId, $dir, $page);
+
+                return true;
+            }
+
+            $rows = [];
+            if (CpanelService::isArchive((string) $entry['name'])) {
+                $rows[] = [self::btn('🗜 باز کردن همین‌جا', 'fx:' . $index)];
+            }
+            $rows[] = [self::btn('🗑 حذف', 'fd:' . $index)];
+            $rows[] = [self::btn('⬅️ بازگشت به پوشه', 'fbr')];
+
+            self::respond(
+                $api,
+                $chatId,
+                '📄 <code>' . Format::escapeHtml((string) $entry['path']) . '</code>'
+                . ($entry['size'] !== null ? "\n💾 " . Format::bytes((float) $entry['size']) : ''),
+                ['inline_keyboard' => $rows],
+            );
+
+            return true;
+        }
+
+        if (str_starts_with($data, 'fx:') || str_starts_with($data, 'fd:')) {
+            $index = (int) substr($data, 3);
+            $entry = $entries[$index] ?? null;
+            if (!is_array($entry)) {
+                self::browseFiles($api, $chatId, $dir, $page);
+
+                return true;
+            }
+
+            $isExtract = str_starts_with($data, 'fx:');
+            $flow = $isExtract ? 'file_extract' : 'file_delete';
+            $payload = $isExtract
+                ? ['path' => (string) $entry['path'], 'dest' => $dir]
+                : ['path' => (string) $entry['path']];
+
+            if ($isExtract) {
+                State::clear($chatId);
+                self::execute($api, $chatId, $flow, $payload);
+
+                return true;
+            }
+
+            // حذف همیشه تأیید می‌خواهد.
+            State::set($chatId, $flow, -1, $payload + ['__msg' => self::$screen]);
+            self::respond(
+                $api,
+                $chatId,
+                self::fillTemplate((string) self::FLOWS[$flow]['confirm'], $payload) . "\n\nادامه می‌دهید؟",
+                self::confirmKeyboard(),
+            );
+
+            return true;
+        }
+
+        if ($data === 'fup') {
+            // آپلود در همان پوشه‌ای که کاربر ایستاده — مرحله‌ی انتخاب مسیر رد می‌شود.
+            State::set($chatId, 'file_upload', 1, ['dir' => $dir !== '' ? $dir : '', '__msg' => self::$screen]);
+            self::askStep($api, $chatId, 'file_upload', 1, ['dir' => $dir]);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * فایلی که کاربر در تلگرام فرستاده را می‌گیرد و روی هاست می‌گذارد.
+     *
+     * @param array<string, mixed> $document
+     */
+    private static function handleDocument(TelegramApi $api, int $chatId, array $document): void
+    {
+        $state = State::get($chatId);
+        $step = null;
+        if ($state !== null && isset(self::FLOWS[$state['flow']]) && $state['step'] >= 0) {
+            $step = self::FLOWS[$state['flow']]['steps'][$state['step']] ?? null;
+        }
+
+        if (($step['file'] ?? false) !== true) {
+            self::respond(
+                $api,
+                $chatId,
+                "📎 فایل را وقتی بفرستید که ربات ازتان خواسته باشد.\n\nبرای آپلود: «📂 فایل‌ها → ⬆️ آپلود فایل».",
+                self::mainKeyboard(),
+            );
+
+            return;
+        }
+
+        $name = trim((string) ($document['file_name'] ?? 'upload.bin'));
+        $size = (int) ($document['file_size'] ?? 0);
+        $dir = (string) ($state['data']['dir'] ?? '');
+
+        if ($size > self::MAX_UPLOAD) {
+            self::respond(
+                $api,
+                $chatId,
+                '⚠️ حجم فایل ' . Format::bytes((float) $size) . ' است و تلگرام اجازه‌ی دانلود بیشتر از '
+                . Format::bytes(self::MAX_UPLOAD) . " را به ربات نمی‌دهد.\n\nفایل را کوچک‌تر یا تکه‌تکه کنید.",
+                self::backKeyboard('files'),
+            );
+
+            return;
+        }
+
+        $api->sendChatAction($chatId, 'upload_document');
+
+        try {
+            $file = $api->getFile((string) ($document['file_id'] ?? ''));
+            $contents = $api->downloadFile($file['file_path']);
+            CpanelService::uploadFile(self::accountClient(), $dir, $name, $contents);
+        } catch (Throwable $e) {
+            AuditLog::record(self::$actor, (string) (ServerStore::activeId() ?? '-'), 'file_upload', ['dir' => $dir, 'name' => $name, 'error' => $e->getMessage()], false);
+            self::respond($api, $chatId, Render::error($e), self::backKeyboard('files'));
+
+            return;
+        }
+
+        State::clear($chatId);
+        AuditLog::record(self::$actor, (string) (ServerStore::activeId() ?? '-'), 'file_upload', ['dir' => $dir, 'name' => $name, 'size' => $size]);
+
+        $path = rtrim($dir, '/') . '/' . $name;
+        $text = '✅ آپلود شد: <code>' . Format::escapeHtml($path) . '</code>' . "\n💾 " . Format::bytes((float) $size);
+
+        $rows = [];
+        if (CpanelService::isArchive($name)) {
+            $text .= "\n\n🗜 این یک آرشیو است؛ می‌توانید همین‌جا بازش کنید.";
+            State::set($chatId, self::BROWSE, -3, ['dir' => $dir, 'entries' => [['name' => $name, 'path' => $path, 'dir' => false, 'size' => $size, 'mtime' => null]], 'page' => 0]);
+            $rows[] = [self::btn('🗜 باز کردن همین آرشیو', 'fx:0')];
+        }
+        $rows[] = [self::btn('🗂 مرور پوشه', 'fbr'), self::btn('⬅️ بازگشت', 'm:files')];
+
+        self::respond($api, $chatId, $text, ['inline_keyboard' => $rows]);
+    }
+
+    /**
+     * هر «کار» زیرمجموعه‌ی کدام منوست — برای اینکه دکمه‌ی بازگشت درست باشد.
+     */
+    private static function sectionOf(string $action): ?string
+    {
+        return match ($action) {
+            'emails', 'forwarders' => 'email',
+            'dbs' => 'db',
+            'domains', 'ssl' => 'dom',
+            'files' => 'files',
+            'ftps' => 'ftp',
+            'crons' => 'cron',
+            'php' => 'php',
+            'backups' => 'backup',
+            'whmaccts', 'whmstatus', 'whmpkgs' => 'whm',
+            'servers', 'ping' => 'srv',
+            'admins' => 'adm',
+            default => null,
+        };
     }
 
     // -------------------------------------------------------------- جریان‌ها
@@ -817,7 +1394,7 @@ final class UpdateHandler
     private static function startFlow(TelegramApi $api, int $chatId, string $flow): void
     {
         if (!isset(self::FLOWS[$flow])) {
-            $api->sendHtml($chatId, 'این عملیات را نمی‌شناسم.', self::mainKeyboard());
+            self::respond($api, $chatId, 'این عملیات را نمی‌شناسم.', self::mainKeyboard());
 
             return;
         }
@@ -827,7 +1404,7 @@ final class UpdateHandler
         try {
             self::clientFor($flow);
         } catch (Throwable $e) {
-            $api->sendHtml($chatId, Render::error($e), self::mainKeyboard());
+            self::respond($api, $chatId, Render::error($e), self::mainKeyboard());
 
             return;
         }
@@ -866,7 +1443,11 @@ final class UpdateHandler
         $data['__page'] = $page;
         State::set($chatId, $flow, $step, $data);
 
-        $api->sendHtml($chatId, $text, self::optionsKeyboard($options, $page, $optional));
+        self::respond($api, $chatId, $text, self::optionsKeyboard($options, $page, $optional));
+
+        // شناسه‌ی صفحه را نگه می‌داریم تا مرحله‌ی بعد هم همین پیام ویرایش شود.
+        $data['__msg'] = self::$screen;
+        State::set($chatId, $flow, $step, $data);
     }
 
     /**
@@ -1027,6 +1608,16 @@ final class UpdateHandler
 
                 return $options;
 
+            case 'dirs':
+                $client = self::accountClient();
+                $home = CpanelService::homeDir($client);
+                $dirs = [$home, $home . '/public_html'];
+                foreach (CpanelService::domains($client)['addon_domains'] as $addon) {
+                    $dirs[] = $home . '/' . $addon;
+                }
+
+                return $simple(array_values(array_unique($dirs)));
+
             case 'record_types':
                 return $simple(['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'NS']);
 
@@ -1088,7 +1679,7 @@ final class UpdateHandler
     {
         $state = State::get($chatId);
         if ($state === null || $state['step'] < 0) {
-            $api->sendHtml($chatId, 'این دکمه دیگر معتبر نیست؛ از منو دوباره شروع کنید.', self::mainKeyboard());
+            self::respond($api, $chatId, 'این دکمه دیگر معتبر نیست؛ از منو دوباره شروع کنید.', self::mainKeyboard());
 
             return;
         }
@@ -1142,6 +1733,12 @@ final class UpdateHandler
             $value = (string) ($stepDefinition['default'] ?? '');
         }
 
+        if (($stepDefinition['file'] ?? false) === true) {
+            $api->sendHtml($chatId, '📎 این مرحله فایل می‌خواهد؛ خود فایل را به‌صورت Document بفرستید (یا <code>/cancel</code>).');
+
+            return;
+        }
+
         if ($value === '/gen' && ($stepDefinition['secret'] ?? false) !== true) {
             $api->sendHtml($chatId, '⚠️ <code>/gen</code> فقط برای مرحله‌های رمز عبور است؛ مقدار این مرحله را بفرستید.');
 
@@ -1192,7 +1789,7 @@ final class UpdateHandler
 
         if (isset($definition['confirm'])) {
             State::set($chatId, $flow, -1, $data);
-            $api->sendHtml($chatId, self::fillTemplate((string) $definition['confirm'], $data) . "\n\nادامه می‌دهید؟", self::confirmKeyboard());
+            self::respond($api, $chatId, self::fillTemplate((string) $definition['confirm'], $data) . "\n\nادامه می‌دهید؟", self::confirmKeyboard());
 
             return;
         }
@@ -1230,7 +1827,7 @@ final class UpdateHandler
             $text = Render::error($e);
         }
 
-        $api->sendHtml($chatId, $text, self::mainKeyboard());
+        self::respond($api, $chatId, $text, self::backKeyboard(self::FLOWS[$flow]['back'] ?? null));
     }
 
     // ------------------------------------------------------- اجرای عملیات‌ها
@@ -1532,6 +2129,86 @@ final class UpdateHandler
         return '🗑 دسترسی <code>' . Format::escapeHtml((string) $id) . '</code> قطع شد.';
     }
 
+    /**
+     * آپلود با فرستادن خود فایل کامل می‌شود (handleDocument)؛ این فقط برای
+     * حالتی است که کسی جریان را جور دیگری تمام کند.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function runFileUpload(array $data): string
+    {
+        return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileExtract(array $data): string
+    {
+        CpanelService::extractArchive(self::accountClient(), (string) $data['path'], (string) ($data['dest'] ?? ''));
+
+        return '✅ آرشیو باز شد: <code>' . Format::escapeHtml((string) $data['path']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileMkdir(array $data): string
+    {
+        CpanelService::makeDirectory(self::accountClient(), (string) $data['dir'], (string) $data['name']);
+
+        return '✅ پوشه ساخته شد: <code>' . Format::escapeHtml($data['dir'] . '/' . $data['name']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileDelete(array $data): string
+    {
+        CpanelService::deletePath(self::accountClient(), (string) $data['path']);
+
+        return '🗑 حذف شد: <code>' . Format::escapeHtml((string) $data['path']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFwdAdd(array $data): string
+    {
+        CpanelService::addForwarder(self::accountClient(), (string) $data['address'], (string) $data['destination']);
+
+        return '✅ از این به بعد ایمیل‌های <code>' . Format::escapeHtml((string) $data['address'])
+            . '</code> به <code>' . Format::escapeHtml((string) $data['destination']) . '</code> هم می‌رسد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFwdDel(array $data): string
+    {
+        CpanelService::deleteForwarder(self::accountClient(), (string) $data['address'], (string) $data['destination']);
+
+        return '🗑 فوروارد حذف شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runCronEmail(array $data): string
+    {
+        $email = trim((string) $data['email']);
+        CpanelService::setCronEmail(self::accountClient(), $email);
+
+        return $email === ''
+            ? '✅ ایمیل خروجی کران خاموش شد.'
+            : '✅ خروجی کران‌ها به <code>' . Format::escapeHtml($email) . '</code> فرستاده می‌شود.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWhmPackage(array $data): string
+    {
+        CpanelService::whmChangePackage(self::whmClient(), (string) $data['user'], (string) $data['package']);
+
+        return '✅ پلن حساب <code>' . Format::escapeHtml((string) $data['user']) . '</code> شد <b>'
+            . Format::escapeHtml((string) $data['package']) . '</b>.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWhmService(array $data): string
+    {
+        CpanelService::whmRestartService(self::whmClient(), (string) $data['service']);
+
+        return '♻️ دستور ری‌استارت <code>' . Format::escapeHtml((string) $data['service']) . '</code> فرستاده شد.';
+    }
+
     /** @param array<string, mixed> $data */
     private static function runSelfhostCron(array $data): string
     {
@@ -1711,17 +2388,75 @@ final class UpdateHandler
         return $password;
     }
 
+    /**
+     * صفحه‌ی «قابلیت‌ها» — دقیقاً همان چیزهایی که روی همین سرور در دسترس‌اند.
+     */
+    private static function features(): string
+    {
+        $context = self::context();
+
+        if ($context['state'] === 'none') {
+            return "✨ <b>این ربات چه کار می‌کند؟</b>\n\n"
+                . "به هاست یا سرور شما از طریق API رسمی cPanel/WHM وصل می‌شود و کارهای مدیریتی را از تلگرام انجام می‌دهد.\n\n"
+                . "اول یک هاست اضافه کنید: «⚙️ سرورها → ➕ افزودن سرور».\n"
+                . 'برای هاست اشتراکی توکن را از cPanel → Security → Manage API Tokens، و برای کل سرور از WHM → Development → Manage API Tokens بسازید.';
+        }
+
+        $account = "📊 <b>خلاصه‌ی حساب</b> — مصرف دیسک، پهنای‌باند، اینود و تعداد ایمیل/دیتابیس/دامنه\n"
+            . "✉️ <b>ایمیل</b> — ساخت، حذف، رمز، سهمیه و فوروارد\n"
+            . "🗄 <b>دیتابیس</b> — دیتابیس و کاربر MySQL و دادن دسترسی (سه قدم ساده)\n"
+            . "📂 <b>فایل‌ها</b> — مرور پوشه‌ها، آپلود سورس از تلگرام، باز کردن zip، ساخت پوشه و حذف\n"
+            . "🌐 <b>دامنه‌ها</b> — ادان‌دامنه و ساب‌دامنه، 🧭 رکوردهای DNS، 🔒 گواهی‌های SSL\n"
+            . "📁 <b>FTP</b> — حساب‌های انتقال فایل\n"
+            . "⏰ <b>کران</b> — کارهای زمان‌بندی‌شده و ایمیل خروجی‌شان\n"
+            . "🐘 <b>PHP</b> — نسخه‌ی هر دامنه\n"
+            . '💾 <b>بکاپ</b> — ساخت بکاپ کامل و دیدن بکاپ‌های موجود';
+
+        $whm = "🖥 <b>سطح سرور (WHM)</b>\n"
+            . "👥 حساب‌ها، 🆕 ساخت حساب، ⛔️ تعلیق/رفع تعلیق، 💀 حذف حساب\n"
+            . "🔑 تغییر رمز حساب، 📦 تغییر پلن، 🔐 لینک ورود یک‌بارمصرف به cPanel کاربر\n"
+            . '📈 بار سیستم و وضعیت سرویس‌ها، ♻️ ری‌استارت سرویس';
+
+        return match ($context['state']) {
+            'cpanel' => "✨ <b>قابلیت‌های این هاست (cPanel)</b>\n\n" . $account
+                . "\n\n💡 کارهای سطح سرور (ساخت/تعلیق حساب، ری‌استارت سرویس) فقط با توکن WHM ممکن است؛ اگر دسترسی WHM دارید، یک سرور از نوع WHM اضافه کنید.",
+            'whm' => "✨ <b>قابلیت‌های این سرور (WHM)</b>\n\n" . $whm
+                . "\n\n💡 برای کارهای داخل یک حساب (ایمیل، دیتابیس، فایل و ...) اول «🎯 انتخاب کاربر مقصد» را بزنید.",
+            default => "✨ <b>قابلیت‌ها</b>\n\n" . $whm . "\n\n" . $account
+                . "\n\n🎯 کارهای سطح حساب روی <code>" . Format::escapeHtml($context['target']) . '</code> انجام می‌شود.',
+        };
+    }
+
     private static function welcome(): string
     {
-        return "🛠 <b>مدیریت cPanel از تلگرام</b>\n\n"
-            . "این ربات از طریق <b>API رسمی cPanel/WHM</b> (با API Token، بدون ذخیره‌ی رمز حساب) به سرور وصل می‌شود و کارهای روزمره‌ی مدیریت هاست را انجام می‌دهد:\n\n"
-            . "📊 خلاصه‌ی مصرف دیسک/پهنای‌باند/اینود\n"
-            . "✉️ ساخت، حذف، تغییر رمز و سهمیه‌ی ایمیل\n"
-            . "🗄 ساخت/حذف دیتابیس و کاربر MySQL و دادن دسترسی\n"
-            . "🌐 دامنه‌ها و ساب‌دامنه‌ها، 🧭 رکوردهای DNS، 🔒 گواهی‌های SSL\n"
-            . "📁 حساب‌های FTP، ⏰ کران‌جاب‌ها، 🐘 نسخه‌ی PHP هر دامنه، 💾 بکاپ کامل\n"
-            . "🖥 و روی WHM: لیست حساب‌ها، ساخت/تعلیق/حذف حساب، تغییر رمز، لینک ورود یک‌بارمصرف و وضعیت سرویس‌ها\n\n"
-            . "<b>دستورهای سریع:</b> /panel /summary /emails /db /domains /ftp /cron /dns /ssl /php /whm /servers /ping /log /cancel\n\n"
-            . 'می‌توانید چند سرور تعریف کنید و با «⚙️ سرورها» بینشان جابه‌جا شوید.';
+        $context = self::context();
+
+        if ($context['state'] === 'none') {
+            return "🛠 <b>cPanel TeamKan</b>\n\n"
+                . "این ربات از طریق <b>API رسمی cPanel/WHM</b> به هاست شما وصل می‌شود و کارهای مدیریتی را از تلگرام انجام می‌دهد.\n\n"
+                . "<b>برای شروع، یک هاست اضافه کنید:</b>\n"
+                . "«⚙️ افزودن سرور / هاست» را بزنید و اسم، نوع (cPanel یا WHM)، آدرس، نام کاربری و API Token را بدهید.\n\n"
+                . "🔑 توکن را از این مسیرها بسازید:\n"
+                . "• هاست اشتراکی: cPanel → Security → Manage API Tokens\n"
+                . "• کل سرور: WHM → Development → Manage API Tokens\n\n"
+                . 'بعد از افزودن هاست، بقیه‌ی دکمه‌ها خودشان ظاهر می‌شوند.';
+        }
+
+        $lines = ["🛠 <b>cPanel TeamKan</b>", ''];
+        $lines[] = $context['is_whm']
+            ? 'این سرور با توکن <b>WHM</b> وصل است، پس کارهای سطح سرور (حساب‌ها، پلن‌ها، سرویس‌ها) در دسترس است.'
+            : 'این هاست با توکن <b>cPanel</b> وصل است، پس کارهای همان حساب (ایمیل، دیتابیس، فایل، دامنه و ...) در دسترس است.';
+
+        if ($context['state'] === 'whm') {
+            $lines[] = '';
+            $lines[] = '🎯 برای کارهای داخل یک حساب، اول «انتخاب کاربر مقصد» را بزنید.';
+        }
+
+        $lines[] = '';
+        $lines[] = '✨ برای دیدن فهرست کامل کارهایی که می‌شود کرد، «قابلیت‌ها» را بزنید.';
+        $lines[] = '';
+        $lines[] = '<b>دستورهای سریع:</b> /panel /summary /emails /db /files /domains /ftp /cron /dns /ssl /php /backup /whm /servers /admins /ping /log /cancel';
+
+        return implode("\n", $lines);
     }
 }

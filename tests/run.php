@@ -655,6 +655,12 @@ check('تعریف مرحله‌های هر جریان کامل است', function
         assertTrue(isset($definition['title']), "جریان $name عنوان ندارد");
         assertTrue(in_array($definition['scope'] ?? '', ['account', 'whm', 'local'], true), "scope جریان $name نامعتبر است");
         assertTrue(($definition['steps'] ?? []) !== [], "جریان $name مرحله‌ای ندارد");
+        // هر جریان باید بداند بعد از تمام‌شدن، دکمه‌ی بازگشتش به کدام منوست.
+        assertTrue(isset($definition['back']), "جریان $name دکمه‌ی بازگشت (back) ندارد");
+        assertTrue(
+            str_contains((string) file_get_contents(__DIR__ . '/../src/UpdateHandler.php'), "'{$definition['back']}' => ["),
+            "منوی بازگشت جریان $name («{$definition['back']}») تعریف نشده است",
+        );
         foreach ($definition['steps'] as $index => $step) {
             assertTrue(isset($step['key'], $step['prompt']), "مرحله‌ی $index از $name ناقص است");
             if (($step['optional'] ?? false) === true) {
