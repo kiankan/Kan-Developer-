@@ -108,6 +108,7 @@ while (time() < $deadline) {
             'imap' => ['server' => 'mail.example.com', 'port' => 993, 'ssl' => 1],
             'smtp' => ['server' => 'mail.example.com', 'port' => 465, 'ssl' => 1],
         ]],
+        str_contains($path, 'Mysql/get_server_information') => ['status' => 1, 'data' => ['host' => 'localhost', 'port' => 3306, 'version' => '8.0.36']],
         str_contains($path, 'Mysql/get_restrictions') => ['status' => 1, 'data' => ['prefix' => 'demo_', 'prefixing_enabled' => 1, 'max_database_name_length' => 64]],
         str_contains($path, 'Mime/list_redirects') => ['status' => 1, 'data' => [
             ['sourceurl' => 'old.example.com', 'destination' => 'https://example.com', 'type' => 'permanent'],

@@ -57,6 +57,25 @@ final class UpdateHandler
                 ['key' => 'quota', 'prompt' => 'سهمیه‌ی صندوق ایمیل:', 'optional' => true, 'default' => '0', 'choices' => self::QUOTA_CHOICES],
             ],
         ],
+        'email_bulk_add' => [
+            'title' => '👥 ساخت گروهی ایمیل',
+            'scope' => 'account',
+            'back' => 'email',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => 'روی کدام دامنه ساخته شوند؟', 'picker' => 'domains'],
+                ['key' => 'list', 'prompt' => "فهرست را بفرستید، هر خط یک ایمیل:\n\n<code>info\nsales rmz-delkhah\nsupport</code>\n\nاگر جلوی نام رمز ننویسید، خودم یک رمز قوی می‌سازم و نشانتان می‌دهم."],
+                ['key' => 'quota', 'prompt' => 'سهمیه‌ی هر صندوق:', 'optional' => true, 'default' => '0', 'choices' => self::QUOTA_CHOICES],
+            ],
+        ],
+        'email_bulk_del' => [
+            'title' => '🗑 حذف گروهی ایمیل',
+            'scope' => 'account',
+            'back' => 'email',
+            'confirm' => "⚠️ همه‌ی صندوق‌های زیر و پیام‌هایشان برای همیشه حذف می‌شوند:\n<code>{list}</code>",
+            'steps' => [
+                ['key' => 'list', 'prompt' => "آدرس‌های کامل را بفرستید، هر خط یکی:\n\n<code>old@example.com\ntest@example.com</code>"],
+            ],
+        ],
         'email_passwd' => [
             'title' => '🔑 تغییر رمز ایمیل',
             'scope' => 'account',
@@ -337,6 +356,27 @@ final class UpdateHandler
             'back' => 'email',
             'steps' => [
                 ['key' => 'email', 'prompt' => 'تنظیمات کدام صندوق را می‌خواهید؟', 'picker' => 'emails'],
+            ],
+        ],
+        'force_https' => [
+            'title' => '🔐 اجبار HTTPS',
+            'scope' => 'account',
+            'back' => 'ssl',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => "برای کدام دامنه؟\n\nبا روشن‌کردنش، هر کسی سایت را با <code>http</code> باز کند خودکار به <code>https</code> منتقل می‌شود.", 'picker' => 'domains'],
+                ['key' => 'state', 'prompt' => 'روشن یا خاموش؟', 'choices' => [
+                    ['✅ روشن (همیشه HTTPS)', '1'],
+                    ['⛔️ خاموش', '0'],
+                ]],
+            ],
+        ],
+        'cleanup_run' => [
+            'title' => '🧹 پاک‌سازی',
+            'scope' => 'account',
+            'back' => 'files',
+            'confirm' => '⚠️ محتوای <code>{path}</code> حذف می‌شود. این کار برگشت‌پذیر نیست.',
+            'steps' => [
+                ['key' => 'path', 'prompt' => 'کدام مورد پاک شود؟', 'picker' => 'cleanup'],
             ],
         ],
         'php_limits' => [
@@ -975,6 +1015,7 @@ final class UpdateHandler
             'email' => ["✉️ <b>مدیریت ایمیل</b>\n\nحساب‌های ایمیل این هاست: ساخت، حذف، رمز، سهمیه و فورواردها.", [
                 [self::btn('📋 لیست حساب‌ها', 'a:emails')],
                 [self::btn('➕ افزودن', 'f:email_add'), self::btn('🗑 حذف', 'f:email_del')],
+                [self::btn('👥 ساخت گروهی', 'f:email_bulk_add'), self::btn('🗑 حذف گروهی', 'f:email_bulk_del')],
                 [self::btn('🔑 تغییر رمز', 'f:email_passwd'), self::btn('📦 سهمیه', 'f:email_quota')],
                 [self::btn('📮 فورواردها', 'a:forwarders'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
                 [self::btn('⬅️ بازگشت', 'menu')],
@@ -986,6 +1027,7 @@ final class UpdateHandler
                 [self::btn('🔑 رمز کاربر', 'f:db_passwd'), self::btn('🚫 گرفتن دسترسی', 'f:db_revoke')],
                 [self::btn('✏️ نام دیتابیس', 'f:db_rename'), self::btn('✏️ نام کاربر', 'f:dbuser_rename')],
                 [self::btn('🛠 بررسی و تعمیر', 'f:db_repair'), self::btn('🌍 اتصال از راه دور', 'a:mysqlhosts')],
+                [self::btn('ℹ️ اطلاعات اتصال', 'a:dbinfo')],
                 [self::btn('🗑 حذف دیتابیس', 'f:db_del'), self::btn('🗑 حذف کاربر', 'f:dbuser_del')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1004,6 +1046,7 @@ final class UpdateHandler
                 [self::btn('✏️ تغییر نام', 'f:file_rename'), self::btn('📦 جابه‌جایی/کپی', 'f:file_move')],
                 [self::btn('🔐 سطح دسترسی', 'f:file_chmod'), self::btn('🗜 فشرده‌سازی', 'f:file_compress')],
                 [self::btn('📊 بزرگ‌ترین فایل‌ها', 'a:bigfiles'), self::btn('🕒 تغییرات اخیر', 'a:recentfiles')],
+                [self::btn('🧹 پاک‌سازی هوشمند', 'a:cleanup')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'ftp' => ["📁 <b>حساب‌های FTP</b>\n\nبرای وصل‌شدن با نرم‌افزارهایی مثل FileZilla.", [
@@ -1024,7 +1067,7 @@ final class UpdateHandler
             ]],
             'ssl' => ["🔒 <b>گواهی SSL</b>\n\nگواهی همان چیزی است که قفل سبز مرورگر و آدرس <code>https</code> را می‌سازد. روی اکثر هاست‌ها cPanel خودش رایگان صادر می‌کند (AutoSSL).", [
                 [self::btn('📋 گواهی‌های نصب‌شده', 'a:ssl')],
-                [self::btn('🔄 درخواست صدور/تمدید خودکار', 'a:autossl')],
+                [self::btn('🔄 درخواست صدور/تمدید خودکار', 'a:autossl'), self::btn('🔐 اجبار HTTPS', 'f:force_https')],
                 [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
             'php' => ["🐘 <b>نسخه‌ی PHP</b>\n\nنسخه‌ی PHP هر دامنه را جدا می‌شود عوض کرد (MultiPHP).", [
@@ -1276,6 +1319,32 @@ final class UpdateHandler
             return;
         }
 
+        if ($action === 'cleanup') {
+            $api->sendChatAction($chatId);
+            try {
+                $client = self::accountClient();
+                $candidates = CpanelService::cleanupCandidates($client);
+                $percent = null;
+                foreach (CpanelService::resourceUsage($client) as $item) {
+                    if (str_contains(strtolower($item['id']), 'disk')) {
+                        $percent = $item['percent'];
+                        break;
+                    }
+                }
+                $text = Render::cleanup($candidates, $percent);
+                $keyboard = ['inline_keyboard' => array_merge(
+                    $candidates === [] ? [] : [[self::btn('🧹 پاک‌کردن یکی از موارد', 'f:cleanup_run')]],
+                    [[self::btn('⬅️ بازگشت', 'm:files'), self::btn('🏠 منوی اصلی', 'menu')]],
+                )];
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $keyboard = self::backKeyboard('files');
+            }
+            self::respond($api, $chatId, $text, $keyboard);
+
+            return;
+        }
+
         if ($action === 'redirects') {
             $api->sendChatAction($chatId);
             try {
@@ -1345,11 +1414,7 @@ final class UpdateHandler
         }
 
         if ($action === 'log') {
-            $lines = AuditLog::tail(15);
-            $text = $lines === []
-                ? '🧾 هنوز عملیاتی ثبت نشده.'
-                : "🧾 <b>آخرین عملیات‌ها</b>\n\n<code>" . Format::escapeHtml(implode("\n", $lines)) . '</code>';
-            self::respond($api, $chatId, $text, self::backKeyboard());
+            self::respond($api, $chatId, Render::auditLog(AuditLog::tail(12)), self::backKeyboard());
 
             return;
         }
@@ -1369,6 +1434,10 @@ final class UpdateHandler
                     CpanelService::domainsData(self::accountClient()),
                 ),
                 'acctfeatures' => Render::features(CpanelService::accountFeatures(self::accountClient())),
+                'dbinfo' => Render::mysqlInfo(
+                    CpanelService::mysqlServerInfo(self::accountClient()),
+                    CpanelService::databaseInfo(self::accountClient())['prefix'],
+                ),
                 'bigfiles' => Render::fileList(
                     '📊 <b>بزرگ‌ترین فایل‌های پوشه‌ی هوم</b>',
                     CpanelService::largestFiles(self::accountClient(), CpanelService::homeDir(self::accountClient())),
@@ -1784,7 +1853,8 @@ final class UpdateHandler
     {
         return match ($action) {
             'emails', 'forwarders' => 'email',
-            'dbs' => 'db',
+            'dbs', 'dbinfo' => 'db',
+            'cleanup' => 'files',
             'domains', 'redirects' => 'dom',
             'ssl', 'autossl' => 'ssl',
             'mysqlhosts' => 'db',
@@ -2030,6 +2100,17 @@ final class UpdateHandler
 
                 return $simple(array_values(array_unique($dirs)));
 
+            case 'cleanup':
+                $options = [];
+                foreach (CpanelService::cleanupCandidates(self::accountClient()) as $candidate) {
+                    $options[] = [
+                        'label' => $candidate['label'] . ' — ' . Format::bytes($candidate['size']),
+                        'value' => $candidate['path'],
+                    ];
+                }
+
+                return $options;
+
             case 'mysql_hosts':
                 return $simple(CpanelService::remoteMysqlHosts(self::accountClient()));
 
@@ -2241,8 +2322,9 @@ final class UpdateHandler
     private static function execute(TelegramApi $api, int $chatId, string $flow, array $data): void
     {
         $api->sendChatAction($chatId);
-        // کلیدهای داخلی (فهرست دکمه‌ها و شماره‌ی صفحه) به عملیات نمی‌رسند.
-        unset($data['__options'], $data['__page']);
+        // کلیدهای داخلی (فهرست دکمه‌ها، شماره‌ی صفحه، شناسه‌ی پیام) نه به
+        // عملیات می‌رسند و نه در لاگ ثبت می‌شوند.
+        unset($data['__options'], $data['__page'], $data['__msg']);
         $method = 'run' . str_replace(' ', '', ucwords(str_replace('_', ' ', $flow)));
 
         try {
@@ -2567,6 +2649,48 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runEmailBulkAdd(array $data): string
+    {
+        $lines = preg_split('/\r\n|\r|\n/', (string) $data['list']) ?: [];
+        $results = CpanelService::bulkAddEmails(
+            self::accountClient(),
+            (string) $data['domain'],
+            $lines,
+            $data['quota'] ?? 0,
+        );
+
+        return Render::bulkResult('👥 <b>ساخت گروهی ایمیل</b>', $results);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runEmailBulkDel(array $data): string
+    {
+        $lines = preg_split('/\r\n|\r|\n/', (string) $data['list']) ?: [];
+        $results = CpanelService::bulkDeleteEmails(self::accountClient(), $lines);
+
+        return Render::bulkResult('🗑 <b>حذف گروهی ایمیل</b>', $results);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runForceHttps(array $data): string
+    {
+        $enable = (string) ($data['state'] ?? '1') === '1';
+        CpanelService::forceHttps(self::accountClient(), (string) $data['domain'], $enable);
+
+        return $enable
+            ? '✅ از این به بعد <code>' . Format::escapeHtml((string) $data['domain']) . '</code> همیشه روی HTTPS باز می‌شود.'
+            : '⛔️ اجبار HTTPS برای <code>' . Format::escapeHtml((string) $data['domain']) . '</code> خاموش شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runCleanupRun(array $data): string
+    {
+        $count = CpanelService::purgePath(self::accountClient(), (string) $data['path']);
+
+        return '🧹 ' . $count . ' مورد از <code>' . Format::escapeHtml((string) $data['path']) . '</code> پاک شد.';
     }
 
     /** @param array<string, mixed> $data */

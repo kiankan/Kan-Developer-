@@ -671,6 +671,63 @@ check('گواهی SSL: پوشش نام دامنه درست سنجیده می‌�
     assertSame('example.com', SiteCheck::cleanDomain('https://Example.com/path?x=1'));
 });
 
+check('محدودیت‌های PHP با پارامتر vhost خوانده می‌شوند', function (): void {
+    // سرور واقعی با پارامتر path خطای «Provide the vhost parameter» می‌دهد.
+    $captured = [];
+    $body = json_encode(['status' => 1, 'data' => [
+        ['key' => 'memory_limit', 'value' => '256M'],
+        ['key' => 'upload_max_filesize', 'value' => '64M'],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => (string) $body], $captured));
+
+    $limits = CpanelService::phpLimits($client, 'example.com');
+
+    $sent = urldecode($captured[0]['body']);
+    assertTrue(str_contains($sent, 'vhost=example.com'), "پارامتر vhost ارسال نشد: {$sent}");
+    assertTrue(!str_contains($sent, 'path='), 'پارامتر path نباید فرستاده شود');
+    assertSame('256M', $limits['memory_limit']);
+});
+
+check('ساخت گروهی ایمیل: رمز نداده‌شده خودکار ساخته می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{}}'], $captured));
+
+    $results = CpanelService::bulkAddEmails($client, 'example.com', ['info', 'sales my-pass', '', '   ']);
+
+    assertSame(2, count($results), 'خط‌های خالی باید نادیده گرفته شوند');
+    assertSame('info@example.com', $results[0]['email']);
+    assertTrue(strlen($results[0]['password']) >= 12, 'رمز خودکار باید قوی باشد');
+    assertSame('my-pass', $results[1]['password'], 'رمز دستی باید حفظ شود');
+    assertTrue($results[0]['ok'] && $results[1]['ok']);
+});
+
+check('ساخت گروهی: شکست یک ردیف بقیه را متوقف نمی‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["already exists"]}'],
+        ['body' => '{"status":1,"data":{}}'],
+    ], $captured));
+
+    $results = CpanelService::bulkAddEmails($client, 'example.com', ['taken', 'fresh']);
+
+    assertTrue(!$results[0]['ok'], 'ردیف اول باید ناموفق باشد');
+    assertTrue(str_contains($results[0]['error'], 'already exists'), 'دلیل شکست باید بماند');
+    assertTrue($results[1]['ok'], 'ردیف دوم باید انجام شود');
+});
+
+check('لاگ عملیات به فارسی و بدون کلید داخلی نمایش داده می‌شود', function (): void {
+    $lines = [
+        json_encode(['time' => '2026-09-04T03:06:00+00:00', 'actor' => 'tg:1', 'action' => 'force_https', 'ok' => true, 'context' => ['domain' => 'example.com']]),
+        json_encode(['time' => '2026-09-04T03:05:00+00:00', 'actor' => 'tg:1', 'action' => 'db_del', 'ok' => false, 'context' => ['name' => 'demo_old']]),
+    ];
+    $text = Render::toPlain(Render::auditLog($lines));
+
+    assertTrue(str_contains($text, 'اجبار HTTPS'), 'نام فارسی عملیات باید بیاید');
+    assertTrue(str_contains($text, 'example.com'), 'هدف عملیات باید بیاید');
+    assertTrue(str_contains($text, '❌'), 'عملیات ناموفق باید مشخص باشد');
+    assertTrue(!str_contains($text, 'context'), 'JSON خام نباید نمایش داده شود');
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {

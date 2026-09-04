@@ -247,6 +247,84 @@ final class CpanelService
         ]);
     }
 
+    /**
+     * ساخت چند صندوق ایمیل با هم.
+     *
+     * ورودی هر خط: «نام» یا «نام رمز». رمز نداده‌شده خودکار ساخته می‌شود و در
+     * خروجی برگردانده می‌شود تا کاربر ببیندش.
+     *
+     * @param array<int, string> $lines
+     *
+     * @return array<int, array{email: string, password: string, ok: bool, error: string}>
+     */
+    public static function bulkAddEmails(CpanelClient $client, string $domain, array $lines, mixed $quotaMb = 0): array
+    {
+        $results = [];
+
+        foreach ($lines as $line) {
+            $parts = preg_split('/\s+/', trim($line)) ?: [];
+            $name = trim((string) ($parts[0] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $name = str_contains($name, '@') ? explode('@', $name)[0] : $name;
+            $password = (string) ($parts[1] ?? '');
+            if ($password === '') {
+                $password = self::randomPassword();
+            }
+            $email = $name . '@' . $domain;
+
+            try {
+                self::addEmail($client, $email, $password, $quotaMb);
+                $results[] = ['email' => $email, 'password' => $password, 'ok' => true, 'error' => ''];
+            } catch (Throwable $e) {
+                $results[] = ['email' => $email, 'password' => '', 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param array<int, string> $addresses
+     *
+     * @return array<int, array{email: string, ok: bool, error: string}>
+     */
+    public static function bulkDeleteEmails(CpanelClient $client, array $addresses): array
+    {
+        $results = [];
+
+        foreach ($addresses as $address) {
+            $address = trim($address);
+            if ($address === '') {
+                continue;
+            }
+            try {
+                self::deleteEmail($client, $address);
+                $results[] = ['email' => $address, 'ok' => true, 'error' => ''];
+            } catch (Throwable $e) {
+                $results[] = ['email' => $address, 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * رمز تصادفی امن — همان چیزی که ربات با /gen می‌سازد.
+     */
+    public static function randomPassword(int $length = 16): string
+    {
+        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%^*_+-=';
+        $max = strlen($alphabet) - 1;
+        $password = '';
+        for ($i = 0; $i < $length; $i++) {
+            $password .= $alphabet[random_int(0, $max)];
+        }
+
+        return $password;
+    }
+
     public static function deleteEmail(CpanelClient $client, string $email): void
     {
         [$local, $domain] = self::splitEmail($email);
@@ -352,6 +430,25 @@ final class CpanelService
         return [
             'prefix' => $prefix,
             'max_length' => isset($data['max_database_name_length']) ? (int) $data['max_database_name_length'] : null,
+        ];
+    }
+
+    /**
+     * اطلاعاتی که برای وصل‌کردن یک برنامه به دیتابیس لازم است (میزبان، پورت،
+     * نسخه) — همان چیزهایی که در wp-config.php یا .env می‌نویسید.
+     *
+     * @return array<string, string>
+     */
+    public static function mysqlServerInfo(CpanelClient $client): array
+    {
+        $raw = self::softCall(fn () => $client->uapi('Mysql', 'get_server_information'), []);
+        $data = is_array($raw) ? $raw : [];
+
+        return [
+            'host' => (string) ($data['host'] ?? 'localhost'),
+            'port' => (string) ($data['port'] ?? '3306'),
+            'version' => (string) ($data['version'] ?? ($data['mysql_version'] ?? '')),
+            'is_remote' => !empty($data['is_remote']) ? '1' : '',
         ];
     }
 
@@ -966,6 +1063,17 @@ final class CpanelService
     }
 
     /**
+     * روشن/خاموش کردن «همیشه HTTPS» برای یک دامنه.
+     */
+    public static function forceHttps(CpanelClient $client, string $domain, bool $enable): void
+    {
+        $client->uapi('SSL', 'toggle_ssl_redirect_for_domains', [
+            'domains' => $domain,
+            'state' => $enable ? 1 : 0,
+        ]);
+    }
+
+    /**
      * درخواست صدور/تمدید خودکار گواهی برای دامنه‌های حساب.
      */
     public static function runAutoSsl(CpanelClient $client): void
@@ -1016,7 +1124,12 @@ final class CpanelService
      */
     public static function phpLimits(CpanelClient $client, string $vhost): array
     {
-        $raw = $client->uapi('LangPHP', 'php_ini_get_user_basic_directives', ['type' => 'vhost', 'path' => $vhost]);
+        // نام پارامتر روی خود cPanel «vhost» است، نه «path» — با path خطای
+        // «Provide the vhost parameter» می‌دهد.
+        $raw = $client->uapi('LangPHP', 'php_ini_get_user_basic_directives', [
+            'type' => 'vhost',
+            'vhost' => $vhost,
+        ]);
 
         $out = [];
         foreach (self::normalizeList($raw) as $row) {
@@ -1245,6 +1358,88 @@ final class CpanelService
         }
 
         return $clean;
+    }
+
+    /**
+     * جاهایی که معمولاً فضای هاست را می‌خورند: کش، لاگ، بکاپ‌های قدیمی و سطل
+     * زباله‌ی ایمیل. هر کدام را جدا اندازه می‌گیریم تا کاربر بداند دقیقاً چه
+     * چیزی فضا گرفته، نه فقط اینکه «فضا پر است».
+     *
+     * @return array<int, array{path: string, label: string, size: float, files: int}>
+     */
+    public static function cleanupCandidates(CpanelClient $client): array
+    {
+        $home = self::homeDir($client);
+
+        $spots = [
+            ['path' => $home . '/tmp', 'label' => 'فایل‌های موقت'],
+            ['path' => $home . '/logs', 'label' => 'لاگ‌های قدیمی'],
+            ['path' => $home . '/.trash', 'label' => 'سطل زباله‌ی فایل‌منیجر'],
+            ['path' => $home . '/.cpanel/caches', 'label' => 'کش خود cPanel'],
+            ['path' => $home . '/public_html/wp-content/cache', 'label' => 'کش وردپرس'],
+            ['path' => $home . '/public_html/cache', 'label' => 'کش سایت'],
+            ['path' => $home . '/public_html/wp-content/uploads/backup', 'label' => 'بکاپ افزونه‌ها'],
+        ];
+
+        $out = [];
+        foreach ($spots as $spot) {
+            $files = self::softCall(fn () => self::listFiles($client, $spot['path']), []);
+            if ($files === []) {
+                continue;
+            }
+            $size = 0.0;
+            foreach ($files as $file) {
+                $size += (float) ($file['size'] ?? 0);
+            }
+            $out[] = ['path' => $spot['path'], 'label' => $spot['label'], 'size' => $size, 'files' => count($files)];
+        }
+
+        // بکاپ‌های کامل داخل هوم هم معمولاً بزرگ‌ترین فایل‌های حسابند.
+        foreach (self::softCall(fn () => self::listFiles($client, $home), []) as $file) {
+            if ($file['dir'] || !preg_match('/^backup.*\.(tar\.gz|tar|tgz|zip)$/i', $file['name'])) {
+                continue;
+            }
+            $out[] = [
+                'path' => $file['path'],
+                'label' => 'فایل بکاپ ' . $file['name'],
+                'size' => (float) ($file['size'] ?? 0),
+                'files' => 1,
+            ];
+        }
+
+        usort($out, static fn (array $a, array $b): int => $b['size'] <=> $a['size']);
+
+        return $out;
+    }
+
+    /**
+     * محتوای یک پوشه را پاک می‌کند (خود پوشه می‌ماند) یا یک فایل را حذف می‌کند.
+     *
+     * @return int تعداد چیزهایی که حذف شدند
+     */
+    public static function purgePath(CpanelClient $client, string $path): int
+    {
+        $path = self::normalizePath($path);
+        $files = self::softCall(fn () => self::listFiles($client, $path), null);
+
+        if ($files === null) {
+            // فایل تکی بود، نه پوشه.
+            self::deletePath($client, $path);
+
+            return 1;
+        }
+
+        if ($files === []) {
+            return 0;
+        }
+
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'unlink',
+            'sourcefiles' => implode(',', array_map(static fn (array $file): string => $file['path'], $files)),
+            'doubledecode' => 0,
+        ]);
+
+        return count($files);
     }
 
     /**

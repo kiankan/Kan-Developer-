@@ -499,6 +499,100 @@ final class Render
         return implode("\n", $lines);
     }
 
+    /**
+     * @param array<int, array{email: string, password?: string, ok: bool, error: string}> $results
+     */
+    public static function bulkResult(string $title, array $results): string
+    {
+        if ($results === []) {
+            return $title . "\n\nچیزی برای انجام‌دادن پیدا نشد.";
+        }
+
+        $ok = array_values(array_filter($results, static fn (array $row): bool => $row['ok']));
+        $failed = array_values(array_filter($results, static fn (array $row): bool => !$row['ok']));
+
+        $lines = [$title, '', '✅ موفق: ' . count($ok) . '   ❌ ناموفق: ' . count($failed)];
+
+        if ($ok !== []) {
+            $lines[] = '';
+            foreach ($ok as $row) {
+                $line = '• <code>' . self::e($row['email']) . '</code>';
+                if (($row['password'] ?? '') !== '') {
+                    $line .= "\n   🔐 <code>" . self::e($row['password']) . '</code>';
+                }
+                $lines[] = $line;
+            }
+            if (($ok[0]['password'] ?? '') !== '') {
+                $lines[] = '';
+                $lines[] = '⚠️ رمزها را همین حالا جایی ذخیره کنید؛ بعداً قابل بازیابی نیستند.';
+            }
+        }
+
+        if ($failed !== []) {
+            $lines[] = '';
+            $lines[] = '<b>ناموفق‌ها:</b>';
+            foreach ($failed as $row) {
+                $lines[] = '• <code>' . self::e($row['email']) . '</code> — ' . self::e(mb_substr($row['error'], 0, 120));
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{path: string, label: string, size: float, files: int}> $candidates
+     */
+    public static function cleanup(array $candidates, ?float $diskPercent = null): string
+    {
+        if ($candidates === []) {
+            return "🧹 <b>پاک‌سازی هوشمند</b>\n\nجای قابل‌پاک‌سازی پیدا نشد — کش، لاگ یا بکاپ اضافه‌ای روی حساب نیست.";
+        }
+
+        $total = 0.0;
+        foreach ($candidates as $candidate) {
+            $total += $candidate['size'];
+        }
+
+        $lines = ['🧹 <b>پاک‌سازی هوشمند</b>', ''];
+        if ($diskPercent !== null) {
+            $lines[] = '💽 مصرف دیسک: ' . Format::percent($diskPercent);
+        }
+        $lines[] = 'مجموع فضایی که می‌شود آزاد کرد: <b>' . Format::bytes($total) . '</b>';
+        $lines[] = '';
+
+        foreach ($candidates as $index => $candidate) {
+            $lines[] = '• ' . self::e($candidate['label']) . ' — ' . Format::bytes($candidate['size'])
+                . ' (' . $candidate['files'] . ' مورد)';
+            $lines[] = '   <code>' . self::e($candidate['path']) . '</code>';
+        }
+
+        $lines[] = '';
+        $lines[] = '💡 پاک‌کردن کش و لاگ بی‌خطر است؛ فایل بکاپ را فقط وقتی پاک کنید که نسخه‌ی دیگری دارید.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, string> $info
+     */
+    public static function mysqlInfo(array $info, string $prefix): string
+    {
+        $lines = ['ℹ️ <b>اطلاعات اتصال به دیتابیس</b>', ''];
+        $lines[] = '🖧 میزبان: <code>' . self::e($info['host'] !== '' ? $info['host'] : 'localhost') . '</code>';
+        $lines[] = '🔌 پورت: <code>' . self::e($info['port']) . '</code>';
+        if ($info['version'] !== '') {
+            $lines[] = '📦 نسخه: <code>' . self::e($info['version']) . '</code>';
+        }
+        if ($prefix !== '') {
+            $lines[] = '🏷 پیشوند اجباری نام‌ها: <code>' . self::e($prefix) . '</code>';
+        }
+
+        $lines[] = '';
+        $lines[] = "💡 در فایل تنظیمات سایت (مثل <code>wp-config.php</code>) همین میزبان را بگذارید و نام دیتابیس، نام کاربر و رمزی که خودتان ساخته‌اید.";
+
+        return implode("\n", $lines);
+    }
+
     public static function ssl(array $hosts): string
     {
         if ($hosts === []) {
@@ -621,6 +715,75 @@ final class Render
         }
 
         return rtrim(implode("\n", $lines));
+    }
+
+    /**
+     * دفترچه‌ی عملیات به زبان آدمیزاد (به‌جای خط‌های خام JSON).
+     *
+     * @param array<int, string> $lines خطوط JSON، از جدید به قدیم
+     */
+    public static function auditLog(array $lines): string
+    {
+        if ($lines === []) {
+            return '🧾 هنوز عملیاتی ثبت نشده.';
+        }
+
+        $labels = [
+            'email_add' => 'ساخت ایمیل', 'email_del' => 'حذف ایمیل', 'email_passwd' => 'تغییر رمز ایمیل',
+            'email_quota' => 'تغییر سهمیه ایمیل', 'email_bulk_add' => 'ساخت گروهی ایمیل',
+            'email_bulk_del' => 'حذف گروهی ایمیل', 'fwd_add' => 'افزودن فوروارد', 'fwd_del' => 'حذف فوروارد',
+            'db_add' => 'ساخت دیتابیس', 'db_del' => 'حذف دیتابیس', 'dbuser_add' => 'ساخت کاربر دیتابیس',
+            'dbuser_del' => 'حذف کاربر دیتابیس', 'db_grant' => 'دادن دسترسی دیتابیس',
+            'db_revoke' => 'گرفتن دسترسی دیتابیس', 'db_passwd' => 'تغییر رمز کاربر دیتابیس',
+            'db_rename' => 'تغییر نام دیتابیس', 'dbuser_rename' => 'تغییر نام کاربر دیتابیس',
+            'db_repair' => 'تعمیر دیتابیس', 'mysql_host_add' => 'افزودن میزبان راه دور',
+            'mysql_host_del' => 'حذف میزبان راه دور',
+            'sub_add' => 'ساخت ساب‌دامنه', 'sub_del' => 'حذف ساب‌دامنه',
+            'redirect_add' => 'افزودن ریدایرکت', 'redirect_del' => 'حذف ریدایرکت',
+            'dns_add' => 'افزودن رکورد DNS', 'dns_del' => 'حذف رکورد DNS', 'dns_list' => 'دیدن رکوردهای DNS',
+            'file_upload' => 'آپلود فایل', 'file_extract' => 'باز کردن آرشیو', 'file_delete' => 'حذف فایل',
+            'file_mkdir' => 'ساخت پوشه', 'file_rename' => 'تغییر نام فایل', 'file_move' => 'جابه‌جایی فایل',
+            'file_chmod' => 'تغییر سطح دسترسی', 'file_compress' => 'فشرده‌سازی', 'cleanup_run' => 'پاک‌سازی',
+            'ftp_add' => 'ساخت حساب FTP', 'ftp_del' => 'حذف حساب FTP',
+            'cron_add' => 'افزودن کران', 'cron_edit' => 'ویرایش کران', 'cron_del' => 'حذف کران',
+            'cron_email' => 'تنظیم ایمیل کران', 'php_set' => 'تغییر نسخه PHP', 'php_limits' => 'دیدن محدودیت‌های PHP',
+            'backup_run' => 'گرفتن بکاپ', 'autossl' => 'درخواست AutoSSL', 'force_https' => 'اجبار HTTPS',
+            'site_check' => 'بررسی سلامت دامنه',
+            'srv_add' => 'افزودن سرور', 'srv_use' => 'تعویض سرور', 'srv_del' => 'حذف سرور',
+            'admin_add' => 'افزودن ادمین', 'admin_del' => 'حذف ادمین', 'claim_bot' => 'تحویل‌گرفتن ربات',
+            'whm_create' => 'ساخت حساب', 'whm_suspend' => 'تعلیق حساب', 'whm_unsuspend' => 'رفع تعلیق',
+            'whm_terminate' => 'حذف حساب', 'whm_passwd' => 'تغییر رمز حساب', 'whm_package' => 'تغییر پلن',
+            'whm_service' => 'ری‌استارت سرویس', 'whm_login' => 'ساخت لینک ورود',
+            'selfhost_cron' => 'نصب کران ربات',
+        ];
+
+        $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];
+        foreach ($lines as $line) {
+            $entry = json_decode($line, true);
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $action = (string) ($entry['action'] ?? '');
+            $label = $labels[$action] ?? $action;
+            $time = substr((string) ($entry['time'] ?? ''), 5, 11);
+            $time = str_replace('T', ' ', $time);
+
+            $context = is_array($entry['context'] ?? null) ? $entry['context'] : [];
+            $target = '';
+            foreach (['email', 'name', 'user', 'domain', 'path', 'host', 'id', 'zone', 'vhost'] as $key) {
+                if (isset($context[$key]) && is_scalar($context[$key]) && trim((string) $context[$key]) !== '') {
+                    $target = (string) $context[$key];
+                    break;
+                }
+            }
+
+            $out[] = (($entry['ok'] ?? true) ? '✅' : '❌') . " <b>{$label}</b>"
+                . ($target !== '' ? ' — <code>' . self::e(mb_substr($target, 0, 40)) . '</code>' : '')
+                . "\n   🕐 {$time}";
+        }
+
+        return implode("\n", $out);
     }
 
     public static function error(Throwable $error): string

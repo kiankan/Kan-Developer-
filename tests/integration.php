@@ -663,9 +663,58 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains(tg_last_text(), 'site.zip'), 'بزرگ‌ترین فایل نیامد');
     });
 
-    scenario('لاگ عملیات، کار انجام‌شده را ثبت کرده است', function (): void {
+    scenario('ساخت گروهی ایمیل، رمزها را خودش می‌سازد و گزارش می‌دهد', function (): void {
+        press('f:email_bulk_add');
+        press('c:0');                       // دامنه
+        send_text("info\nsales rmz-dasti\nsupport");
+        press('skip');                      // سهمیه: پیش‌فرض
+
+        $text = tg_last_text();
+        expect(str_contains($text, 'موفق: 3'), 'هر سه ایمیل باید ساخته شوند');
+        expect(str_contains($text, 'info@example.com'), 'ایمیل اول نیامد');
+        expect(str_contains($text, 'rmz-dasti'), 'رمز دستی باید حفظ شود');
+
+        $adds = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'add_pop'));
+        expect(count($adds) === 3, 'باید سه درخواست ساخت ایمیل رفته باشد');
+    });
+
+    scenario('اطلاعات اتصال دیتابیس نمایش داده می‌شود', function (): void {
+        press('a:dbinfo');
+        $text = tg_last_text();
+        expect(str_contains($text, 'localhost'), 'میزبان دیتابیس نیامد');
+        expect(str_contains($text, '3306'), 'پورت نیامد');
+        expect(str_contains($text, 'demo_'), 'پیشوند نیامد');
+    });
+
+    scenario('پاک‌سازی هوشمند، جاهای پرحجم را پیدا و پاک می‌کند', function (): void {
+        press('m:files');
+        expect(in_array('a:cleanup', tg_last_buttons(), true), 'دکمه‌ی پاک‌سازی هوشمند نبود');
+
+        press('a:cleanup');
+        $text = tg_last_text();
+        expect(str_contains($text, 'پاک‌سازی هوشمند'), 'صفحه‌ی پاک‌سازی نیامد');
+        expect(str_contains($text, 'آزاد کرد') || str_contains($text, 'پیدا نشد'), 'باید حجم قابل آزادسازی را بگوید');
+    });
+
+    scenario('اجبار HTTPS از منوی SSL در دسترس است', function (): void {
+        press('m:ssl');
+        expect(in_array('f:force_https', tg_last_buttons(), true), 'دکمه‌ی اجبار HTTPS نبود');
+
+        press('f:force_https');
+        press('c:0');                       // دامنه
+        press('c:0');                       // روشن
+        $calls = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'toggle_ssl_redirect'));
+        expect($calls !== [], 'درخواست اجبار HTTPS فرستاده نشد');
+        expect(str_contains(urldecode((string) array_values($calls)[0]['body']), 'state=1'), 'وضعیت روشن ارسال نشد');
+    });
+
+    scenario('لاگ عملیات، کارهای انجام‌شده را ثبت می‌کند و کلید داخلی لو نمی‌دهد', function (): void {
         press('a:log');
-        expect(str_contains(tg_last_text(), 'email_del'), 'عملیات حذف در لاگ نیست');
+        $text = tg_last_text();
+        expect(str_contains($text, 'اجبار HTTPS') || str_contains($text, 'ساخت گروهی ایمیل'), 'آخرین عملیات‌ها در لاگ نیستند');
+        expect(!str_contains($text, '__msg'), 'کلیدهای داخلی نباید در لاگ بیایند');
+        expect(!str_contains($text, '__options'), 'فهرست دکمه‌ها نباید در لاگ بیاید');
+        expect(!str_contains($text, '"action"'), 'لاگ نباید خام JSON نمایش داده شود');
     });
 
     proc_terminate($cpanelProcess);
