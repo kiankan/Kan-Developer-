@@ -607,6 +607,70 @@ check('میزبان‌های راه دور MySQL روی نسخه‌های قدی
     assertTrue(str_contains($captured[1]['body'], 'cpanel_jsonapi_module=MysqlFE'), 'باید MysqlFE صدا زده شود');
 });
 
+check('domains_data: هم آبجکت تکی و هم لیست درست خوانده می‌شود', function (): void {
+    $captured = [];
+    $body = json_encode(['status' => 1, 'data' => [
+        'main_domain' => ['domain' => 'example.com', 'documentroot' => '/home/demo/public_html', 'ip' => '203.0.113.7'],
+        'addon_domains' => [
+            ['domain' => 'second.com', 'documentroot' => '/home/demo/second.com', 'ip' => '203.0.113.7'],
+        ],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => (string) $body], $captured));
+    $domains = CpanelService::domainsData($client);
+
+    assertSame(2, count($domains), 'هر دو دامنه باید خوانده شوند');
+    assertSame('example.com', $domains[0]['domain']);
+    assertSame('/home/demo/public_html', $domains[0]['docroot'], 'پوشه‌ی ریشه باید خوانده شود');
+    assertSame('اصلی', $domains[0]['type']);
+    assertSame('ادان', $domains[1]['type']);
+});
+
+check('اطلاعات حساب از StatsBar نرمال می‌شود', function (): void {
+    $captured = [];
+    $stats = json_encode(['status' => 1, 'data' => [
+        ['name' => 'hostname', 'value' => 'srv01.example.com'],
+        ['name' => 'plan', 'value' => 'Business Pro'],
+        ['name' => 'lastlogin_ip', 'value' => '203.0.113.55'],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => (string) $stats],
+        ['body' => '{"status":1,"data":{"home":"/home/demo","user":"demo"}}'],
+    ], $captured));
+
+    $info = CpanelService::accountInfo($client);
+    assertSame('srv01.example.com', $info['hostname']);
+    assertSame('Business Pro', $info['plan']);
+    assertSame('/home/demo', $info['home'], 'پوشه‌ی هوم از Variables باید بیاید');
+});
+
+check('سطح دسترسی فایل‌ها یک‌دست نمایش داده می‌شود', function (): void {
+    assertSame('644', CpanelService::formatPermissions('0644'));
+    assertSame('755', CpanelService::formatPermissions('755'));
+    assertSame('', CpanelService::formatPermissions(''));
+});
+
+check('تغییر سطح دسترسی و فشرده‌سازی، fileop درست را می‌فرستند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"cpanelresult":{"event":{"result":1},"data":[]}}'], $captured));
+
+    CpanelService::chmodPath($client, '/home/demo/public_html/index.php', '644');
+    $body = urldecode($captured[0]['body']);
+    assertTrue(str_contains($body, 'op=chmod'), 'باید chmod باشد');
+    assertTrue(str_contains($body, 'metadata=644'), "سطح دسترسی درست نرفت: {$body}");
+
+    $archive = CpanelService::compressPath($client, '/home/demo/public_html');
+    assertTrue(str_ends_with($archive, '.zip'), 'نام آرشیو باید zip باشد');
+    assertTrue(str_contains(urldecode($captured[1]['body']), 'op=compress'), 'باید compress باشد');
+});
+
+check('گواهی SSL: پوشش نام دامنه درست سنجیده می‌شود', function (): void {
+    assertTrue(SiteCheck::covers('example.com', ['example.com', 'www.example.com'], ''));
+    assertTrue(SiteCheck::covers('shop.example.com', ['*.example.com'], ''));
+    assertTrue(!SiteCheck::covers('a.b.example.com', ['*.example.com'], ''), 'وایلدکارد فقط یک سطح را پوشش می‌دهد');
+    assertTrue(!SiteCheck::covers('other.com', ['example.com'], 'example.com'));
+    assertSame('example.com', SiteCheck::cleanDomain('https://Example.com/path?x=1'));
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {

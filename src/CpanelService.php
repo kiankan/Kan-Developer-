@@ -27,6 +27,7 @@ final class CpanelService
         return [
             'server' => $client->label(),
             'user' => $client->targetUser(),
+            'info' => self::softCall(fn () => self::accountInfo($client), []),
             'usage' => $usage,
             'domains' => $domains,
             'counts' => [
@@ -37,6 +38,87 @@ final class CpanelService
                 'addon' => count($domains['addon_domains'] ?? []),
             ],
         ];
+    }
+
+    /**
+     * اطلاعات کلی حساب: هاست‌نیم سرور، پلن، آخرین ورود و آی‌پی‌اش، پوشه‌ی هوم،
+     * نسخه‌ی cPanel و وضعیت حساب.
+     *
+     * StatsBar تقریباً همه‌ی این‌ها را یک‌جا می‌دهد؛ هر چه نداشت خالی می‌ماند.
+     *
+     * @return array<string, string>
+     */
+    public static function accountInfo(CpanelClient $client): array
+    {
+        $wanted = 'hostname|machine|plan|lastlogin|lastlogin_ip|homedir|cpanelversion|theme|ftpaccounts|emailaccounts|sqldatabases|addondomains|subdomains|parkeddomains|diskusage|bandwidthusage';
+
+        $stats = self::softCall(fn () => $client->uapi('StatsBar', 'get_stats', ['display' => $wanted]), []);
+
+        $info = [];
+        foreach (self::normalizeList($stats) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['name'] ?? ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $value = $row['value'] ?? ($row['count'] ?? '');
+            $info[$id] = is_scalar($value) ? trim((string) $value) : '';
+            if (isset($row['_max']) || isset($row['max'])) {
+                $info[$id . '_max'] = trim((string) ($row['_max'] ?? $row['max']));
+            }
+            if (isset($row['units'])) {
+                $info[$id . '_units'] = trim((string) $row['units']);
+            }
+        }
+
+        $variables = self::softCall(fn () => $client->uapi('Variables', 'get_user_information'), []);
+        if (is_array($variables)) {
+            foreach (['home', 'user', 'owner', 'plan', 'suspended'] as $key) {
+                if (isset($variables[$key]) && is_scalar($variables[$key]) && trim((string) $variables[$key]) !== '') {
+                    $info[$key] = trim((string) $variables[$key]);
+                }
+            }
+        }
+
+        return $info;
+    }
+
+    /**
+     * قابلیت‌هایی که هاست برای این حساب فعال کرده — یعنی چه کارهایی اصلاً
+     * روی این پلن مجاز است.
+     *
+     * @return array{enabled: array<int, string>, disabled: array<int, string>}
+     */
+    public static function accountFeatures(CpanelClient $client): array
+    {
+        $raw = self::softCall(fn () => $client->uapi('Features', 'list_features'), []);
+
+        $enabled = [];
+        $disabled = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (is_string($row)) {
+                $enabled[] = $row;
+                continue;
+            }
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = (string) ($row['id'] ?? ($row['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            if ((bool) ($row['enabled'] ?? true)) {
+                $enabled[] = $name;
+            } else {
+                $disabled[] = $name;
+            }
+        }
+        sort($enabled);
+        sort($disabled);
+
+        return ['enabled' => $enabled, 'disabled' => $disabled];
     }
 
     /**
@@ -104,6 +186,54 @@ final class CpanelService
         usort($out, static fn (array $a, array $b): int => strcmp($a['email'], $b['email']));
 
         return $out;
+    }
+
+    /**
+     * مجموع مصرف صندوق‌های ایمیل.
+     *
+     * @param array<int, array{email: string, domain: string, used: ?float, quota: mixed, percent: ?float}> $emails
+     *
+     * @return array{count: int, used: float, near_full: array<int, string>}
+     */
+    public static function emailUsage(array $emails): array
+    {
+        $used = 0.0;
+        $nearFull = [];
+        foreach ($emails as $email) {
+            $used += (float) ($email['used'] ?? 0);
+            if (($email['percent'] ?? null) !== null && (float) $email['percent'] >= 80) {
+                $nearFull[] = $email['email'];
+            }
+        }
+
+        return ['count' => count($emails), 'used' => $used, 'near_full' => $nearFull];
+    }
+
+    /**
+     * تنظیمات IMAP/SMTP یک صندوق — همان چیزی که برای Outlook یا موبایل لازم است.
+     *
+     * @return array<string, string>
+     */
+    public static function emailClientSettings(CpanelClient $client, string $email): array
+    {
+        $raw = $client->uapi('Email', 'get_client_settings', ['account' => $email, 'service' => 'both']);
+
+        $flat = [];
+        $walk = static function (mixed $value, string $prefix) use (&$walk, &$flat): void {
+            if (!is_array($value)) {
+                if (is_scalar($value) && trim((string) $value) !== '') {
+                    $flat[$prefix] = (string) $value;
+                }
+
+                return;
+            }
+            foreach ($value as $key => $item) {
+                $walk($item, $prefix === '' ? (string) $key : $prefix . '.' . $key);
+            }
+        };
+        $walk($raw, '');
+
+        return $flat;
     }
 
     public static function addEmail(CpanelClient $client, string $email, string $password, mixed $quotaMb = 0): void
@@ -334,6 +464,74 @@ final class CpanelService
         ];
     }
 
+    /**
+     * جزئیات هر دامنه: پوشه‌ی ریشه و آی‌پی — برای وقتی که سایت بالا نمی‌آید و
+     * باید بدانیم فایل‌ها کجا باید باشند.
+     *
+     * @return array<int, array{domain: string, docroot: string, ip: string, type: string}>
+     */
+    public static function domainsData(CpanelClient $client): array
+    {
+        $raw = self::softCall(fn () => $client->uapi('DomainInfo', 'domains_data', ['format' => 'hash']), null);
+        if ($raw === null) {
+            return [];
+        }
+
+        // domains_data گاهی برای دامنه‌ی اصلی یک آبجکت تکی می‌دهد و گاهی لیست؛
+        // normalizeList روی آبجکت تکی مقادیرش را باز می‌کند، پس جدا می‌سنجیم.
+        $rowsOf = static function (mixed $value): array {
+            if (!is_array($value)) {
+                return [];
+            }
+            if (isset($value['domain']) || isset($value['servername'])) {
+                return [$value];
+            }
+
+            $out = [];
+            foreach ($value as $item) {
+                if (is_array($item)) {
+                    $out[] = $item;
+                }
+            }
+
+            return $out;
+        };
+
+        $rows = [];
+        if (is_array($raw)) {
+            foreach (['main_domain', 'addon_domains', 'sub_domains', 'parked_domains'] as $key) {
+                foreach ($rowsOf($raw[$key] ?? null) as $row) {
+                    $rows[] = $row + ['__type' => $key];
+                }
+            }
+            if ($rows === []) {
+                $rows = $rowsOf($raw);
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $domain = (string) ($row['domain'] ?? ($row['servername'] ?? ''));
+            if ($domain === '') {
+                continue;
+            }
+            $out[] = [
+                'domain' => $domain,
+                'docroot' => (string) ($row['documentroot'] ?? ($row['docroot'] ?? '')),
+                'ip' => (string) ($row['ip'] ?? ($row['ipv4'] ?? '')),
+                'type' => match ((string) ($row['__type'] ?? ($row['type'] ?? ''))) {
+                    'main_domain', 'main' => 'اصلی',
+                    'addon_domains', 'addon' => 'ادان',
+                    'sub_domains', 'sub' => 'ساب‌دامنه',
+                    'parked_domains', 'parked' => 'پارک‌شده',
+                    default => '',
+                },
+            ];
+        }
+
+        return $out;
+    }
+
     public static function addSubdomain(CpanelClient $client, string $subdomain, string $rootDomain, string $dir = ''): void
     {
         $params = ['domain' => $subdomain, 'rootdomain' => $rootDomain];
@@ -451,6 +649,26 @@ final class CpanelService
         ];
 
         self::uapiOrApi2($client, ['Cron', 'add_line', $params], ['Cron', 'add_line', $params]);
+    }
+
+    /**
+     * ویرایش یک کران موجود (زمان‌بندی و/یا دستور).
+     *
+     * @param array{minute: string, hour: string, day: string, month: string, weekday: string} $schedule
+     */
+    public static function editCron(CpanelClient $client, string $lineKey, array $schedule, string $command): void
+    {
+        $params = [
+            'linekey' => $lineKey,
+            'command' => $command,
+            'minute' => $schedule['minute'],
+            'hour' => $schedule['hour'],
+            'day' => $schedule['day'],
+            'month' => $schedule['month'],
+            'weekday' => $schedule['weekday'],
+        ];
+
+        self::uapiOrApi2($client, ['Cron', 'edit_line', $params], ['Cron', 'edit_line', $params]);
     }
 
     public static function deleteCron(CpanelClient $client, string $lineKey): void
@@ -790,6 +1008,32 @@ final class CpanelService
         return self::stringList($raw);
     }
 
+    /**
+     * محدودیت‌های PHP یک دامنه — همان چیزهایی که موقع آپلود فایل بزرگ یا
+     * تایم‌اوت گرفتن سایت باید دید.
+     *
+     * @return array<string, string>
+     */
+    public static function phpLimits(CpanelClient $client, string $vhost): array
+    {
+        $raw = $client->uapi('LangPHP', 'php_ini_get_user_basic_directives', ['type' => 'vhost', 'path' => $vhost]);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $key = (string) ($row['key'] ?? ($row['name'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+            $value = $row['value'] ?? '';
+            $out[$key] = is_scalar($value) ? (string) $value : '';
+        }
+
+        return $out;
+    }
+
     public static function setPhpVersion(CpanelClient $client, string $vhost, string $version): void
     {
         $client->uapi('LangPHP', 'php_set_vhost_lang_version', ['vhost' => $vhost, 'version' => $version]);
@@ -821,12 +1065,14 @@ final class CpanelService
                 continue;
             }
             $type = strtolower((string) ($row['type'] ?? ''));
+            $permissions = $row['permissions'] ?? ($row['mode'] ?? ($row['rawmode'] ?? null));
             $out[] = [
                 'name' => $name,
                 'path' => rtrim($dir, '/') . '/' . $name,
                 'dir' => $type === 'dir' || $type === 'directory' || (bool) ($row['isdir'] ?? false),
                 'size' => self::numberOrNull($row['size'] ?? ($row['humansize'] ?? null)),
                 'mtime' => isset($row['mtime']) ? (int) $row['mtime'] : null,
+                'permissions' => $permissions !== null ? self::formatPermissions((string) $permissions) : '',
             ];
         }
 
@@ -872,6 +1118,74 @@ final class CpanelService
         ]);
     }
 
+    /**
+     * تغییر نام، کپی و جابه‌جایی — هر سه با همان fileop سی‌پنل.
+     */
+    public static function renamePath(CpanelClient $client, string $path, string $newName): void
+    {
+        $path = self::normalizePath($path);
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'rename',
+            'sourcefiles' => $path,
+            'destfiles' => trim($newName),
+            'doubledecode' => 0,
+        ]);
+    }
+
+    public static function copyPath(CpanelClient $client, string $path, string $destination): void
+    {
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'copy',
+            'sourcefiles' => self::normalizePath($path),
+            'destfiles' => self::normalizePath($destination),
+            'doubledecode' => 0,
+        ]);
+    }
+
+    public static function movePath(CpanelClient $client, string $path, string $destination): void
+    {
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'move',
+            'sourcefiles' => self::normalizePath($path),
+            'destfiles' => self::normalizePath($destination),
+            'doubledecode' => 0,
+        ]);
+    }
+
+    /**
+     * تغییر سطح دسترسی فایل/پوشه (مثل 644 برای فایل و 755 برای پوشه).
+     */
+    public static function chmodPath(CpanelClient $client, string $path, string $permissions): void
+    {
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'chmod',
+            'sourcefiles' => self::normalizePath($path),
+            'metadata' => ltrim(trim($permissions), '0') ?: '644',
+            'doubledecode' => 0,
+        ]);
+    }
+
+    /**
+     * فشرده‌کردن یک پوشه یا فایل به zip — مفید برای بکاپ گرفتن قبل از تغییر.
+     */
+    public static function compressPath(CpanelClient $client, string $path, string $archiveName = ''): string
+    {
+        $path = self::normalizePath($path);
+        $archive = trim($archiveName) !== ''
+            ? self::normalizePath($archiveName)
+            : $path . '-' . gmdate('Ymd-His') . '.zip';
+
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'compress',
+            'sourcefiles' => $path,
+            'destfiles' => $archive,
+            'metadata' => 'zip',
+            'doubledecode' => 0,
+        ]);
+
+        return $archive;
+    }
+
     public static function deletePath(CpanelClient $client, string $path): void
     {
         $client->api2('Fileman', 'fileop', [
@@ -913,6 +1227,51 @@ final class CpanelService
         $user = $client->targetUser();
 
         return $user !== '' ? "/home/{$user}" : '/home';
+    }
+
+    /**
+     * سی‌پنل سطح دسترسی را گاهی 0644، گاهی 644 و گاهی عدد اکتال خام می‌دهد.
+     */
+    public static function formatPermissions(string $raw): string
+    {
+        $clean = trim($raw);
+        if ($clean === '') {
+            return '';
+        }
+        if (ctype_digit($clean)) {
+            $clean = substr($clean, -4);
+
+            return ltrim($clean, '0') ?: '0';
+        }
+
+        return $clean;
+    }
+
+    /**
+     * بزرگ‌ترین فایل‌های یک پوشه — برای وقتی فضای هاست پر شده و باید فهمید
+     * چه چیزی جا گرفته است.
+     *
+     * @return array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int, permissions: string}>
+     */
+    public static function largestFiles(CpanelClient $client, string $dir, int $limit = 10): array
+    {
+        $files = array_values(array_filter(self::listFiles($client, $dir), static fn (array $entry): bool => !$entry['dir']));
+        usort($files, static fn (array $a, array $b): int => (int) (($b['size'] ?? 0) <=> ($a['size'] ?? 0)));
+
+        return array_slice($files, 0, $limit);
+    }
+
+    /**
+     * فایل‌هایی که تازه عوض شده‌اند — برای وقتی سایت ناگهان خراب شده.
+     *
+     * @return array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int, permissions: string}>
+     */
+    public static function recentFiles(CpanelClient $client, string $dir, int $limit = 10): array
+    {
+        $files = self::listFiles($client, $dir);
+        usort($files, static fn (array $a, array $b): int => (int) (($b['mtime'] ?? 0) <=> ($a['mtime'] ?? 0)));
+
+        return array_slice($files, 0, $limit);
     }
 
     public static function isArchive(string $name): bool

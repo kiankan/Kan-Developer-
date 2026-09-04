@@ -80,6 +80,34 @@ while (time() < $deadline) {
             ['file' => 'site.zip', 'type' => 'file', 'size' => 2048],
         ]],
         str_contains($path, 'Fileman/upload_files') => ['status' => 1, 'data' => ['uploads' => [['status' => 1, 'file' => 'ok']]]],
+        str_contains($path, 'StatsBar/get_stats') => ['status' => 1, 'data' => [
+            ['name' => 'hostname', 'value' => 'srv01.example.com'],
+            ['name' => 'plan', 'value' => 'Business Pro'],
+            ['name' => 'lastlogin', 'value' => '2026-09-03 21:10'],
+            ['name' => 'lastlogin_ip', 'value' => '203.0.113.55'],
+            ['name' => 'cpanelversion', 'value' => '118.0.12'],
+        ]],
+        str_contains($path, 'Features/list_features') => ['status' => 1, 'data' => [
+            ['id' => 'cron', 'enabled' => 1],
+            ['id' => 'ssl', 'enabled' => 1],
+            ['id' => 'ssh', 'enabled' => 0],
+        ]],
+        str_contains($path, 'DomainInfo/domains_data') => ['status' => 1, 'data' => [
+            'main_domain' => ['domain' => 'example.com', 'documentroot' => '/home/demo/public_html', 'ip' => '203.0.113.7'],
+            'addon_domains' => [['domain' => 'second.com', 'documentroot' => '/home/demo/second.com', 'ip' => '203.0.113.7']],
+        ]],
+        str_contains($path, 'LangPHP/php_get_vhost_versions') => ['status' => 1, 'data' => [
+            ['vhost' => 'example.com', 'version' => 'ea-php82'],
+        ]],
+        str_contains($path, 'LangPHP/php_ini_get_user_basic_directives') => ['status' => 1, 'data' => [
+            ['key' => 'memory_limit', 'value' => '256M'],
+            ['key' => 'upload_max_filesize', 'value' => '64M'],
+            ['key' => 'max_execution_time', 'value' => '120'],
+        ]],
+        str_contains($path, 'Email/get_client_settings') => ['status' => 1, 'data' => [
+            'imap' => ['server' => 'mail.example.com', 'port' => 993, 'ssl' => 1],
+            'smtp' => ['server' => 'mail.example.com', 'port' => 465, 'ssl' => 1],
+        ]],
         str_contains($path, 'Mysql/get_restrictions') => ['status' => 1, 'data' => ['prefix' => 'demo_', 'prefixing_enabled' => 1, 'max_database_name_length' => 64]],
         str_contains($path, 'Mime/list_redirects') => ['status' => 1, 'data' => [
             ['sourceurl' => 'old.example.com', 'destination' => 'https://example.com', 'type' => 'permanent'],

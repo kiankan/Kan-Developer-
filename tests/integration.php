@@ -614,6 +614,55 @@ if (is_resource($cpanelProcess)) {
         expect(in_array('m:howto', tg_last_buttons(), true), 'دکمه‌ی بازگشت به راهنما باید باشد');
     });
 
+    scenario('خلاصه‌ی حساب، اطلاعات واقعی هاست را نشان می‌دهد', function (): void {
+        press('a:summary');
+        $text = tg_last_text();
+        expect(str_contains($text, 'srv01.example.com'), 'نام سرور نیامد');
+        expect(str_contains($text, 'Business Pro'), 'نام پلن نیامد');
+        expect(str_contains($text, '203.0.113.55'), 'آی‌پی آخرین ورود نیامد');
+        expect(str_contains($text, '/home/demo'), 'پوشه‌ی هوم نیامد');
+        expect(in_array('a:acctfeatures', tg_last_buttons(), true), 'دکمه‌ی امکانات فعال نبود');
+
+        press('a:acctfeatures');
+        expect(str_contains(tg_last_text(), 'cron'), 'فهرست قابلیت‌های فعال نیامد');
+        expect(str_contains(tg_last_text(), 'ssh'), 'قابلیت‌های غیرفعال هم باید بیایند');
+    });
+
+    scenario('لیست دامنه‌ها، پوشه‌ی ریشه و آی‌پی هر دامنه را می‌دهد', function (): void {
+        press('a:domains');
+        $text = tg_last_text();
+        expect(str_contains($text, '/home/demo/public_html'), 'پوشه‌ی ریشه نیامد');
+        expect(str_contains($text, '203.0.113.7'), 'آی‌پی دامنه نیامد');
+        expect(in_array('f:site_check', tg_last_buttons(), true), 'دکمه‌ی بررسی سلامت نبود');
+    });
+
+    scenario('محدودیت‌های PHP هر دامنه نمایش داده می‌شود', function (): void {
+        press('f:php_limits');
+        press('c:0');
+        $text = tg_last_text();
+        expect(str_contains($text, '256M'), 'memory_limit نیامد');
+        expect(str_contains($text, '64M'), 'upload_max_filesize نیامد');
+    });
+
+    scenario('تنظیمات IMAP/SMTP یک صندوق داده می‌شود', function (): void {
+        press('f:email_settings');
+        press('c:0');
+        $text = tg_last_text();
+        expect(str_contains($text, 'mail.example.com'), 'سرور ایمیل نیامد');
+        expect(str_contains($text, '993'), 'پورت IMAP نیامد');
+    });
+
+    scenario('بزرگ‌ترین فایل‌ها و تغییرات اخیر از منوی فایل‌ها می‌آیند', function (): void {
+        press('m:files');
+        $buttons = tg_last_buttons();
+        foreach (['a:bigfiles', 'a:recentfiles', 'f:file_rename', 'f:file_chmod', 'f:file_compress', 'f:file_move'] as $expected) {
+            expect(in_array($expected, $buttons, true), "دکمه‌ی $expected در منوی فایل‌ها نبود");
+        }
+
+        press('a:bigfiles');
+        expect(str_contains(tg_last_text(), 'site.zip'), 'بزرگ‌ترین فایل نیامد');
+    });
+
     scenario('لاگ عملیات، کار انجام‌شده را ثبت کرده است', function (): void {
         press('a:log');
         expect(str_contains(tg_last_text(), 'email_del'), 'عملیات حذف در لاگ نیست');

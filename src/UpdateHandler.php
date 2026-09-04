@@ -323,6 +323,90 @@ final class UpdateHandler
                 ['key' => 'line', 'prompt' => 'کدام رکورد حذف شود؟', 'picker' => 'dns_records'],
             ],
         ],
+        'site_check' => [
+            'title' => '🩺 بررسی سلامت دامنه',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => "کدام دامنه بررسی شود؟\n\nربات از بیرون سرور صدایش می‌زند و DNS، ریدایرکت، کد پاسخ، سرعت و گواهی SSL را می‌بیند.", 'picker' => 'domains'],
+            ],
+        ],
+        'email_settings' => [
+            'title' => '📱 تنظیمات IMAP/SMTP',
+            'scope' => 'account',
+            'back' => 'email',
+            'steps' => [
+                ['key' => 'email', 'prompt' => 'تنظیمات کدام صندوق را می‌خواهید؟', 'picker' => 'emails'],
+            ],
+        ],
+        'php_limits' => [
+            'title' => '⚙️ محدودیت‌های PHP',
+            'scope' => 'account',
+            'back' => 'php',
+            'steps' => [
+                ['key' => 'vhost', 'prompt' => "کدام دامنه؟\n\n(حافظه، حجم مجاز آپلود، زمان اجرا و ... را نشان می‌دهد.)", 'picker' => 'vhosts'],
+            ],
+        ],
+        'cron_edit' => [
+            'title' => '✏️ ویرایش کران‌جاب',
+            'scope' => 'account',
+            'back' => 'cron',
+            'steps' => [
+                ['key' => 'key', 'prompt' => 'کدام کران ویرایش شود؟', 'picker' => 'cron'],
+                ['key' => 'schedule', 'prompt' => 'زمان‌بندی جدید:', 'choices' => [
+                    ['هر ۵ دقیقه', '*/5 * * * *'],
+                    ['هر ۱۵ دقیقه', '*/15 * * * *'],
+                    ['هر ساعت', '0 * * * *'],
+                    ['هر ۶ ساعت', '0 */6 * * *'],
+                    ['هر شب ساعت ۰۰:۰۰', '0 0 * * *'],
+                ]],
+                ['key' => 'command', 'prompt' => 'دستور جدید (همان دستور قبلی را هم می‌توانید دوباره بفرستید):'],
+            ],
+        ],
+        'file_rename' => [
+            'title' => '✏️ تغییر نام فایل/پوشه',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => 'مسیر کامل فایل یا پوشه:'],
+                ['key' => 'name', 'prompt' => 'نام جدید (فقط نام، بدون مسیر):'],
+            ],
+        ],
+        'file_move' => [
+            'title' => '📦 جابه‌جایی یا کپی',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => 'مسیر کامل فایل یا پوشه‌ی مبدأ:'],
+                ['key' => 'destination', 'prompt' => 'مسیر پوشه‌ی مقصد:', 'picker' => 'dirs'],
+                ['key' => 'mode', 'prompt' => 'کدام کار؟', 'choices' => [
+                    ['📦 جابه‌جایی (Move)', 'move'],
+                    ['📄 کپی (Copy)', 'copy'],
+                ]],
+            ],
+        ],
+        'file_chmod' => [
+            'title' => '🔐 تغییر سطح دسترسی',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => 'مسیر کامل فایل یا پوشه:'],
+                ['key' => 'permissions', 'prompt' => "سطح دسترسی؟\n\n۶۴۴ برای فایل‌ها و ۷۵۵ برای پوشه‌ها استاندارد است. ۷۷۷ ناامن است و اکثر هاست‌ها هم قبولش نمی‌کنند.", 'choices' => [
+                    ['📄 644 (فایل)', '644'],
+                    ['📁 755 (پوشه)', '755'],
+                    ['🔒 600 (فقط خودم)', '600'],
+                    ['🔓 775', '775'],
+                ]],
+            ],
+        ],
+        'file_compress' => [
+            'title' => '🗜 فشرده‌سازی (zip)',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'path', 'prompt' => "مسیر پوشه یا فایلی که باید zip شود:\n\n💡 قبل از تغییرات مهم، یک zip از پوشه‌ی سایت بگیرید تا راه برگشت داشته باشید."],
+            ],
+        ],
         'php_set' => [
             'title' => '🐘 تغییر نسخه‌ی PHP دامنه',
             'scope' => 'account',
@@ -892,7 +976,7 @@ final class UpdateHandler
                 [self::btn('📋 لیست حساب‌ها', 'a:emails')],
                 [self::btn('➕ افزودن', 'f:email_add'), self::btn('🗑 حذف', 'f:email_del')],
                 [self::btn('🔑 تغییر رمز', 'f:email_passwd'), self::btn('📦 سهمیه', 'f:email_quota')],
-                [self::btn('📮 فورواردها', 'a:forwarders')],
+                [self::btn('📮 فورواردها', 'a:forwarders'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'db' => [self::databaseMenuText(), [
@@ -909,7 +993,7 @@ final class UpdateHandler
                 [self::btn('📋 لیست دامنه‌ها', 'a:domains')],
                 [self::btn('➕ ساب‌دامنه', 'f:sub_add'), self::btn('🗑 حذف ساب‌دامنه', 'f:sub_del')],
                 [self::btn('↪️ ریدایرکت‌ها', 'a:redirects'), self::btn('🧭 DNS', 'm:dns')],
-                [self::btn('🔒 SSL', 'm:ssl')],
+                [self::btn('🩺 بررسی سلامت دامنه', 'f:site_check'), self::btn('🔒 SSL', 'm:ssl')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'files' => ["📂 <b>فایل‌های هاست</b>\n\nسورس سایت را از همین‌جا آپلود کنید: فایل (یا zip) را بفرستید، و اگر آرشیو بود همان‌جا بازش کنید.\n"
@@ -917,6 +1001,9 @@ final class UpdateHandler
                 [self::btn('🗂 مرور فایل‌ها', 'a:files')],
                 [self::btn('⬆️ آپلود فایل', 'f:file_upload'), self::btn('🗜 باز کردن آرشیو', 'f:file_extract')],
                 [self::btn('📁 پوشه‌ی جدید', 'f:file_mkdir'), self::btn('🗑 حذف فایل/پوشه', 'f:file_delete')],
+                [self::btn('✏️ تغییر نام', 'f:file_rename'), self::btn('📦 جابه‌جایی/کپی', 'f:file_move')],
+                [self::btn('🔐 سطح دسترسی', 'f:file_chmod'), self::btn('🗜 فشرده‌سازی', 'f:file_compress')],
+                [self::btn('📊 بزرگ‌ترین فایل‌ها', 'a:bigfiles'), self::btn('🕒 تغییرات اخیر', 'a:recentfiles')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'ftp' => ["📁 <b>حساب‌های FTP</b>\n\nبرای وصل‌شدن با نرم‌افزارهایی مثل FileZilla.", [
@@ -926,8 +1013,8 @@ final class UpdateHandler
             ]],
             'cron' => ["⏰ <b>کران‌جاب‌ها</b>\n\nدستورهایی که سرور خودکار و سر وقت اجرا می‌کند (مثل کران وردپرس یا بکاپ روزانه).", [
                 [self::btn('📋 لیست کران‌جاب‌ها', 'a:crons')],
-                [self::btn('➕ افزودن', 'f:cron_add'), self::btn('🗑 حذف', 'f:cron_del')],
-                [self::btn('📧 ایمیل خروجی کران', 'f:cron_email')],
+                [self::btn('➕ افزودن', 'f:cron_add'), self::btn('✏️ ویرایش', 'f:cron_edit')],
+                [self::btn('🗑 حذف', 'f:cron_del'), self::btn('📧 ایمیل خروجی کران', 'f:cron_email')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'dns' => ["🧭 <b>رکوردهای DNS</b>\n\nمشخص می‌کند دامنه به کجا اشاره کند (A برای آی‌پی، CNAME برای نام، MX برای ایمیل، TXT برای تأییدیه‌ها).", [
@@ -942,7 +1029,7 @@ final class UpdateHandler
             ]],
             'php' => ["🐘 <b>نسخه‌ی PHP</b>\n\nنسخه‌ی PHP هر دامنه را جدا می‌شود عوض کرد (MultiPHP).", [
                 [self::btn('📋 نسخه‌ی هر دامنه', 'a:php')],
-                [self::btn('🔧 تغییر نسخه', 'f:php_set')],
+                [self::btn('🔧 تغییر نسخه', 'f:php_set'), self::btn('⚙️ محدودیت‌ها', 'f:php_limits')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'backup' => ["💾 <b>بکاپ</b>\n\nبکاپ کامل حساب در پوشه‌ی هوم ساخته می‌شود و بعد می‌توانید دانلودش کنید.", [
@@ -1272,12 +1359,24 @@ final class UpdateHandler
             $text = match ($action) {
                 'ping' => Render::ping(ServerStore::client()->ping()),
                 'summary' => Render::summary(CpanelService::summary(self::accountClient())),
-                'emails' => Render::emails(CpanelService::emails(self::accountClient())),
+                'emails' => self::emailsWithUsage(),
                 'dbs' => Render::databases(
                     CpanelService::databases(self::accountClient()),
                     CpanelService::databaseUsers(self::accountClient()),
                 ),
-                'domains' => Render::domains(CpanelService::domains(self::accountClient())),
+                'domains' => Render::domains(
+                    CpanelService::domains(self::accountClient()),
+                    CpanelService::domainsData(self::accountClient()),
+                ),
+                'acctfeatures' => Render::features(CpanelService::accountFeatures(self::accountClient())),
+                'bigfiles' => Render::fileList(
+                    '📊 <b>بزرگ‌ترین فایل‌های پوشه‌ی هوم</b>',
+                    CpanelService::largestFiles(self::accountClient(), CpanelService::homeDir(self::accountClient())),
+                ),
+                'recentfiles' => Render::fileList(
+                    '🕒 <b>تازه‌ترین تغییرات پوشه‌ی هوم</b>',
+                    CpanelService::recentFiles(self::accountClient(), CpanelService::homeDir(self::accountClient())),
+                ),
                 'ftps' => Render::ftp(CpanelService::ftpAccounts(self::accountClient())),
                 'crons' => Render::cron(CpanelService::cronJobs(self::accountClient())),
                 'ssl' => Render::ssl(CpanelService::sslHosts(self::accountClient())),
@@ -1299,7 +1398,29 @@ final class UpdateHandler
             $text = Render::error($e);
         }
 
-        self::respond($api, $chatId, $text, self::backKeyboard(self::sectionOf($action)));
+        self::respond($api, $chatId, $text, self::actionKeyboard($action));
+    }
+
+    /**
+     * کیبورد پایین هر «کار»: دکمه‌های مرتبط با همان صفحه، به‌علاوه‌ی بازگشت.
+     *
+     * @return array{inline_keyboard: array<int, array<int, array<string, string>>>}
+     */
+    private static function actionKeyboard(string $action): array
+    {
+        $extra = match ($action) {
+            'summary' => [[self::btn('🧩 امکانات فعال حساب', 'a:acctfeatures')]],
+            'acctfeatures' => [[self::btn('⬅️ خلاصه‌ی حساب', 'a:summary')]],
+            'domains' => [[self::btn('🩺 بررسی سلامت دامنه', 'f:site_check')]],
+            'bigfiles', 'recentfiles' => [[self::btn('🗂 مرور فایل‌ها', 'a:files')]],
+            'php' => [[self::btn('⚙️ محدودیت‌های PHP', 'f:php_limits')]],
+            'emails' => [[self::btn('📮 فورواردها', 'a:forwarders')]],
+            default => [],
+        };
+
+        $back = self::backKeyboard(self::sectionOf($action));
+
+        return ['inline_keyboard' => array_merge($extra, $back['inline_keyboard'])];
     }
 
     /**
@@ -1628,6 +1749,25 @@ final class UpdateHandler
         self::respond($api, $chatId, $text, ['inline_keyboard' => $rows]);
     }
 
+    /**
+     * فهرست ایمیل‌ها به‌همراه مجموع مصرف و هشدار صندوق‌های نزدیک به پر شدن.
+     */
+    private static function emailsWithUsage(): string
+    {
+        $emails = CpanelService::emails(self::accountClient());
+        $usage = CpanelService::emailUsage($emails);
+
+        $text = Render::emails($emails);
+        if ($usage['count'] > 0) {
+            $text .= "\n\n📦 مجموع مصرف: " . Format::bytes($usage['used']);
+        }
+        if ($usage['near_full'] !== []) {
+            $text .= "\n⚠️ نزدیک پر شدن: " . Format::escapeHtml(implode('، ', $usage['near_full']));
+        }
+
+        return $text;
+    }
+
     private static function runAutoSslAction(): string
     {
         CpanelService::runAutoSsl(self::accountClient());
@@ -1648,7 +1788,8 @@ final class UpdateHandler
             'domains', 'redirects' => 'dom',
             'ssl', 'autossl' => 'ssl',
             'mysqlhosts' => 'db',
-            'files' => 'files',
+            'files', 'bigfiles', 'recentfiles' => 'files',
+            'acctfeatures' => null,
             'ftps' => 'ftp',
             'crons' => 'cron',
             'php' => 'php',
@@ -2426,6 +2567,92 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSiteCheck(array $data): string
+    {
+        $domain = SiteCheck::cleanDomain((string) $data['domain']);
+        $info = CpanelService::accountInfo(self::accountClient());
+        $serverIp = '';
+        foreach (CpanelService::domainsData(self::accountClient()) as $detail) {
+            if ($detail['ip'] !== '') {
+                $serverIp = $detail['ip'];
+                break;
+            }
+        }
+
+        return Render::siteCheck(SiteCheck::run($domain, $serverIp !== '' ? $serverIp : ($info['ip'] ?? null)));
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runEmailSettings(array $data): string
+    {
+        return Render::emailSettings(
+            (string) $data['email'],
+            CpanelService::emailClientSettings(self::accountClient(), (string) $data['email']),
+        );
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runPhpLimits(array $data): string
+    {
+        return Render::phpLimits(
+            (string) $data['vhost'],
+            CpanelService::phpLimits(self::accountClient(), (string) $data['vhost']),
+        );
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runCronEdit(array $data): string
+    {
+        $schedule = CpanelService::parseSchedule((string) $data['schedule']);
+        if ($schedule === null) {
+            throw CpanelError::config('زمان‌بندی باید ۵ فیلد کران باشد، مثل <code>*/5 * * * *</code>.');
+        }
+        CpanelService::editCron(self::accountClient(), (string) $data['key'], $schedule, (string) $data['command']);
+
+        return '✅ کران‌جاب به‌روزرسانی شد: <code>' . Format::escapeHtml((string) $data['schedule']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileRename(array $data): string
+    {
+        CpanelService::renamePath(self::accountClient(), (string) $data['path'], (string) $data['name']);
+
+        return '✅ نام تغییر کرد به <code>' . Format::escapeHtml((string) $data['name']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileMove(array $data): string
+    {
+        $copy = (string) ($data['mode'] ?? 'move') === 'copy';
+        $client = self::accountClient();
+
+        if ($copy) {
+            CpanelService::copyPath($client, (string) $data['path'], (string) $data['destination']);
+        } else {
+            CpanelService::movePath($client, (string) $data['path'], (string) $data['destination']);
+        }
+
+        return ($copy ? '✅ کپی شد به ' : '✅ منتقل شد به ') . '<code>' . Format::escapeHtml((string) $data['destination']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileChmod(array $data): string
+    {
+        CpanelService::chmodPath(self::accountClient(), (string) $data['path'], (string) $data['permissions']);
+
+        return '✅ سطح دسترسی <code>' . Format::escapeHtml((string) $data['path']) . '</code> شد '
+            . Format::escapeHtml((string) $data['permissions']) . '.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileCompress(array $data): string
+    {
+        $archive = CpanelService::compressPath(self::accountClient(), (string) $data['path']);
+
+        return '✅ فشرده شد: <code>' . Format::escapeHtml($archive) . '</code>';
     }
 
     /** @param array<string, mixed> $data */

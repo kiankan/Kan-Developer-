@@ -33,16 +33,45 @@ final class Render
         $lines = ['📊 <b>خلاصه‌ی حساب</b>'];
         $lines[] = '🖥 ' . self::e((string) $data['server']) . ' — <code>' . self::e((string) $data['user']) . '</code>';
 
+        $info = is_array($data['info'] ?? null) ? $data['info'] : [];
+        $row = static function (string $label, string $value) use (&$lines): void {
+            if (trim($value) !== '') {
+                $lines[] = $label . ': ' . $value;
+            }
+        };
+
         $domains = $data['domains'];
         if (($domains['main_domain'] ?? '') !== '') {
             $lines[] = '🌐 دامنه‌ی اصلی: <code>' . self::e((string) $domains['main_domain']) . '</code>';
         }
 
+        $row('🏷 سرور', '<code>' . self::e((string) ($info['hostname'] ?? ($info['machine'] ?? ''))) . '</code>');
+        $row('📦 پلن', self::e((string) ($info['plan'] ?? '')));
+        $row('📂 پوشه‌ی هوم', '<code>' . self::e((string) ($info['home'] ?? ($info['homedir'] ?? ''))) . '</code>');
+        $row('🕐 آخرین ورود', self::e((string) ($info['lastlogin'] ?? '')));
+        $row('🖧 آی‌پی آخرین ورود', '<code>' . self::e((string) ($info['lastlogin_ip'] ?? '')) . '</code>');
+        $row('🧩 نسخه‌ی cPanel', self::e((string) ($info['cpanelversion'] ?? '')));
+
+        if (isset($info['suspended'])) {
+            $lines[] = 'وضعیت حساب: ' . (((string) $info['suspended']) === '1' ? '⛔️ معلق' : '✅ فعال');
+        }
+
         if ($data['usage'] !== []) {
             $lines[] = '';
-            $lines[] = '<b>منابع:</b>';
+            $lines[] = '<b>مصرف منابع:</b>';
             foreach ($data['usage'] as $item) {
                 $lines[] = self::usageLine($item);
+            }
+
+            $warnings = [];
+            foreach ($data['usage'] as $item) {
+                if ($item['percent'] !== null && $item['percent'] >= 80) {
+                    $warnings[] = $item['label'] . ' (' . Format::percent($item['percent']) . ')';
+                }
+            }
+            if ($warnings !== []) {
+                $lines[] = '';
+                $lines[] = '⚠️ نزدیک سقف: ' . self::e(implode('، ', $warnings));
             }
         }
 
@@ -53,6 +82,27 @@ final class Render
         $lines[] = "🌐 ساب‌دامنه: {$counts['subdomains']}   ➕ ادان‌دامنه: {$counts['addon']}";
         $lines[] = '';
         $lines[] = '🕐 ' . Format::jalaliNow();
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{enabled: array<int, string>, disabled: array<int, string>} $features
+     */
+    public static function features(array $features): string
+    {
+        if ($features['enabled'] === [] && $features['disabled'] === []) {
+            return 'ℹ️ این هاست فهرست قابلیت‌های حساب را از طریق API نمی‌دهد.';
+        }
+
+        $lines = ['🧩 <b>قابلیت‌های فعال این حساب</b> (' . count($features['enabled']) . ')', ''];
+        $lines[] = self::e(implode('، ', $features['enabled']));
+
+        if ($features['disabled'] !== []) {
+            $lines[] = '';
+            $lines[] = '🚫 <b>غیرفعال</b> (' . count($features['disabled']) . '):';
+            $lines[] = self::e(implode('، ', $features['disabled']));
+        }
 
         return implode("\n", $lines);
     }
@@ -113,9 +163,29 @@ final class Render
         return implode("\n", $lines);
     }
 
-    public static function domains(array $domains): string
+    /**
+     * @param array<int, array{domain: string, docroot: string, ip: string, type: string}> $details
+     */
+    public static function domains(array $domains, array $details = []): string
     {
         $lines = ['🌐 <b>دامنه‌ها</b>'];
+
+        if ($details !== []) {
+            $lines[] = '';
+            foreach ($details as $detail) {
+                $lines[] = '• <code>' . self::e($detail['domain']) . '</code>'
+                    . ($detail['type'] !== '' ? ' — ' . self::e($detail['type']) : '');
+                if ($detail['docroot'] !== '') {
+                    $lines[] = '   📂 <code>' . self::e($detail['docroot']) . '</code>';
+                }
+                if ($detail['ip'] !== '') {
+                    $lines[] = '   🖧 <code>' . self::e($detail['ip']) . '</code>';
+                }
+            }
+
+            return implode("\n", $lines);
+        }
+
         $lines[] = '';
         $lines[] = '🏠 اصلی: <code>' . self::e($domains['main_domain']) . '</code>';
         $lines[] = '';
@@ -127,6 +197,134 @@ final class Render
         $lines[] = '';
         $lines[] = '🅿️ پارک‌شده‌ها (' . count($domains['parked_domains']) . '):';
         $lines[] = $domains['parked_domains'] === [] ? '—' : self::bullets($domains['parked_domains']);
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     */
+    public static function siteCheck(array $result): string
+    {
+        $lines = ['🩺 <b>بررسی سلامت ' . self::e((string) $result['domain']) . '</b>'];
+
+        $status = static function (array $check, string $label): string {
+            if (($check['status'] ?? 0) === 0) {
+                return "❌ {$label}: جواب نداد" . (($check['error'] ?? '') !== '' ? ' (' . Format::escapeHtml((string) $check['error']) . ')' : '');
+            }
+            $icon = ($check['status'] < 400) ? '✅' : '⚠️';
+
+            return "{$icon} {$label}: کد {$check['status']} — {$check['time_ms']} میلی‌ثانیه"
+                . (($check['loop'] ?? false) ? ' 🔁 حلقه‌ی ریدایرکت' : '');
+        };
+
+        $lines[] = '';
+        $lines[] = $status($result['https'], 'HTTPS');
+        $lines[] = $status($result['http'], 'HTTP');
+        $lines[] = $status($result['www'], 'www');
+
+        $chain = $result['https']['chain'] ?? [];
+        if (count($chain) > 1) {
+            $lines[] = '';
+            $lines[] = '↪️ مسیر ریدایرکت:';
+            foreach ($chain as $hop) {
+                $lines[] = '   ' . self::e((string) $hop);
+            }
+        }
+
+        $dns = $result['dns'];
+        $lines[] = '';
+        $lines[] = '🧭 رکورد A: ' . ($dns['a'] === [] ? '—' : '<code>' . self::e(implode('، ', $dns['a'])) . '</code>');
+        if ($dns['matches_server'] !== null) {
+            $lines[] = $dns['matches_server']
+                ? '   ✅ به همین هاست اشاره می‌کند'
+                : '   ⚠️ به این هاست اشاره نمی‌کند';
+        }
+        if ($dns['ns'] !== []) {
+            $lines[] = '🌐 نیم‌سرورها: ' . self::e(implode('، ', $dns['ns']));
+        }
+
+        $certificate = $result['certificate'];
+        $lines[] = '';
+        if ($certificate === null) {
+            $lines[] = '🔒 گواهی SSL خوانده نشد.';
+        } else {
+            $lines[] = '🔒 گواهی از: ' . self::e((string) $certificate['issuer']);
+            $lines[] = '   📅 انقضا: ' . self::e(Format::timestampWithRemaining($certificate['valid_to']));
+            $lines[] = '   ' . (($certificate['covers_domain'] ?? false) ? '✅ برای همین دامنه صادر شده' : '⚠️ نام دامنه با گواهی نمی‌خواند');
+        }
+
+        if ($result['problems'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>مشکل‌های پیداشده:</b>';
+            foreach ($result['problems'] as $problem) {
+                $lines[] = '• ' . self::e((string) $problem);
+            }
+        } else {
+            $lines[] = '';
+            $lines[] = '✅ مشکلی پیدا نشد.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, string> $limits
+     */
+    public static function phpLimits(string $vhost, array $limits): string
+    {
+        if ($limits === []) {
+            return 'ℹ️ محدودیت‌های PHP این دامنه از طریق API در دسترس نیست.';
+        }
+
+        $labels = [
+            'memory_limit' => '🧠 حافظه (memory_limit)',
+            'upload_max_filesize' => '⬆️ حجم آپلود (upload_max_filesize)',
+            'post_max_size' => '📮 حجم فرم (post_max_size)',
+            'max_execution_time' => '⏱ زمان اجرا (max_execution_time)',
+            'max_input_vars' => '🔢 تعداد ورودی (max_input_vars)',
+            'max_input_time' => '⏳ زمان دریافت ورودی (max_input_time)',
+        ];
+
+        $lines = ['⚙️ <b>محدودیت‌های PHP</b> — <code>' . self::e($vhost) . '</code>', ''];
+        foreach ($labels as $key => $label) {
+            if (isset($limits[$key])) {
+                $lines[] = $label . ': <code>' . self::e($limits[$key]) . '</code>';
+            }
+        }
+        foreach ($limits as $key => $value) {
+            if (!isset($labels[$key])) {
+                $lines[] = self::e($key) . ': <code>' . self::e($value) . '</code>';
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<string, string> $settings
+     */
+    public static function emailSettings(string $email, array $settings): string
+    {
+        if ($settings === []) {
+            return 'ℹ️ تنظیمات این صندوق از طریق API برنگشت.';
+        }
+
+        $lines = ['📱 <b>تنظیمات ' . self::e($email) . '</b>', ''];
+        $wanted = ['imap', 'pop3', 'smtp', 'server', 'port', 'ssl', 'user'];
+
+        foreach ($settings as $key => $value) {
+            $lower = strtolower($key);
+            foreach ($wanted as $needle) {
+                if (str_contains($lower, $needle)) {
+                    $lines[] = self::e($key) . ': <code>' . self::e($value) . '</code>';
+                    break;
+                }
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '💡 در Outlook یا موبایل، همین مقادیر را با نام کاربری «آدرس کامل ایمیل» و رمز همان صندوق وارد کنید.';
 
         return implode("\n", $lines);
     }
@@ -204,6 +402,39 @@ final class Render
 
         $dirs = count(array_filter($entries, static fn (array $entry): bool => $entry['dir']));
         $lines[] = $dirs . ' پوشه، ' . (count($entries) - $dirs) . ' فایل';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * فهرست فایل با جزئیات (حجم، تاریخ، سطح دسترسی) — برای نماهایی مثل
+     * «بزرگ‌ترین فایل‌ها» و «تغییرات اخیر».
+     *
+     * @param array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int, permissions?: string}> $entries
+     */
+    public static function fileList(string $title, array $entries): string
+    {
+        if ($entries === []) {
+            return $title . "\n\nچیزی پیدا نشد.";
+        }
+
+        $lines = [$title, ''];
+        foreach ($entries as $entry) {
+            $lines[] = ($entry['dir'] ? '📁 ' : '📄 ') . '<code>' . self::e($entry['name']) . '</code>';
+            $meta = [];
+            if (($entry['size'] ?? null) !== null) {
+                $meta[] = Format::bytes((float) $entry['size']);
+            }
+            if (($entry['permissions'] ?? '') !== '') {
+                $meta[] = 'دسترسی ' . $entry['permissions'];
+            }
+            if (($entry['mtime'] ?? null) !== null) {
+                $meta[] = date('Y-m-d H:i', (int) $entry['mtime']);
+            }
+            if ($meta !== []) {
+                $lines[] = '   ' . self::e(implode(' — ', $meta));
+            }
+        }
 
         return implode("\n", $lines);
     }
