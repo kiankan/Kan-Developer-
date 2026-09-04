@@ -27,12 +27,131 @@ final class Admins
 
     public static function isAdmin(int $id): bool
     {
-        return in_array($id, self::all(), true);
+        if (in_array($id, self::all(), true)) {
+            return true;
+        }
+
+        return self::hasTemporaryAccess($id);
+    }
+
+    /**
+     * دسترسی موقت: کدی که چند ساعت اعتبار دارد و برای دادن به یک توسعه‌دهنده
+     * یا پشتیبان ساخته می‌شود. بعد از انقضا خودش بی‌اثر می‌شود.
+     *
+     * @return array{code: string, expires: int}
+     */
+    public static function createInvite(int $hours): array
+    {
+        $state = self::load();
+        $invite = ['code' => self::generateCode(), 'expires' => time() + max(1, $hours) * 3600];
+        $state['invite'] = $invite;
+        $state['guests'] = self::activeGuests($state);
+        self::save($state);
+
+        return $invite;
+    }
+
+    public static function revokeInvites(): void
+    {
+        $state = self::load();
+        unset($state['invite']);
+        $state['guests'] = [];
+        self::save($state);
+    }
+
+    /**
+     * @return array{code: string, expires: int}|null
+     */
+    public static function invite(): ?array
+    {
+        $state = self::load();
+        $invite = $state['invite'] ?? null;
+        if (!is_array($invite) || (int) ($invite['expires'] ?? 0) <= time()) {
+            return null;
+        }
+
+        return ['code' => (string) $invite['code'], 'expires' => (int) $invite['expires']];
+    }
+
+    /**
+     * @return array<int, array{id: int, expires: int}>
+     */
+    public static function guests(): array
+    {
+        return self::activeGuests(self::load());
+    }
+
+    /**
+     * تلاش برای استفاده از کد دسترسی موقت.
+     */
+    public static function redeemInvite(int $id, string $code): bool
+    {
+        $invite = self::invite();
+        if ($invite === null) {
+            return false;
+        }
+
+        $given = strtoupper(trim(str_replace([' ', '_'], ['', '-'], $code)));
+        if (!hash_equals($invite['code'], $given)) {
+            return false;
+        }
+
+        $state = self::load();
+        $guests = self::activeGuests($state);
+        $guests[] = ['id' => $id, 'expires' => $invite['expires']];
+        $state['guests'] = $guests;
+        self::save($state);
+
+        return true;
+    }
+
+    private static function hasTemporaryAccess(int $id): bool
+    {
+        foreach (self::guests() as $guest) {
+            if ($guest['id'] === $id) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     *
+     * @return array<int, array{id: int, expires: int}>
+     */
+    private static function activeGuests(array $state): array
+    {
+        $out = [];
+        foreach (is_array($state['guests'] ?? null) ? $state['guests'] : [] as $guest) {
+            if (!is_array($guest) || (int) ($guest['expires'] ?? 0) <= time()) {
+                continue;
+            }
+            $out[] = ['id' => (int) $guest['id'], 'expires' => (int) $guest['expires']];
+        }
+
+        return $out;
     }
 
     public static function isClaimed(): bool
     {
         return self::all() !== [];
+    }
+
+    /**
+     * ادمین‌های دائمی + مهمان‌های موقت — برای نمایش در فهرست.
+     *
+     * @return array<int, int>
+     */
+    public static function everyone(): array
+    {
+        $ids = self::all();
+        foreach (self::guests() as $guest) {
+            $ids[] = $guest['id'];
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /**
@@ -147,7 +266,7 @@ final class Admins
     }
 
     /**
-     * @return array{admins: array<int, mixed>, claim_code: string}
+     * @return array{admins: array<int, mixed>, claim_code: string, invite: array<string, mixed>|null, guests: array<int, mixed>}
      */
     private static function load(): array
     {
@@ -160,11 +279,13 @@ final class Admins
         return [
             'admins' => is_array($decoded['admins'] ?? null) ? $decoded['admins'] : [],
             'claim_code' => (string) ($decoded['claim_code'] ?? ''),
+            'invite' => is_array($decoded['invite'] ?? null) ? $decoded['invite'] : null,
+            'guests' => is_array($decoded['guests'] ?? null) ? $decoded['guests'] : [],
         ];
     }
 
     /**
-     * @param array{admins: array<int, mixed>, claim_code: string} $state
+     * @param array<string, mixed> $state
      */
     private static function save(array $state): void
     {

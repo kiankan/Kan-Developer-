@@ -924,6 +924,62 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains(tg_last_text(), 'مصرف پوشه') || str_contains(tg_last_text(), 'پیدا نشد'), 'صفحه‌ی مصرف پوشه‌ها نیامد');
     });
 
+    scenario('خروجی CSV به‌صورت فایل فرستاده می‌شود', function (): void {
+        press('menu');
+        expect(in_array('f:export_csv', tg_last_buttons(), true), 'دکمه‌ی خروجی CSV در منوی اصلی نبود');
+
+        $before = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        press('f:export_csv');
+        press('c:0');                                   // ایمیل‌ها
+        $after = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        expect($after > $before, 'فایل CSV فرستاده نشد');
+        expect(str_contains(tg_last_text(), 'ردیف'), 'تعداد ردیف‌ها گزارش نشد');
+    });
+
+    scenario('بررسی رکوردهای ایمیل دامنه', function (): void {
+        press('m:email');
+        expect(in_array('f:mail_records', tg_last_buttons(), true), 'دکمه‌ی بررسی رکوردهای ایمیل نبود');
+
+        press('f:mail_records');
+        press('c:0');
+        $text = tg_last_text();
+        expect(str_contains($text, 'MX'), 'وضعیت MX نیامد');
+        expect(str_contains($text, 'SPF'), 'وضعیت SPF نیامد');
+    });
+
+    scenario('بکاپ خودکار و دامنه‌های تحت‌نظر از منوی هشدارها تنظیم می‌شوند', function (): void {
+        press('m:alerts');
+        foreach (['f:backup_schedule', 'f:watch_domains'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی هشدارها نبود");
+        }
+
+        press('f:backup_schedule');
+        press('c:1');                                   // هفتگی
+        press('c:1');                                   // ۳ نسخه
+        expect(Settings::get(Settings::BACKUP_EVERY) === 'weekly', 'زمان‌بندی بکاپ ذخیره نشد');
+        expect(Settings::int(Settings::BACKUP_KEEP, 0) === 3, 'تعداد نسخه‌ها ذخیره نشد');
+
+        press('f:watch_domains');
+        send_text("example.com\nsecond.com");
+        expect(str_contains(Settings::get(Settings::WATCH_DOMAINS), 'second.com'), 'دامنه‌های تحت‌نظر ذخیره نشدند');
+    });
+
+    scenario('دسترسی موقت: کد ساخته و بعد لغو می‌شود', function (): void {
+        press('m:adm');
+        expect(in_array('f:guest_invite', tg_last_buttons(), true), 'دکمه‌ی دسترسی موقت نبود');
+
+        press('f:guest_invite');
+        press('c:0');                                   // ۲ ساعت
+        expect(str_contains(tg_last_text(), 'دسترسی موقت'), 'کد دسترسی موقت نمایش داده نشد');
+        expect(Admins::invite() !== null, 'کد ساخته نشد');
+
+        press('a:admins');
+        expect(str_contains(tg_last_text(), 'کد دسترسی موقت فعال'), 'فهرست ادمین‌ها باید کد فعال را نشان دهد');
+
+        press('a:revokeguests');
+        expect(Admins::invite() === null, 'کد باید لغو شود');
+    });
+
     scenario('لاگ عملیات، کارهای انجام‌شده را ثبت می‌کند و کلید داخلی لو نمی‌دهد', function (): void {
         press('a:log');
         $text = tg_last_text();

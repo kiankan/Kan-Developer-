@@ -346,6 +346,80 @@ final class UpdateHandler
                 ['key' => 'ip', 'prompt' => "آی‌پی مقصد را بفرستید.\n\n💡 آی‌پی هاست را در «دامنه‌ها → لیست دامنه‌ها» می‌بینید."],
             ],
         ],
+        'mail_records' => [
+            'title' => '📬 بررسی رکوردهای ایمیل دامنه',
+            'scope' => 'account',
+            'back' => 'email',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => "کدام دامنه بررسی شود؟\n\nMX، SPF، DKIM و DMARC را از بیرون می‌خوانم و می‌گویم کدام کم است.", 'picker' => 'domains'],
+            ],
+        ],
+        'watch_domains' => [
+            'title' => '👁 دامنه‌های تحت‌نظر',
+            'scope' => 'local',
+            'back' => 'alerts',
+            'steps' => [
+                ['key' => 'list', 'prompt' => "دامنه‌هایی که باید بالا بودنشان چک شود را بفرستید (هر خط یکی).\n\nخالی بفرستید (<code>-</code>) تا خودکار دامنه‌ی اصلی و ادان‌ها بررسی شوند."],
+            ],
+        ],
+        'backup_schedule' => [
+            'title' => '🗓 بکاپ خودکار',
+            'scope' => 'local',
+            'back' => 'alerts',
+            'steps' => [
+                ['key' => 'every', 'prompt' => 'هر چند وقت یک‌بار بکاپ کامل گرفته شود؟', 'choices' => [
+                    ['🗓 روزانه', 'daily'],
+                    ['📅 هفتگی', 'weekly'],
+                    ['⛔️ خاموش', 'off'],
+                ]],
+                ['key' => 'keep', 'prompt' => 'چند نسخه‌ی آخر نگه داشته شود؟ (بقیه خودکار پاک می‌شوند)', 'choices' => [
+                    ['۲ نسخه', '2'],
+                    ['۳ نسخه', '3'],
+                    ['۵ نسخه', '5'],
+                    ['همه (بدون پاک‌سازی)', '0'],
+                ]],
+            ],
+        ],
+        'guest_invite' => [
+            'title' => '⏳ دسترسی موقت',
+            'scope' => 'local',
+            'back' => 'adm',
+            'steps' => [
+                ['key' => 'hours', 'prompt' => "دسترسی موقت چند ساعت اعتبار داشته باشد؟\n\n💡 کدی می‌سازم که بدهید به توسعه‌دهنده یا پشتیبان؛ بعد از این مدت خودش بی‌اثر می‌شود.", 'choices' => [
+                    ['۲ ساعت', '2'],
+                    ['۸ ساعت', '8'],
+                    ['۲۴ ساعت', '24'],
+                    ['۷۲ ساعت', '72'],
+                ]],
+            ],
+        ],
+        'whm_bulk' => [
+            'title' => '👥 تعلیق/رفع تعلیق گروهی',
+            'scope' => 'whm',
+            'back' => 'whm',
+            'confirm' => "⚠️ عملیات روی این حساب‌ها انجام می‌شود:\n<code>{users}</code>",
+            'steps' => [
+                ['key' => 'users', 'prompt' => "نام کاربری حساب‌ها را بفرستید، هر خط یکی:"],
+                ['key' => 'state', 'prompt' => 'کدام کار؟', 'choices' => [
+                    ['⛔️ تعلیق همه', '1'],
+                    ['✅ رفع تعلیق همه', '0'],
+                ]],
+                ['key' => 'reason', 'prompt' => 'دلیل (اختیاری، فقط برای تعلیق):', 'optional' => true, 'default' => ''],
+            ],
+        ],
+        'export_csv' => [
+            'title' => '📤 خروجی CSV',
+            'scope' => 'account',
+            'back' => 'menu',
+            'steps' => [
+                ['key' => 'kind', 'prompt' => 'از چه چیزی خروجی می‌خواهید؟', 'choices' => [
+                    ['✉️ ایمیل‌ها', 'emails'],
+                    ['🗄 دیتابیس‌ها', 'databases'],
+                    ['🌐 دامنه‌ها', 'domains'],
+                    ['📁 حساب‌های FTP', 'ftp'],
+                ]],
+            ],
+        ],
         'alert_threshold' => [
             'title' => '🔔 آستانه‌ی هشدارها',
             'scope' => 'local',
@@ -802,6 +876,16 @@ final class UpdateHandler
             'back' => 'fav',
             'steps' => [
                 ['key' => 'value', 'prompt' => 'کدام میان‌بر حذف شود؟', 'picker' => 'favorites'],
+            ],
+        ],
+        'site_copy' => [
+            'title' => '📑 کپی سایت به دامنه‌ی دیگر',
+            'scope' => 'account',
+            'back' => 'files',
+            'confirm' => '⚠️ محتوای <code>{from}</code> در <code>{to}</code> کپی می‌شود؛ فایل‌های هم‌نام مقصد بازنویسی می‌شوند.',
+            'steps' => [
+                ['key' => 'from', 'prompt' => 'پوشه‌ی سایت مبدأ:', 'picker' => 'dirs'],
+                ['key' => 'to', 'prompt' => 'پوشه‌ی سایت مقصد:', 'picker' => 'dirs'],
             ],
         ],
         'file_extract' => [
@@ -1300,7 +1384,7 @@ final class UpdateHandler
                 [self::btn('📋 لیست حساب‌ها', 'a:emails')],
                 [self::btn('➕ افزودن', 'f:email_add'), self::btn('🗑 حذف', 'f:email_del')],
                 [self::btn('👥 ساخت گروهی', 'f:email_bulk_add'), self::btn('🗑 حذف گروهی', 'f:email_bulk_del')],
-                [self::btn('🔑 رمز گروهی', 'f:email_bulk_passwd')],
+                [self::btn('🔑 رمز گروهی', 'f:email_bulk_passwd'), self::btn('📬 بررسی رکوردهای ایمیل', 'f:mail_records')],
                 [self::btn('🔑 تغییر رمز', 'f:email_passwd'), self::btn('📦 سهمیه', 'f:email_quota')],
                 [self::btn('📮 فورواردها', 'a:forwarders'), self::btn('🤖 پاسخ خودکار', 'a:responders')],
                 [self::btn('🧽 پاک‌سازی Trash و Spam', 'f:mail_purge'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
@@ -1340,6 +1424,7 @@ final class UpdateHandler
                 [self::btn('🔎 پیدا کردن فایل', 'f:file_find'), self::btn('↩️ بازگردانی آخرین بکاپ', 'a:undo')],
                 [self::btn('🗑 حذف گروهی', 'f:file_bulk_delete'), self::btn('📦 جابه‌جایی گروهی', 'f:file_bulk_move')],
                 [self::btn('🔐 رمز روی پوشه', 'f:dir_protect'), self::btn('📊 مصرف پوشه‌ها', 'a:dirusage')],
+                [self::btn('📑 کپی سایت به دامنه‌ی دیگر', 'f:site_copy')],
                 [self::btn('🧹 پاک‌سازی هوشمند', 'a:cleanup')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1384,6 +1469,7 @@ final class UpdateHandler
                 [self::btn('🔐 لینک ورود', 'f:whm_login'), self::btn('📦 تغییر پلن', 'f:whm_package')],
                 [self::btn('🖥 وضعیت سرور', 'a:whmstatus'), self::btn('♻️ ری‌استارت سرویس', 'f:whm_service')],
                 [self::btn('📦 پلن‌ها', 'a:whmpkgs'), self::btn('💀 حذف حساب', 'f:whm_terminate')],
+                [self::btn('👥 تعلیق/رفع تعلیق گروهی', 'f:whm_bulk'), self::btn('📊 پرمصرف‌ترین حساب‌ها', 'a:whmtop')],
                 [self::btn('🎯 انتخاب کاربر مقصد', 'f:whm_user')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1406,12 +1492,14 @@ final class UpdateHandler
             'alerts' => [self::alertsMenuText(), [
                 [self::btn('💽 آستانه‌ی دیسک/اینود/SSL', 'f:alert_threshold')],
                 [self::btn('🔴 هشدار داون‌شدن سایت', 'a:togglesite'), self::btn('🛡 بکاپ قبل از تغییر', 'a:togglesafe')],
-                [self::btn('📊 گزارش دوره‌ای', 'a:reportevery')],
+                [self::btn('📊 گزارش دوره‌ای', 'a:reportevery'), self::btn('🗓 بکاپ خودکار', 'f:backup_schedule')],
+                [self::btn('👁 دامنه‌های تحت‌نظر', 'f:watch_domains')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'adm' => ["👮 <b>ادمین‌های ربات</b>\n\nهر کسی که اینجا باشد به همه‌ی امکانات ربات دسترسی دارد.", [
                 [self::btn('📋 لیست ادمین‌ها', 'a:admins')],
                 [self::btn('➕ افزودن ادمین', 'f:admin_add'), self::btn('🗑 حذف ادمین', 'f:admin_del')],
+                [self::btn('⏳ دسترسی موقت', 'f:guest_invite'), self::btn('🚫 لغو دسترسی‌های موقت', 'a:revokeguests')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'srv' => ["🖥 <b>سرورها</b>\n\nهر تعداد هاست cPanel یا سرور WHM می‌توانید اضافه کنید و بینشان جابه‌جا شوید.", array_merge(
@@ -1469,7 +1557,8 @@ final class UpdateHandler
         }
 
         $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
-        $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('✨ قابلیت‌ها', 'a:features')];
+        $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('📤 خروجی CSV', 'f:export_csv')];
+        $rows[] = [self::btn('✨ قابلیت‌ها', 'a:features')];
         $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('⭐ میان‌برها', 'm:fav')];
         $rows[] = [self::btn('🔔 هشدارها', 'm:alerts')];
         $rows[] = [self::btn('🧾 لاگ عملیات', 'a:log')];
@@ -1719,6 +1808,13 @@ final class UpdateHandler
             return;
         }
 
+        if ($action === 'revokeguests') {
+            Admins::revokeInvites();
+            self::respond($api, $chatId, '🚫 همه‌ی دسترسی‌های موقت لغو شدند.', self::backKeyboard('adm'));
+
+            return;
+        }
+
         if ($action === 'responders') {
             $api->sendChatAction($chatId);
             try {
@@ -1849,6 +1945,15 @@ final class UpdateHandler
             foreach (Admins::fromFile() as $adminId) {
                 $lines[] = '• <code>' . $adminId . '</code>';
             }
+            foreach (Admins::guests() as $guest) {
+                $hours = max(0, (int) ceil(($guest['expires'] - time()) / 3600));
+                $lines[] = '• <code>' . $guest['id'] . "</code> — ⏳ دسترسی موقت، {$hours} ساعت دیگر تمام می‌شود";
+            }
+            $invite = Admins::invite();
+            if ($invite !== null) {
+                $lines[] = '';
+                $lines[] = '⏳ کد دسترسی موقت فعال است: <code>' . Format::escapeHtml($invite['code']) . '</code>';
+            }
             self::respond($api, $chatId, implode("\n", $lines), self::backKeyboard('adm'));
 
             return;
@@ -1900,6 +2005,7 @@ final class UpdateHandler
                 'backups' => Render::backups(CpanelService::listBackups(self::accountClient())),
                 'autossl' => self::runAutoSslAction(),
                 'whmaccts' => Render::whmAccounts(CpanelService::whmAccounts(self::whmClient())),
+                'whmtop' => Render::whmTopAccounts(CpanelService::whmTopAccounts(self::whmClient())),
                 'whmstatus' => Render::whmStatus(CpanelService::whmServerStatus(self::whmClient())),
                 'whmpkgs' => '📦 <b>پلن‌ها</b>' . "\n\n" . implode("\n", array_map(
                     static fn (string $plan): string => '• <code>' . Format::escapeHtml($plan) . '</code>',
@@ -2382,7 +2488,8 @@ final class UpdateHandler
             'crons' => 'cron',
             'php' => 'php',
             'backups' => 'backup',
-            'whmaccts', 'whmstatus', 'whmpkgs' => 'whm',
+            'whmaccts', 'whmstatus', 'whmpkgs', 'whmtop' => 'whm',
+            'revokeguests' => 'adm',
             'servers', 'ping' => 'srv',
             'admins' => 'adm',
             default => null,
@@ -3205,6 +3312,129 @@ final class UpdateHandler
     private static function runFileUpload(array $data): string
     {
         return '📎 برای آپلود، خود فایل را به‌صورت Document در همین گفت‌وگو بفرستید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSiteCopy(array $data): string
+    {
+        $count = CpanelService::copySite(self::accountClient(), (string) $data['from'], (string) $data['to']);
+
+        return '📑 ' . $count . ' مورد از <code>' . Format::escapeHtml((string) $data['from'])
+            . '</code> به <code>' . Format::escapeHtml((string) $data['to']) . "</code> کپی شد.\n\n"
+            . '💡 اگر سایت دیتابیس دارد، یادتان باشد تنظیمات اتصالش را در نسخه‌ی جدید عوض کنید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runMailRecords(array $data): string
+    {
+        return Render::mailRecords((string) $data['domain'], CpanelService::mailRecords((string) $data['domain']));
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWatchDomains(array $data): string
+    {
+        $raw = trim((string) $data['list']);
+        Settings::set(Settings::WATCH_DOMAINS, $raw === '-' ? '' : $raw);
+
+        return $raw === '-'
+            ? '👁 برگشت به حالت خودکار: دامنه‌ی اصلی و ادان‌ها بررسی می‌شوند.'
+            : '👁 از این به بعد این دامنه‌ها تحت‌نظرند:' . "\n<code>" . Format::escapeHtml($raw) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runBackupSchedule(array $data): string
+    {
+        Settings::set(Settings::BACKUP_EVERY, (string) $data['every']);
+        Settings::set(Settings::BACKUP_KEEP, (string) $data['keep']);
+
+        $every = match ((string) $data['every']) {
+            'daily' => 'روزانه',
+            'weekly' => 'هفتگی',
+            default => 'خاموش',
+        };
+        $keep = (int) $data['keep'];
+
+        return "🗓 بکاپ خودکار: <b>{$every}</b>"
+            . ($keep > 0 ? "\n🧹 فقط {$keep} نسخه‌ی آخر نگه داشته می‌شود." : "\n🧹 پاک‌سازی خودکار خاموش است.");
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runGuestInvite(array $data): string
+    {
+        $invite = Admins::createInvite((int) $data['hours']);
+        $hours = (int) $data['hours'];
+
+        return "⏳ <b>کد دسترسی موقت</b>\n\n<code>" . Format::escapeHtml($invite['code']) . "</code>\n\n"
+            . "این کد {$hours} ساعت اعتبار دارد. هر کسی آن را برای ربات بفرستد، تا پایان همان مدت دسترسی دارد.\n\n"
+            . '⚠️ دسترسی موقت هم همه‌ی امکانات را دارد؛ فقط به کسی بدهید که به او اعتماد دارید. برای لغو زودتر: «🚫 لغو دسترسی‌های موقت».';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWhmBulk(array $data): string
+    {
+        $users = self::pathLines((string) $data['users']);
+        $suspend = (string) ($data['state'] ?? '1') === '1';
+        $results = CpanelService::whmBulkSuspend(self::whmClient(), $users, $suspend, (string) ($data['reason'] ?? ''));
+
+        return Render::bulkResult($suspend ? '⛔️ <b>تعلیق گروهی</b>' : '✅ <b>رفع تعلیق گروهی</b>', $results);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runExportCsv(array $data): string
+    {
+        $client = self::accountClient();
+        $kind = (string) $data['kind'];
+
+        [$headers, $rows, $name] = match ($kind) {
+            'databases' => [
+                ['database', 'size_bytes', 'users'],
+                array_map(
+                    static fn (array $row): array => [$row['name'], (string) ($row['size'] ?? ''), implode(' ', $row['users'])],
+                    CpanelService::databases($client),
+                ),
+                'databases',
+            ],
+            'domains' => [
+                ['domain', 'type', 'document_root', 'ip'],
+                array_map(
+                    static fn (array $row): array => [$row['domain'], $row['type'], $row['docroot'], $row['ip']],
+                    CpanelService::domainsData($client),
+                ),
+                'domains',
+            ],
+            'ftp' => [
+                ['user', 'directory', 'used_bytes'],
+                array_map(
+                    static fn (array $row): array => [$row['user'], $row['dir'], (string) ($row['used'] ?? '')],
+                    CpanelService::ftpAccounts($client),
+                ),
+                'ftp-accounts',
+            ],
+            default => [
+                ['email', 'domain', 'used_bytes', 'quota'],
+                array_map(
+                    static fn (array $row): array => [
+                        $row['email'],
+                        $row['domain'],
+                        (string) ($row['used'] ?? ''),
+                        is_scalar($row['quota'] ?? null) ? (string) $row['quota'] : '',
+                    ],
+                    CpanelService::emails($client),
+                ),
+                'emails',
+            ],
+        };
+
+        if ($rows === []) {
+            return 'چیزی برای خروجی‌گرفتن پیدا نشد.';
+        }
+
+        self::$pendingFile = [
+            'name' => $name . '-' . gmdate('Ymd') . '.csv',
+            'content' => CpanelService::toCsv($headers, $rows),
+        ];
+
+        return '📤 خروجی CSV با ' . count($rows) . ' ردیف آماده شد.';
     }
 
     /** @param array<string, mixed> $data */

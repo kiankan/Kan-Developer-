@@ -932,6 +932,73 @@ check('تاریخچه‌ی مصرف: امروز ثبت و با دیروز مقا
     assertTrue(UsageHistory::days() >= 1);
 });
 
+check('دسترسی موقت: کد می‌سازد، اعتبار دارد و لغو می‌شود', function (): void {
+    Admins::add(555);
+    assertTrue(!Admins::isAdmin(999), 'کاربر ناشناس نباید دسترسی داشته باشد');
+
+    $invite = Admins::createInvite(2);
+    assertTrue($invite['expires'] > time(), 'کد باید تاریخ انقضا داشته باشد');
+    assertTrue(!Admins::redeemInvite(999, 'WRONG-CODE'), 'کد اشتباه نباید دسترسی بدهد');
+
+    assertTrue(Admins::redeemInvite(999, $invite['code']), 'کد درست باید پذیرفته شود');
+    assertTrue(Admins::isAdmin(999), 'مهمان باید دسترسی موقت داشته باشد');
+    assertTrue(!in_array(999, Admins::fromFile(), true), 'مهمان نباید ادمین دائمی شود');
+
+    Admins::revokeInvites();
+    assertTrue(!Admins::isAdmin(999), 'بعد از لغو، دسترسی باید قطع شود');
+    assertSame(null, Admins::invite(), 'کد لغوشده نباید فعال بماند');
+    Admins::remove(555);
+});
+
+check('اندازه‌های WHM به بایت تبدیل و مرتب می‌شوند', function (): void {
+    assertSame(1024.0 ** 3 * 1.5, CpanelService::parseSize('1.5G'));
+    assertSame(1024.0 ** 2 * 250, CpanelService::parseSize('250M'));
+    assertSame(0.0, CpanelService::parseSize('unlimited'));
+    assertSame(0.0, CpanelService::parseSize(''));
+});
+
+check('CSV با BOM و سرستون ساخته می‌شود', function (): void {
+    $csv = CpanelService::toCsv(['email', 'quota'], [['info@example.com', '250'], ['a,b@example.com', '0']]);
+
+    assertTrue(str_starts_with($csv, "\xEF\xBB\xBF"), 'BOM باید باشد تا اکسل فارسی را درست بخواند');
+    assertTrue(str_contains($csv, 'email,quota'), 'سرستون‌ها باید بیایند');
+    assertTrue(str_contains($csv, '"a,b@example.com"'), 'مقدار دارای کاما باید کوتیشن بگیرد');
+});
+
+check('پاک‌سازی بکاپ‌های قدیمی فقط چند نسخه‌ی آخر را نگه می‌دارد', function (): void {
+    $captured = [];
+    $listing = json_encode(['status' => 1, 'data' => [
+        ['file' => 'backup-old.tar.gz', 'type' => 'file', 'size' => 10, 'mtime' => 1000],
+        ['file' => 'backup-new.tar.gz', 'type' => 'file', 'size' => 10, 'mtime' => 3000],
+        ['file' => 'backup-mid.tar.gz', 'type' => 'file', 'size' => 10, 'mtime' => 2000],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["Failed to load module “Backup”"]}'],
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],
+        ['body' => (string) $listing],
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[]}}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[]}}'],
+    ], $captured));
+
+    $result = CpanelService::pruneBackups($client, 1);
+
+    assertSame(1, $result['kept'], 'باید یک نسخه بماند');
+    assertSame(2, count($result['deleted']), 'دو نسخه‌ی قدیمی باید پاک شوند');
+    assertTrue(!in_array('backup-new.tar.gz', $result['deleted'], true), 'تازه‌ترین نسخه نباید پاک شود');
+});
+
+check('رکوردهای ایمیل: نبودشان به‌عنوان مشکل گزارش می‌شود', function (): void {
+    // دامنه‌ای که وجود ندارد، پس هیچ رکوردی برنمی‌گرداند.
+    $records = CpanelService::mailRecords('invalid-domain-for-tests.example');
+
+    assertSame([], $records['mx']);
+    assertTrue($records['problems'] !== [], 'نبود رکوردها باید گزارش شود');
+    $joined = implode(' ', $records['problems']);
+    assertTrue(str_contains($joined, 'MX'), 'نبود MX باید گفته شود');
+    assertTrue(str_contains($joined, 'SPF'), 'نبود SPF باید گفته شود');
+});
+
 echo "\nServerStore\n";
 
 check('افزودن، انتخاب و حذف سرور روی دیسک', function (): void {

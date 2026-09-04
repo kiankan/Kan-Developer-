@@ -17,6 +17,10 @@ final class Settings
     public const ALERT_SITE = 'alert_site';
     public const REPORT_EVERY = 'report_every';
     public const LAST_BACKUP = 'last_backup';
+    public const WATCH_DOMAINS = 'watch_domains';
+    public const BACKUP_EVERY = 'backup_every';
+    public const BACKUP_KEEP = 'backup_keep';
+    public const LAST_SERVER_IP = 'last_server_ip';
 
     private const DEFAULTS = [
         self::SAFE_DELETE => '1',
@@ -26,6 +30,10 @@ final class Settings
         self::ALERT_SITE => '1',
         self::REPORT_EVERY => 'weekly',
         self::LAST_BACKUP => '',
+        self::WATCH_DOMAINS => '',
+        self::BACKUP_EVERY => 'off',
+        self::BACKUP_KEEP => '3',
+        self::LAST_SERVER_IP => '',
     ];
 
     public static function get(string $key, string $default = ''): string

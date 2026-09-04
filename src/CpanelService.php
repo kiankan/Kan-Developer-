@@ -1987,6 +1987,232 @@ final class CpanelService
     }
 
     /**
+     * کپی محتوای یک سایت به پوشه‌ی سایت دیگر (مثلاً راه‌اندازی نسخه‌ی
+     * استیجینگ یا انتقال سایت به دامنه‌ی جدید).
+     *
+     * @return int تعداد چیزهایی که کپی شد
+     */
+    public static function copySite(CpanelClient $client, string $from, string $to): int
+    {
+        $from = self::normalizePath($from);
+        $to = self::normalizePath($to);
+        if ($from === $to) {
+            throw CpanelError::config('مبدأ و مقصد یکی است.');
+        }
+
+        $entries = self::listFiles($client, $from);
+        if ($entries === []) {
+            throw CpanelError::config("پوشه‌ی «{$from}» خالی است یا خوانده نشد.");
+        }
+
+        $client->api2('Fileman', 'fileop', [
+            'op' => 'copy',
+            'sourcefiles' => implode(',', array_map(static fn (array $entry): string => $entry['path'], $entries)),
+            'destfiles' => $to,
+            'doubledecode' => 0,
+        ]);
+
+        return count($entries);
+    }
+
+    /**
+     * رکوردهای ایمیلی و ضروری یک دامنه، از دید دنیای بیرون.
+     *
+     * @return array{mx: array<int, string>, spf: string, dmarc: string, dkim: bool, problems: array<int, string>}
+     */
+    public static function mailRecords(string $domain): array
+    {
+        $domain = SiteCheck::cleanDomain($domain);
+
+        $mx = [];
+        foreach (@dns_get_record($domain, DNS_MX) ?: [] as $record) {
+            if (isset($record['target'])) {
+                $mx[] = (string) $record['pri'] . ' ' . (string) $record['target'];
+            }
+        }
+
+        $spf = '';
+        foreach (@dns_get_record($domain, DNS_TXT) ?: [] as $record) {
+            $txt = (string) ($record['txt'] ?? '');
+            if (str_starts_with(strtolower($txt), 'v=spf1')) {
+                $spf = $txt;
+            }
+        }
+
+        $dmarc = '';
+        foreach (@dns_get_record('_dmarc.' . $domain, DNS_TXT) ?: [] as $record) {
+            $txt = (string) ($record['txt'] ?? '');
+            if (str_starts_with(strtolower($txt), 'v=dmarc1')) {
+                $dmarc = $txt;
+            }
+        }
+
+        $dkim = false;
+        foreach (['default._domainkey.', 'x._domainkey.'] as $selector) {
+            if ((@dns_get_record($selector . $domain, DNS_TXT) ?: []) !== []) {
+                $dkim = true;
+                break;
+            }
+        }
+
+        $problems = [];
+        if ($mx === []) {
+            $problems[] = 'رکورد MX ندارد — این دامنه اصلاً ایمیل دریافت نمی‌کند.';
+        }
+        if ($spf === '') {
+            $problems[] = 'رکورد SPF ندارد — ایمیل‌های ارسالی‌اش راحت‌تر اسپم می‌شوند.';
+        } elseif (str_contains($spf, '+all')) {
+            $problems[] = 'SPF با <code>+all</code> تنظیم شده که یعنی هر کسی می‌تواند به‌جای شما ایمیل بفرستد.';
+        }
+        if (!$dkim) {
+            $problems[] = 'رکورد DKIM پیدا نشد — از cPanel بخش Email Deliverability می‌شود ساختش.';
+        }
+        if ($dmarc === '') {
+            $problems[] = 'رکورد DMARC ندارد — توصیه می‌شود حداقل <code>v=DMARC1; p=none</code> بگذارید.';
+        }
+
+        return ['mx' => $mx, 'spf' => $spf, 'dmarc' => $dmarc, 'dkim' => $dkim, 'problems' => $problems];
+    }
+
+    /**
+     * پاک‌سازی بکاپ‌های قدیمی و نگه‌داشتن فقط چند نسخه‌ی آخر.
+     *
+     * @return array{kept: int, deleted: array<int, string>}
+     */
+    public static function pruneBackups(CpanelClient $client, int $keep): array
+    {
+        $backups = self::listBackups($client);
+        usort($backups, static fn (array $a, array $b): int => (int) (($b['time'] ?? 0) <=> ($a['time'] ?? 0)));
+
+        $home = self::homeDir($client);
+        $deleted = [];
+        foreach (array_slice($backups, max(0, $keep)) as $backup) {
+            $path = $home . '/' . $backup['name'];
+            try {
+                self::deletePath($client, $path);
+                $deleted[] = $backup['name'];
+            } catch (Throwable) {
+                // اگر یکی پاک نشد، بقیه را ادامه می‌دهیم.
+            }
+        }
+
+        return ['kept' => min(count($backups), max(0, $keep)), 'deleted' => $deleted];
+    }
+
+    /**
+     * پرمصرف‌ترین حساب‌های سرور (فقط WHM).
+     *
+     * @return array<int, array{user: string, domain: string, disk: string, suspended: bool}>
+     */
+    public static function whmTopAccounts(CpanelClient $client, int $limit = 10): array
+    {
+        $accounts = self::whmAccounts($client);
+
+        $rows = [];
+        foreach ($accounts as $account) {
+            $rows[] = [
+                'user' => $account['user'],
+                'domain' => $account['domain'],
+                'disk' => (string) ($account['disk_used'] ?? ''),
+                'suspended' => $account['suspended'],
+                'bytes' => self::parseSize((string) ($account['disk_used'] ?? '')),
+            ];
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['bytes'] <=> $a['bytes']);
+
+        return array_map(
+            static fn (array $row): array => [
+                'user' => $row['user'],
+                'domain' => $row['domain'],
+                'disk' => $row['disk'],
+                'suspended' => $row['suspended'],
+            ],
+            array_slice($rows, 0, $limit),
+        );
+    }
+
+    /**
+     * «1.5G» یا «250M» را به بایت تبدیل می‌کند (WHM اندازه‌ها را این‌طور می‌دهد).
+     */
+    public static function parseSize(string $value): float
+    {
+        $value = trim(strtoupper($value));
+        if ($value === '' || $value === 'UNLIMITED') {
+            return 0.0;
+        }
+        if (!preg_match('/^([\d.]+)\s*([KMGT])?/', $value, $matches)) {
+            return 0.0;
+        }
+
+        $number = (float) $matches[1];
+
+        return $number * match ($matches[2] ?? '') {
+            'K' => 1024,
+            'M' => 1024 ** 2,
+            'G' => 1024 ** 3,
+            'T' => 1024 ** 4,
+            default => 1,
+        };
+    }
+
+    /**
+     * تعلیق یا رفع تعلیق چند حساب با هم (فقط WHM).
+     *
+     * @param array<int, string> $users
+     *
+     * @return array<int, array{email: string, ok: bool, error: string}>
+     */
+    public static function whmBulkSuspend(CpanelClient $client, array $users, bool $suspend, string $reason = ''): array
+    {
+        $results = [];
+        foreach ($users as $user) {
+            $user = trim($user);
+            if ($user === '') {
+                continue;
+            }
+            try {
+                if ($suspend) {
+                    self::whmSuspend($client, $user, $reason);
+                } else {
+                    self::whmUnsuspend($client, $user);
+                }
+                $results[] = ['email' => $user, 'ok' => true, 'error' => ''];
+            } catch (Throwable $e) {
+                $results[] = ['email' => $user, 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * ساخت CSV از یک فهرست — برای بایگانی یا باز کردن در اکسل.
+     *
+     * @param array<int, string>              $headers
+     * @param array<int, array<int, string>>  $rows
+     */
+    public static function toCsv(array $headers, array $rows): string
+    {
+        $handle = fopen('php://temp', 'r+');
+        if ($handle === false) {
+            return '';
+        }
+
+        // BOM تا اکسل فارسی را درست نشان بدهد.
+        fwrite($handle, "\xEF\xBB\xBF");
+        fputcsv($handle, $headers);
+        foreach ($rows as $row) {
+            fputcsv($handle, $row);
+        }
+        rewind($handle);
+        $csv = (string) stream_get_contents($handle);
+        fclose($handle);
+
+        return $csv;
+    }
+
+    /**
      * بزرگ‌ترین فایل‌های یک پوشه — برای وقتی فضای هاست پر شده و باید فهمید
      * چه چیزی جا گرفته است.
      *

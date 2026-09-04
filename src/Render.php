@@ -722,6 +722,54 @@ final class Render
         return implode("\n", $lines);
     }
 
+    /**
+     * @param array{mx: array<int, string>, spf: string, dmarc: string, dkim: bool, problems: array<int, string>} $records
+     */
+    public static function mailRecords(string $domain, array $records): string
+    {
+        $lines = ['📬 <b>رکوردهای ایمیل ' . self::e($domain) . '</b>', ''];
+
+        $lines[] = '📮 MX: ' . ($records['mx'] === [] ? '—' : '<code>' . self::e(implode('، ', $records['mx'])) . '</code>');
+        $lines[] = '🛡 SPF: ' . ($records['spf'] === '' ? '—' : '<code>' . self::e($records['spf']) . '</code>');
+        $lines[] = '✍️ DKIM: ' . ($records['dkim'] ? '✅ دارد' : '—');
+        $lines[] = '📋 DMARC: ' . ($records['dmarc'] === '' ? '—' : '<code>' . self::e($records['dmarc']) . '</code>');
+
+        if ($records['problems'] === []) {
+            $lines[] = '';
+            $lines[] = '✅ همه‌ی رکوردهای مهم سرجایشان هستند.';
+
+            return implode("\n", $lines);
+        }
+
+        $lines[] = '';
+        $lines[] = '<b>چه چیزی کم است:</b>';
+        foreach ($records['problems'] as $problem) {
+            $lines[] = '• ' . $problem;
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{user: string, domain: string, disk: string, suspended: bool}> $accounts
+     */
+    public static function whmTopAccounts(array $accounts): string
+    {
+        if ($accounts === []) {
+            return '📊 حسابی پیدا نشد.';
+        }
+
+        $lines = ['📊 <b>پرمصرف‌ترین حساب‌های سرور</b>', ''];
+        foreach ($accounts as $index => $account) {
+            $lines[] = ($index + 1) . '. <code>' . self::e($account['user']) . '</code> — '
+                . self::e($account['disk'] !== '' ? $account['disk'] : '—')
+                . ($account['suspended'] ? ' ⛔️' : '');
+            $lines[] = '   ' . self::e($account['domain']);
+        }
+
+        return implode("\n", $lines);
+    }
+
     public static function ssl(array $hosts): string
     {
         if ($hosts === []) {

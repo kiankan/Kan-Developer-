@@ -76,11 +76,7 @@ final class Alerts
 
         // ---- بالا بودن سایت
         if (Settings::bool(Settings::ALERT_SITE, true)) {
-            $domains = CpanelService::domains($client);
-            $watch = array_slice(array_values(array_filter(array_merge(
-                [$domains['main_domain']],
-                $domains['addon_domains'],
-            ))), 0, 5);
+            $watch = self::watchList($client);
 
             foreach ($watch as $domain) {
                 $result = SiteCheck::run($domain);
@@ -101,6 +97,95 @@ final class Alerts
             }
         }
 
+        // ---- تغییر آی‌پی سرور
+        $ip = '';
+        foreach (CpanelService::domainsData($client) as $detail) {
+            if ($detail['ip'] !== '') {
+                $ip = $detail['ip'];
+                break;
+            }
+        }
+        if ($ip !== '') {
+            $previous = Settings::get(Settings::LAST_SERVER_IP);
+            if ($previous !== '' && $previous !== $ip) {
+                $messages[] = "🖧 آی‌پی سرور عوض شد: <code>{$previous}</code> → <code>{$ip}</code>\n\n"
+                    . '💡 اگر دامنه‌ای بیرون از این هاست DNS دارد، رکورد A آن را به‌روز کنید.';
+            }
+            Settings::set(Settings::LAST_SERVER_IP, $ip);
+        }
+
+        // ---- بکاپ زمان‌بندی‌شده و نگه‌داشتن چند نسخه
+        foreach (self::scheduledBackup($client) as $message) {
+            $messages[] = $message;
+        }
+
+        self::saveState($state);
+
+        return $messages;
+    }
+
+    /**
+     * دامنه‌هایی که باید بالا بودنشان بررسی شود: فهرست دستی کاربر، وگرنه
+     * دامنه‌ی اصلی و ادان‌ها.
+     *
+     * @return array<int, string>
+     */
+    public static function watchList(CpanelClient $client): array
+    {
+        $manual = array_values(array_filter(array_map(
+            'trim',
+            preg_split('/[\s,\n]+/', Settings::get(Settings::WATCH_DOMAINS)) ?: [],
+        )));
+        if ($manual !== []) {
+            return array_slice($manual, 0, 10);
+        }
+
+        $domains = CpanelService::domains($client);
+
+        return array_slice(array_values(array_filter(array_merge(
+            [$domains['main_domain']],
+            $domains['addon_domains'],
+        ))), 0, 5);
+    }
+
+    /**
+     * بکاپ خودکار (روزانه/هفتگی) به‌علاوه‌ی پاک‌سازی نسخه‌های قدیمی.
+     *
+     * @return array<int, string>
+     */
+    private static function scheduledBackup(CpanelClient $client): array
+    {
+        $every = Settings::get(Settings::BACKUP_EVERY, 'off');
+        if ($every === 'off') {
+            return [];
+        }
+
+        $state = self::loadState();
+        $last = (int) ($state['backup:last'] ?? 0);
+        $interval = $every === 'daily' ? 86400 : 604800;
+        if (time() - $last < $interval) {
+            return [];
+        }
+
+        $messages = [];
+        try {
+            CpanelService::fullBackup($client);
+            $messages[] = '💾 بکاپ خودکار شروع شد؛ فایلش در پوشه‌ی هوم ساخته می‌شود.';
+
+            $keep = Settings::int(Settings::BACKUP_KEEP, 3);
+            if ($keep > 0) {
+                $pruned = CpanelService::pruneBackups($client, $keep);
+                if ($pruned['deleted'] !== []) {
+                    $messages[] = '🧹 ' . count($pruned['deleted']) . ' بکاپ قدیمی پاک شد تا فقط '
+                        . $keep . ' نسخه‌ی آخر بماند.';
+                }
+            }
+        } catch (Throwable $e) {
+            $messages[] = '⚠️ بکاپ خودکار انجام نشد: ' . $e->getMessage();
+        }
+
+        $state = self::loadState();
+        $state['backup:last'] = time();
         self::saveState($state);
 
         return $messages;
