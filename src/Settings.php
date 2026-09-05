@@ -22,6 +22,7 @@ final class Settings
     public const BACKUP_KEEP = 'backup_keep';
     public const LAST_SERVER_IP = 'last_server_ip';
     public const WATCH_FILES = 'watch_files';
+    public const ALERT_BANDWIDTH = 'alert_bandwidth';
 
     private const DEFAULTS = [
         self::SAFE_DELETE => '1',
@@ -36,6 +37,7 @@ final class Settings
         self::BACKUP_KEEP => '3',
         self::LAST_SERVER_IP => '',
         self::WATCH_FILES => '',
+        self::ALERT_BANDWIDTH => '85',
     ];
 
     public static function get(string $key, string $default = ''): string

@@ -2079,6 +2079,290 @@ check('رکوردهای CAA و SRV هم پشتیبانی می‌شوند', funct
     assertTrue(str_contains($body, 'value=letsencrypt.org'), 'مقدار CAA فرستاده نشد');
 });
 
+echo "\nفوروارد دامنه، فرستنده‌ها و دسترسی دیتابیس\n";
+
+check('فوروارد کل دامنه: مبدأ و مقصد یکی نمی‌شود و API2 جایگزین دارد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["Unknown function"]}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{}]}}'],
+    ], $captured));
+
+    assertThrows(
+        static fn () => CpanelService::addDomainForwarder($client, 'example.com', 'example.com'),
+        CpanelError::KIND_CONFIG,
+    );
+    assertSame([], $captured, 'مبدأ و مقصد یکسان نباید به سرور برود');
+
+    CpanelService::addDomainForwarder($client, 'old.com', 'https://new.com/');
+    assertSame(2, count($captured), 'بعد از رد شدن UAPI باید API2 صدا زده شود');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'newdomain=new.com'), "دامنه‌ی مقصد تمیز نشد: $body");
+});
+
+check('پرکارترین فرستنده‌ها گروه‌بندی و مرتب می‌شوند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => '{"status":1,"data":[{"sender":"a@x.com","type":"success"},{"sender":"a@x.com","type":"failure"},'
+            . '{"sender":"b@x.com","type":"success"},{"sender":"a@x.com","type":"success"}]}',
+    ], $captured));
+
+    $result = CpanelService::topSenders($client);
+    assertSame(4, $result['total']);
+    assertSame('a@x.com', $result['rows'][0]['sender'], 'پرکارترین باید اول باشد');
+    assertSame(3, $result['rows'][0]['total']);
+    assertSame(1, $result['rows'][0]['failed'], 'نامه‌ی ناموفق باید جدا شمرده شود');
+});
+
+echo "\nبلوک‌های .htaccess: یکسان‌سازی، سرعت، وردپرس و HSTS\n";
+
+check('یکسان‌سازی آدرس، به همان نسخه‌ی انتخاب‌شده ریدایرکت می‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":""}}'], $captured));
+
+    CpanelService::setCanonical($client, '/home/demo/public_html', 'www.example.com', 'root');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'RewriteCond %{HTTP_HOST} ^www\.example\.com$'), "شرط www نوشته نشد: $body");
+    assertTrue(str_contains($body, 'https://example.com/$1'), 'مقصد بدون www نوشته نشد');
+
+    CpanelService::setCanonical($client, '/home/demo/public_html', 'example.com', 'www');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'https://www.example.com/$1'), 'مقصد با www نوشته نشد');
+
+    $with = "# TEAMKAN CANONICAL START\nRewriteEngine On\n# TEAMKAN CANONICAL END\n# mine\n";
+    assertSame("# mine\n", CpanelService::stripBlock($with, 'CANONICAL'));
+});
+
+check('بهینه‌سازی سرعت، gzip و کش مرورگر را می‌نویسد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":""}}'], $captured));
+
+    CpanelService::setSpeedRules($client, '/home/demo/public_html', true);
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'mod_deflate'), 'بلوک فشرده‌سازی نوشته نشد');
+    assertTrue(str_contains($body, 'ExpiresByType image/webp'), 'کش مرورگر نوشته نشد');
+    assertTrue(str_contains($body, 'TEAMKAN SPEED START'), 'بلوک باید نشان‌دار باشد');
+});
+
+check('محافظت ورود وردپرس بدون آی‌پی معتبر انجام نمی‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":""}}'], $captured));
+
+    assertThrows(
+        static fn () => CpanelService::protectWordpressLogin($client, '/home/demo/public_html', true, ['بی‌معنی']),
+        CpanelError::KIND_CONFIG,
+    );
+
+    $ips = CpanelService::protectWordpressLogin($client, '/home/demo/public_html', true, ['1.2.3.4 5.6.7.8', '1.2.3.4']);
+    assertSame(['1.2.3.4', '5.6.7.8'], $ips, 'آی‌پی تکراری باید یکی حساب شود');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, '<Files wp-login.php>'), 'قانون ورود وردپرس نوشته نشد');
+    assertTrue(str_contains($body, 'Require ip 1.2.3.4'), 'آی‌پی مجاز نوشته نشد');
+    assertTrue(str_contains($body, 'xmlrpc.php'), 'xmlrpc باید بسته شود');
+});
+
+check('HSTS با max-age نوشته و با خاموش‌کردن برداشته می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":""}}'], $captured));
+
+    CpanelService::setHsts($client, '/home/demo/public_html', true);
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'Strict-Transport-Security'), 'هدر HSTS نوشته نشد');
+
+    $with = "# TEAMKAN HSTS START\nx\n# TEAMKAN HSTS END\n# mine\n";
+    assertSame("# mine\n", CpanelService::stripBlock($with, 'HSTS'));
+});
+
+echo "\nوارد کردن زون، تغییر آی‌پی و گواهی‌ها\n";
+
+check('وارد کردن فایل زون: کامنت و رکورد تکراری رد می‌شوند', function (): void {
+    $captured = [];
+    $zone = json_encode(['status' => 1, 'data' => [
+        ['type' => 'record', 'line_index' => 1, 'record_type' => 'SOA', 'dname_b64' => base64_encode('example.com.'),
+            'data_b64' => array_map('base64_encode', ['ns1.example.com.', 'root.example.com.', '2024010101'])],
+        ['type' => 'record', 'line_index' => 2, 'record_type' => 'A', 'ttl' => 14400,
+            'dname_b64' => base64_encode('www.example.com.'), 'data_b64' => [base64_encode('203.0.113.10')]],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $zone],   // خواندن زون برای تشخیص تکراری‌ها
+        ['body' => $zone],   // خواندن داخل addDnsRecord
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $text = implode("\n", [
+        '; این یک کامنت است',
+        '$TTL 14400',
+        'www.example.com.   14400  IN  A    203.0.113.10',      // تکراری
+        'shop.example.com.  300    IN  A    203.0.113.11',      // تازه
+        'example.com.       14400  IN  NS   ns1.example.com.',  // نوع غیرمجاز
+    ]);
+
+    $result = CpanelService::importZone($client, 'example.com', $text);
+
+    assertSame(1, count($result['skipped']), 'رکورد تکراری باید رد شود');
+    assertSame(1, count($result['added']), 'فقط رکورد تازه باید ساخته شود');
+    assertTrue(str_contains($result['added'][0], 'shop.example.com'), 'رکورد اشتباهی ساخته شد');
+});
+
+check('تغییر آی‌پی همه‌ی دامنه‌ها، آی‌پی نامعتبر را رد می‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    assertThrows(static fn () => CpanelService::repointDomains($client, 'شماره'), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => CpanelService::repointDomains($client, '999.1.1.1'), CpanelError::KIND_CONFIG);
+    assertSame([], $captured, 'آی‌پی نامعتبر نباید به سرور برسد');
+});
+
+check('بررسی گواهی از بیرون، دامنه‌ی بی‌جواب را صریح گزارش می‌کند', function (): void {
+    $rows = CpanelService::certificateSweep(['teamkan-does-not-exist.invalid']);
+    assertSame(1, count($rows));
+    assertTrue(!$rows[0]['ok'], 'دامنه‌ی بی‌جواب نباید سالم حساب شود');
+    assertTrue(str_contains($rows[0]['error'], 'گواهی خوانده نشد'), 'دلیل باید روشن باشد');
+});
+
+echo "\nفایل‌ها: اینود، جایگزینی و مقایسه‌ی پوشه‌ها\n";
+
+check('شمارش فایل هر پوشه', function (): void {
+    $captured = [];
+    $home = json_encode(['status' => 1, 'data' => [
+        ['file' => 'public_html', 'type' => 'dir', 'size' => 4096],
+        ['file' => 'note.txt', 'type' => 'file', 'size' => 10],
+    ]]);
+    $inner = json_encode(['status' => 1, 'data' => [
+        ['file' => 'a.php', 'type' => 'file', 'size' => 10],
+        ['file' => 'b.php', 'type' => 'file', 'size' => 10],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],
+        ['body' => $home],
+        ['body' => $inner],
+    ], $captured));
+
+    $usage = CpanelService::inodeUsage($client);
+    assertSame(1, count($usage['rows']));
+    assertSame(2, $usage['rows'][0]['files'], 'فایل‌های داخل پوشه شمرده نشدند');
+    assertSame(3, $usage['total'], 'فایل سطح هوم هم باید شمرده شود');
+});
+
+check('جایگزینی متن، فقط فایل‌های حاوی عبارت را می‌نویسد', function (): void {
+    $captured = [];
+    $listing = json_encode(['status' => 1, 'data' => [
+        ['file' => 'config.php', 'type' => 'file', 'size' => 100],
+        ['file' => 'logo.png', 'type' => 'file', 'size' => 100],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $listing],
+        ['body' => '{"status":1,"data":{"content":"define(\'HOME\',\'old.com\'); // old.com"}}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $result = CpanelService::replaceInFiles($client, '/home/demo/public_html', 'old.com', 'new.com');
+
+    assertSame(1, count($result['changed']), 'فقط یک فایل باید عوض شود');
+    assertSame(2, $result['changed'][0]['hits'], 'هر دو مورد باید شمرده شوند');
+    $saved = urldecode(end($captured)['body']);
+    assertTrue(str_contains($saved, 'new.com'), 'محتوای تازه ذخیره نشد');
+    assertTrue(!str_contains($saved, 'old.com'), 'عبارت قدیمی باید رفته باشد');
+});
+
+check('مقایسه‌ی دو پوشه، تفاوت‌ها را جدا می‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => json_encode(['status' => 1, 'data' => [
+            ['file' => 'index.php', 'type' => 'file', 'size' => 100],
+            ['file' => 'old.php', 'type' => 'file', 'size' => 50],
+            ['file' => 'style.css', 'type' => 'file', 'size' => 20],
+        ]])],
+        ['body' => json_encode(['status' => 1, 'data' => [
+            ['file' => 'index.php', 'type' => 'file', 'size' => 100],
+            ['file' => 'new.php', 'type' => 'file', 'size' => 70],
+            ['file' => 'style.css', 'type' => 'file', 'size' => 25],
+        ]])],
+    ], $captured));
+
+    $diff = CpanelService::compareDirectories($client, '/home/demo/a', '/home/demo/b');
+    assertSame(['old.php'], $diff['only_left']);
+    assertSame(['new.php'], $diff['only_right']);
+    assertSame(['style.css'], $diff['different'], 'اختلاف حجم باید گزارش شود');
+    assertSame(1, $diff['same']);
+});
+
+check('فایل‌های مهم فقط وقتی هستند گزارش می‌شوند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        'body' => json_encode(['status' => 1, 'data' => [
+            ['file' => '.htaccess', 'type' => 'file', 'size' => 100],
+            ['file' => 'wp-config.php', 'type' => 'file', 'size' => 100],
+            ['file' => 'random.txt', 'type' => 'file', 'size' => 100],
+            ['file' => 'wp-admin', 'type' => 'dir', 'size' => 4096],
+        ]]),
+    ], $captured));
+
+    $files = CpanelService::importantFiles($client, '/home/demo/public_html');
+    assertSame(
+        ['/home/demo/public_html/.htaccess', '/home/demo/public_html/wp-config.php'],
+        $files,
+    );
+});
+
+echo "\nکران آماده، کپی محدودیت PHP و WHM\n";
+
+check('زمان‌بندی‌های آماده‌ی کران همه معتبرند', function (): void {
+    foreach (CpanelService::CRON_WHEN as $schedule => $label) {
+        assertTrue(
+            CpanelService::parseSchedule((string) $schedule) !== null,
+            "زمان‌بندی «$label» معتبر نیست: $schedule",
+        );
+    }
+});
+
+check('کپی محدودیت‌های PHP روی بقیه‌ی دامنه‌ها', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":[{"key":"memory_limit","value":"512M"},{"key":"max_execution_time","value":"300"}]}'],
+        ['body' => '{"status":1,"data":[{"vhost":"a.com","version":"ea-php82"},{"vhost":"b.com","version":"ea-php82"}]}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $result = CpanelService::copyPhpLimits($client, 'a.com');
+    assertSame(['b.com'], $result['applied'], 'خود دامنه‌ی سرمشق نباید دوباره ست شود');
+    assertSame('512M', $result['directives']['memory_limit'] ?? '');
+
+    $bodies = implode(' ', array_map(static fn (array $c): string => urldecode($c['body']), $captured));
+    assertTrue(str_contains($bodies, 'directive=memory_limit:512M'), 'مقدار کپی‌شده فرستاده نشد');
+});
+
+check('آی‌پی نامعتبر برای حساب WHM رد می‌شود', function (): void {
+    $captured = [];
+    $whm = new CpanelClient(
+        cpanelServer(['type' => CpanelClient::TYPE_WHM, 'port' => 2087, 'user' => 'root']),
+        fakeTransport(['body' => '{"metadata":{"result":1}}'], $captured),
+    );
+
+    assertThrows(static fn () => CpanelService::whmSetSiteIp($whm, 'ali', 'nope'), CpanelError::KIND_CONFIG);
+    assertSame([], $captured, 'آی‌پی نامعتبر نباید فرستاده شود');
+
+    CpanelService::whmCreatePackage($whm, 'bronze', '1024', '10240');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'name=bronze'), 'نام پلن فرستاده نشد');
+    assertTrue(str_contains($body, 'quota=1024'), 'سهمیه‌ی پلن فرستاده نشد');
+});
+
+check('داشبورد و فعالیت ادمین‌ها متن خوانا می‌دهند', function (): void {
+    $text = Render::toPlain(Render::dashboard([
+        ['id' => 'a', 'label' => 'هاست الف', 'state' => 'ok', 'detail' => 'Disk 40%'],
+        ['id' => 'b', 'label' => 'هاست ب', 'state' => 'bad', 'detail' => 'اتصال برقرار نشد'],
+    ]));
+    assertTrue(str_contains($text, 'هاست الف'), 'نام سرور نیامد');
+    assertTrue(str_contains($text, 'اتصال برقرار نشد'), 'خطای سرور نیامد');
+
+    $actors = Render::toPlain(Render::actors([
+        ['actor' => 'tg:555', 'count' => 12, 'last' => 'email_add', 'failed' => 2],
+    ]));
+    assertTrue(str_contains($actors, 'tg:555'), 'شناسه‌ی ادمین نیامد');
+    assertTrue(str_contains($actors, '2 ناموفق'), 'تعداد ناموفق‌ها نیامد');
+});
+
 echo "\nState و AuditLog\n";
 
 check('جریان چندمرحله‌ای ذخیره و پاک می‌شود', function (): void {

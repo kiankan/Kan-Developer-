@@ -148,6 +148,16 @@ final class SiteCheck
     }
 
     /**
+     * همان بررسی گواهی، برای وقتی که فقط گواهی لازم است و نه کل بررسی سلامت.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function certificateFor(string $domain): ?array
+    {
+        return self::certificate(self::cleanDomain($domain));
+    }
+
+    /**
      * گواهی‌ای که واقعاً روی پورت ۴۴۳ سرو می‌شود (نه آنچه داخل پنل ثبت است).
      *
      * @return array<string, mixed>|null

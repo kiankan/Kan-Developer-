@@ -37,6 +37,8 @@ final class Alerts
                 $threshold = Settings::int(Settings::ALERT_DISK, 85);
             } elseif (str_contains($id, 'inode')) {
                 $threshold = Settings::int(Settings::ALERT_INODE, 85);
+            } elseif (str_contains($id, 'bandwidth') || str_contains($id, 'bw')) {
+                $threshold = Settings::int(Settings::ALERT_BANDWIDTH, 85);
             }
             if ($threshold === null || $threshold <= 0) {
                 continue;

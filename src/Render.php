@@ -976,6 +976,16 @@ final class Render
             'backup_ftp' => 'بکاپ روی FTP راه دور', 'whm_find' => 'پیدا کردن حساب از روی دامنه',
             'srv_rename' => 'تغییر نام سرور', 'srv_token' => 'تغییر توکن سرور',
             'watch_files' => 'تنظیم فایل‌های تحت‌نظر',
+            'fwd_domain' => 'فوروارد کل دامنه', 'db_export_all' => 'خروجی همه‌ی دیتابیس‌ها',
+            'db_privs' => 'دیدن دسترسی‌های دیتابیس', 'canonical' => 'یکسان‌سازی آدرس سایت',
+            'speed' => 'بهینه‌سازی سرعت', 'wp_protect' => 'محافظت از ورود وردپرس',
+            'dns_import' => 'وارد کردن فایل زون', 'dns_repoint' => 'تغییر آی‌پی همه‌ی دامنه‌ها',
+            'hsts' => 'تنظیم HSTS', 'quick_view' => 'دیدن فایل مهم',
+            'file_replace' => 'جایگزینی متن در فایل‌ها', 'dir_diff' => 'مقایسه‌ی دو پوشه',
+            'sshkey_auth' => 'مجاز/نامجاز کردن کلید SSH', 'cron_easy' => 'ساخت کران با انتخاب زمان',
+            'php_copy_limits' => 'کپی محدودیت‌های PHP', 'backup_restore' => 'بازکردن بکاپ',
+            'whm_addpkg' => 'ساخت پلن', 'whm_setip' => 'تغییر آی‌پی حساب',
+            'whm_webmail' => 'لینک ورود به وبمیل', 'trash_empty' => 'خالی‌کردن سطل زباله',
         ];
 
         $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];
@@ -1717,6 +1727,197 @@ final class Render
             '',
             '⚠️ رمز را همین حالا جای امنی ذخیره کنید؛ دیگر نشانتان نمی‌دهم.',
         ]);
+    }
+
+    /**
+     * @param array<int, array{id: string, label: string, state: string, detail: string}> $rows
+     */
+    public static function dashboard(array $rows): string
+    {
+        if ($rows === []) {
+            return '🗂 هنوز سروری اضافه نکرده‌اید.';
+        }
+
+        $lines = ['🗂 <b>همه‌ی هاست‌ها در یک نگاه</b>', ''];
+        foreach ($rows as $row) {
+            $icon = match ($row['state']) {
+                'ok' => '🟢',
+                'warn' => '🟡',
+                default => '🔴',
+            };
+            $lines[] = $icon . ' <b>' . self::e($row['label']) . '</b>';
+            $lines[] = '   ' . self::e($row['detail']);
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ برای کار روی هرکدام، از «⚙️ سرورها» فعالش کنید.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{rows: array<int, array{sender: string, total: int, failed: int}>, total: int} $result
+     */
+    public static function topSenders(array $result): string
+    {
+        if ($result['rows'] === []) {
+            return "📤 <b>پرکارترین فرستنده‌ها</b>\n\nدر لاگ اخیر نامه‌ای ثبت نشده.";
+        }
+
+        $lines = ['📤 <b>پرکارترین فرستنده‌ها</b> — ' . $result['total'] . ' نامه‌ی اخیر', ''];
+        foreach (array_slice($result['rows'], 0, 12) as $row) {
+            $lines[] = '• <code>' . self::e($row['sender']) . '</code> — ' . $row['total'] . ' نامه'
+                . ($row['failed'] > 0 ? '   ❌ ' . $row['failed'] . ' ناموفق' : '');
+        }
+        $lines[] = '';
+        $lines[] = '💡 اگر صندوقی ناگهان خیلی بیشتر از بقیه فرستاده، احتمالاً رمزش لو رفته؛ «⛔️ تعلیق صندوق» فوری جلویش را می‌گیرد.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{rows: array<int, array{path: string, files: int}>, total: int, complete: bool} $usage
+     */
+    public static function inodes(array $usage): string
+    {
+        if ($usage['rows'] === []) {
+            return '🔢 پوشه‌ای برای شمارش پیدا نشد.';
+        }
+
+        $lines = ['🔢 <b>تعداد فایل هر پوشه (اینود)</b>', '', 'مجموع شمرده‌شده: ' . $usage['total'] . ' فایل', ''];
+        $biggest = $usage['rows'][0]['files'] ?? 0;
+        foreach ($usage['rows'] as $row) {
+            $share = $biggest > 0 ? $row['files'] / $biggest * 100 : 0.0;
+            $lines[] = '• <code>' . self::e($row['path']) . '</code> — ' . $row['files'] . ' '
+                . Format::bar($share, 8);
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ سقف «اینود» هاست‌های اشتراکی معمولاً زودتر از سقف حجم پر می‌شود؛ کش و لاگ بیشترین سهم را دارند.';
+        if (!$usage['complete']) {
+            $lines[] = 'ℹ️ شمارش تا سقف مشخصی از پوشه‌ها انجام شد، پس عدد بالا کمینه است.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{changed: array<int, array{path: string, hits: int}>, scanned: int, complete: bool} $result
+     */
+    public static function replaceResult(string $search, string $replace, array $result): string
+    {
+        if ($result['changed'] === []) {
+            return '🔁 عبارت <code>' . self::e($search) . '</code> در ' . $result['scanned'] . ' فایل گشته شد و پیدا نشد.';
+        }
+
+        $hits = 0;
+        foreach ($result['changed'] as $row) {
+            $hits += $row['hits'];
+        }
+
+        $lines = [
+            '🔁 <b>جایگزینی انجام شد</b>',
+            '',
+            '<code>' . self::e($search) . '</code> → <code>' . self::e($replace) . '</code>',
+            $hits . ' مورد در ' . count($result['changed']) . ' فایل (از ' . $result['scanned'] . ' فایل بررسی‌شده)',
+            '',
+        ];
+        foreach (array_slice($result['changed'], 0, 12) as $row) {
+            $lines[] = '• <code>' . self::e($row['path']) . '</code> — ' . $row['hits'] . ' مورد';
+        }
+        if (!$result['complete']) {
+            $lines[] = '';
+            $lines[] = 'ℹ️ به سقف فایل‌های قابل بررسی رسیدیم؛ برای بقیه، پوشه‌ی دقیق‌تری بدهید و دوباره بزنید.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{only_left: array<int, string>, only_right: array<int, string>, different: array<int, string>, same: int} $diff
+     */
+    public static function directoryDiff(string $left, string $right, array $diff): string
+    {
+        $lines = [
+            '🔀 <b>مقایسه‌ی دو پوشه</b>',
+            '🅰️ <code>' . self::e($left) . '</code>',
+            '🅱️ <code>' . self::e($right) . '</code>',
+            '',
+            '✅ یکسان: ' . $diff['same'],
+        ];
+
+        $section = static function (string $title, array $items) use (&$lines): void {
+            if ($items === []) {
+                return;
+            }
+            $lines[] = '';
+            $lines[] = $title . ' (' . count($items) . ')';
+            foreach (array_slice($items, 0, 12) as $name) {
+                $lines[] = '• <code>' . self::e((string) $name) . '</code>';
+            }
+            if (count($items) > 12) {
+                $lines[] = '… و ' . (count($items) - 12) . ' مورد دیگر.';
+            }
+        };
+
+        $section('<b>فقط در 🅰️:</b>', $diff['only_left']);
+        $section('<b>فقط در 🅱️:</b>', $diff['only_right']);
+        $section('<b>حجمشان فرق دارد:</b>', $diff['different']);
+
+        if ($diff['only_left'] === [] && $diff['only_right'] === [] && $diff['different'] === []) {
+            $lines[] = '';
+            $lines[] = '✅ محتوای سطح‌اول این دو پوشه یکی است.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{domain: string, ok: bool, days: ?int, issuer: string, covers: bool, error: string}> $rows
+     */
+    public static function certificateSweep(array $rows): string
+    {
+        if ($rows === []) {
+            return '🔒 دامنه‌ای برای بررسی نبود.';
+        }
+
+        $lines = ['🔒 <b>گواهی‌ها از دید مرورگر</b>', ''];
+        foreach ($rows as $row) {
+            $icon = $row['ok'] ? '✅' : '❌';
+            $lines[] = $icon . ' <code>' . self::e($row['domain']) . '</code>';
+            if ($row['error'] !== '') {
+                $lines[] = '   ' . self::e($row['error']);
+                continue;
+            }
+            $lines[] = '   صادرکننده: ' . self::e($row['issuer'] !== '' ? $row['issuer'] : '—')
+                . ($row['days'] !== null ? '، ' . $row['days'] . ' روز مانده' : '');
+            if (!$row['covers']) {
+                $lines[] = '   ⚠️ این گواهی نام همین دامنه را پوشش نمی‌دهد.';
+            }
+        }
+        $lines[] = '';
+        $lines[] = '💡 هر کدام مشکل داشت، «🔄 درخواست صدور/تمدید خودکار» را بزنید.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{actor: string, count: int, last: string, failed: int}> $rows
+     */
+    public static function actors(array $rows): string
+    {
+        if ($rows === []) {
+            return '👮 هنوز عملیاتی ثبت نشده.';
+        }
+
+        $lines = ['👮 <b>فعالیت ادمین‌ها</b>', ''];
+        foreach ($rows as $row) {
+            $lines[] = '• <code>' . self::e($row['actor']) . '</code> — ' . $row['count'] . ' عملیات'
+                . ($row['failed'] > 0 ? '   ❌ ' . $row['failed'] . ' ناموفق' : '');
+            if ($row['last'] !== '') {
+                $lines[] = '   آخرین: ' . self::e($row['last']);
+            }
+        }
+
+        return implode("\n", $lines);
     }
 
     public static function error(Throwable $error): string

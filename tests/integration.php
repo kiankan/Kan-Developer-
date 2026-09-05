@@ -1573,6 +1573,201 @@ if (is_resource($cpanelProcess)) {
         expect(Settings::get(Settings::WATCH_FILES) === '', 'خاموش‌کردن دیده‌بانی کار نکرد');
     });
 
+    scenario('فوروارد کل دامنه و پرکارترین فرستنده‌ها', function (): void {
+        press('m:email');
+        foreach (['f:fwd_domain', 'a:mailtop'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی ایمیل نبود");
+        }
+
+        press('a:mailtop');
+        $text = tg_last_text();
+        expect(str_contains($text, 'پرکارترین فرستنده‌ها'), 'عنوان نیامد');
+        expect(str_contains($text, 'info@example.com'), 'فرستنده نیامد');
+
+        press('f:fwd_domain');
+        press('c:0');                                   // example.com
+        send_text('new-example.com');
+        press('ok');
+        expect(str_contains(tg_last_text(), 'new-example.com'), 'نتیجه‌ی فوروارد دامنه نیامد');
+    });
+
+    scenario('دسترسی‌های کاربر روی دیتابیس و خروجی همه‌ی دیتابیس‌ها', function (): void {
+        press('m:db');
+        foreach (['f:db_privs', 'f:db_export_all'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی دیتابیس نبود");
+        }
+
+        press('f:db_privs');
+        press('c:0');                                   // demo_admin
+        press('c:0');                                   // demo_shop
+        expect(str_contains(tg_last_text(), 'demo_shop'), 'نتیجه‌ی دسترسی‌ها نیامد');
+
+        $before = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        press('f:db_export_all');
+        press('c:0');                                   // ۳ تا
+        press('ok');
+        $after = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        expect($after > $before, 'حداقل یک خروجی دیتابیس باید فرستاده شود');
+    });
+
+    scenario('یکسان‌سازی آدرس، سرعت و محافظت وردپرس', function (): void {
+        press('m:dom');
+        foreach (['f:canonical', 'f:speed', 'f:wp_protect'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی دامنه‌ها نبود");
+        }
+
+        press('f:canonical');
+        press('c:0');                                   // example.com
+        press('c:1');                                   // public_html
+        press('c:0');                                   // بدون www
+        expect(str_contains(tg_last_text(), 'https://example.com/'), 'مقصد یکسان‌سازی نیامد');
+
+        press('f:speed');
+        press('c:1');
+        press('c:0');
+        $bodies = implode(' ', array_map(
+            static fn (array $c): string => urldecode($c['body']),
+            array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'save_file_content')),
+        ));
+        expect(str_contains($bodies, 'mod_deflate'), 'قانون فشرده‌سازی نوشته نشد');
+
+        press('f:wp_protect');
+        press('c:1');
+        press('c:0');                                   // روشن
+        send_text('1.2.3.4');
+        expect(str_contains(tg_last_text(), '1.2.3.4'), 'آی‌پی مجاز در نتیجه نیامد');
+    });
+
+    scenario('وارد کردن فایل زون و تغییر آی‌پی همه‌ی دامنه‌ها', function (): void {
+        press('m:dns');
+        foreach (['f:dns_import', 'f:dns_repoint'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی DNS نبود");
+        }
+
+        press('f:dns_import');
+        press('c:0');                                   // example.com
+        send_text("shop.example.com. 300 IN A 203.0.113.11");
+        press('ok');
+        expect(str_contains(tg_last_text(), 'shop.example.com'), 'رکورد واردشده گزارش نشد');
+
+        press('f:dns_repoint');
+        send_text('203.0.113.99');
+        press('ok');
+        expect(str_contains(tg_last_text(), '203.0.113.99'), 'نتیجه‌ی تغییر آی‌پی نیامد');
+    });
+
+    scenario('HSTS و بررسی گواهی‌ها از بیرون', function (): void {
+        press('m:ssl');
+        foreach (['f:hsts', 'a:sslcheck'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی SSL نبود");
+        }
+
+        press('f:hsts');
+        press('c:1');
+        press('c:0');                                   // روشن
+        $bodies = implode(' ', array_map(
+            static fn (array $c): string => urldecode($c['body']),
+            array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'save_file_content')),
+        ));
+        expect(str_contains($bodies, 'Strict-Transport-Security'), 'هدر HSTS نوشته نشد');
+        expect(str_contains(tg_last_text(), 'تمدید خودکار'), 'هشدار HSTS نیامد');
+    });
+
+    scenario('فایل‌های مهم، جایگزینی متن و مقایسه‌ی پوشه‌ها', function (): void {
+        press('m:files');
+        foreach (['f:quick_view', 'f:file_replace', 'f:dir_diff', 'a:inodes'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی فایل‌ها نبود");
+        }
+
+        press('f:dir_diff');
+        press('c:0');                                   // هوم
+        press('c:1');                                   // public_html
+        expect(str_contains(tg_last_text(), 'مقایسه‌ی دو پوشه'), 'نتیجه‌ی مقایسه نیامد');
+
+        press('f:file_replace');
+        press('c:0');
+        send_text('salam');
+        send_text('doroud');
+        press('ok');
+        expect(str_contains(tg_last_text(), 'جایگزینی') || str_contains(tg_last_text(), 'گشته شد'), 'نتیجه‌ی جایگزینی نیامد');
+    });
+
+    scenario('مجاز کردن کلید SSH و کران با انتخاب زمان', function (): void {
+        press('m:ftp');
+        expect(in_array('f:sshkey_auth', tg_last_buttons(), true), 'دکمه‌ی مجاز کردن کلید نبود');
+
+        press('f:sshkey_auth');
+        press('c:0');                                   // laptop
+        press('c:1');                                   // نامجاز
+        $calls = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'deauthorize_key'));
+        expect($calls !== [], 'درخواست نامجاز کردن نرفت');
+
+        press('m:cron');
+        expect(in_array('f:cron_easy', tg_last_buttons(), true), 'دکمه‌ی ساخت کران با انتخاب زمان نبود');
+
+        press('f:cron_easy');
+        press('c:0');                                   // هر ۵ دقیقه
+        send_text('/usr/local/bin/php /home/demo/task.php');
+        $adds = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'Cron/add_line'));
+        expect($adds !== [], 'کران ساخته نشد');
+        $body = urldecode((string) (array_values($adds)[array_key_last(array_values($adds))]['body'] ?? ''));
+        expect(str_contains($body, 'minute=%2A%2F5') || str_contains($body, 'minute=*/5'), "زمان‌بندی درست نرفت: $body");
+    });
+
+    scenario('کپی محدودیت‌های PHP و بازکردن بکاپ', function (): void {
+        press('m:php');
+        expect(in_array('f:php_copy_limits', tg_last_buttons(), true), 'دکمه‌ی کپی محدودیت‌ها نبود');
+
+        press('m:backup');
+        expect(in_array('f:backup_restore', tg_last_buttons(), true), 'دکمه‌ی بازکردن بکاپ نبود');
+
+        press('f:backup_restore');
+        press('c:0');                                   // بکاپ موجود
+        press('c:0');                                   // پوشه‌ی هوم
+        expect(in_array('ok', tg_last_buttons(), true), 'بازکردن بکاپ باید تأیید بگیرد');
+        press('ok');
+        expect(str_contains(tg_last_text(), 'باز شد') || str_contains(tg_last_text(), '⚠️'), 'نتیجه‌ی بازکردن بکاپ نیامد');
+    });
+
+    scenario('داشبورد چندسروری، تست همه و خروجی تنظیمات', function (): void {
+        press('m:srv');
+        foreach (['a:dashboard', 'a:pingall', 'a:configexport'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی سرورها نبود");
+        }
+
+        press('a:dashboard');
+        expect(str_contains(tg_last_text(), 'یک نگاه'), 'داشبورد نیامد');
+
+        press('a:pingall');
+        expect(str_contains(tg_last_text(), 'تست اتصال همه'), 'تست همه نیامد');
+
+        $before = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        press('a:configexport');
+        $documents = array_values(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        expect(count($documents) === $before + 1, 'فایل تنظیمات فرستاده نشد');
+        expect(!str_contains(json_encode($documents, JSON_UNESCAPED_UNICODE), 'TESTTOKEN'), 'توکن نباید در خروجی باشد!');
+    });
+
+    scenario('فعالیت ادمین‌ها و راهنماهای تازه', function (): void {
+        press('m:adm');
+        expect(in_array('a:actors', tg_last_buttons(), true), 'دکمه‌ی فعالیت ادمین‌ها نبود');
+
+        press('a:actors');
+        expect(str_contains(tg_last_text(), 'فعالیت ادمین‌ها'), 'گزارش فعالیت نیامد');
+
+        press('m:howto');
+        foreach (['h:migrate', 'h:security'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "راهنمای $expected نبود");
+        }
+
+        press('h:migrate');
+        expect(str_contains(tg_last_text(), 'انتقال سایت'), 'راهنمای انتقال نیامد');
+        expect(in_array('f:dns_repoint', tg_last_buttons(), true), 'دکمه‌ی قدم DNS در راهنما نبود');
+
+        press('h:security');
+        expect(in_array('f:harden', tg_last_buttons(), true), 'دکمه‌ی سخت‌سازی در راهنمای امنیت نبود');
+    });
+
     proc_terminate($cpanelProcess);
     proc_close($cpanelProcess);
 } else {

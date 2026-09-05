@@ -4931,6 +4931,647 @@ final class CpanelService
     }
 
     /**
+     * پرکارترین فرستنده‌های ایمیل بر اساس لاگ تحویل — برای وقتی که حجم ارسال
+     * ناگهان بالا رفته و می‌خواهیم بدانیم کدام صندوق مسبب است.
+     *
+     * @return array{rows: array<int, array{sender: string, total: int, failed: int}>, total: int}
+     */
+    public static function topSenders(CpanelClient $client, int $limit = 200): array
+    {
+        $rows = [];
+        $total = 0;
+
+        foreach (self::mailDelivery($client, '', $limit) as $record) {
+            $sender = $record['sender'] !== '' ? $record['sender'] : '(نامشخص)';
+            if (!isset($rows[$sender])) {
+                $rows[$sender] = ['sender' => $sender, 'total' => 0, 'failed' => 0];
+            }
+            $rows[$sender]['total']++;
+            if ($record['status'] === 'ناموفق') {
+                $rows[$sender]['failed']++;
+            }
+            $total++;
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['total'] <=> $a['total']);
+
+        return ['rows' => array_values($rows), 'total' => $total];
+    }
+
+    /**
+     * فوروارد کل دامنه: هر نامه‌ای که به هر آدرسی از دامنه‌ی اول برسد، به همان
+     * نام روی دامنه‌ی دوم می‌رود.
+     */
+    public static function addDomainForwarder(CpanelClient $client, string $domain, string $destination): void
+    {
+        $domain = SiteCheck::cleanDomain($domain);
+        $destination = SiteCheck::cleanDomain($destination);
+        if ($domain === '' || $destination === '') {
+            throw CpanelError::config('هر دو دامنه را درست بفرستید.');
+        }
+        if ($domain === $destination) {
+            throw CpanelError::config('دامنه‌ی مبدأ و مقصد نمی‌توانند یکی باشند.');
+        }
+
+        try {
+            $client->uapi('Email', 'add_domain_forwarder', ['domain' => $domain, 'dest' => $destination]);
+
+            return;
+        } catch (CpanelError $e) {
+            if (in_array($e->kind, [CpanelError::KIND_AUTH, CpanelError::KIND_TRANSPORT], true)) {
+                throw $e;
+            }
+        }
+
+        $client->api2('Email', 'adddforward', ['domain' => $domain, 'newdomain' => $destination]);
+    }
+
+    /**
+     * دسترسی‌های یک کاربر روی یک دیتابیس.
+     *
+     * @return array<int, string>
+     */
+    public static function databasePrivileges(CpanelClient $client, string $user, string $database): array
+    {
+        $raw = $client->uapi('Mysql', 'get_privileges_on_database', ['user' => $user, 'database' => $database]);
+
+        $out = [];
+        foreach (self::normalizeList($raw) as $row) {
+            $value = is_array($row) ? (string) ($row['privilege'] ?? '') : (string) $row;
+            if (trim($value) !== '') {
+                $out[] = trim($value);
+            }
+        }
+
+        return $out;
+    }
+
+    // ------------------------------------------------ بلوک‌های .htaccess سایت
+
+    /**
+     * یکسان‌سازی آدرس سایت: همیشه با www یا همیشه بدون www.
+     *
+     * داشتن هر دو نسخه هم برای گوگل بد است هم گاهی باعث حلقه‌ی ورود می‌شود.
+     */
+    public static function setCanonical(CpanelClient $client, string $docroot, string $domain, string $mode): void
+    {
+        $domain = SiteCheck::cleanDomain($domain);
+        $domain = (string) preg_replace('/^www\./', '', $domain);
+        if ($domain === '') {
+            throw CpanelError::config('نام دامنه معتبر نیست.');
+        }
+
+        $htaccess = self::normalizePath($docroot) . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+
+        if ($mode === 'off') {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'CANONICAL'));
+
+            return;
+        }
+
+        $escaped = str_replace('.', '\.', $domain);
+        $lines = ['# TEAMKAN CANONICAL START', 'RewriteEngine On'];
+        if ($mode === 'www') {
+            $lines[] = 'RewriteCond %{HTTP_HOST} ^' . $escaped . '$ [NC]';
+            $lines[] = 'RewriteRule ^(.*)$ https://www.' . $domain . '/$1 [R=301,L]';
+        } else {
+            $lines[] = 'RewriteCond %{HTTP_HOST} ^www\.' . $escaped . '$ [NC]';
+            $lines[] = 'RewriteRule ^(.*)$ https://' . $domain . '/$1 [R=301,L]';
+        }
+        $lines[] = '# TEAMKAN CANONICAL END';
+        $lines[] = '';
+
+        self::saveFile($client, $htaccess, implode("\n", $lines) . self::stripBlock($current, 'CANONICAL'));
+    }
+
+    /**
+     * فشرده‌سازی gzip و کش مرورگر — دو تنظیمی که بیشترین تأثیر را روی سرعت
+     * سایت دارند و هر دو با .htaccess انجام می‌شوند.
+     */
+    public static function setSpeedRules(CpanelClient $client, string $docroot, bool $enable): void
+    {
+        $htaccess = self::normalizePath($docroot) . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+
+        if (!$enable) {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'SPEED'));
+
+            return;
+        }
+
+        $rules = implode("\n", [
+            '# TEAMKAN SPEED START',
+            '<IfModule mod_deflate.c>',
+            '    AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml',
+            '    AddOutputFilterByType DEFLATE application/javascript application/json',
+            '    AddOutputFilterByType DEFLATE application/xml image/svg+xml',
+            '</IfModule>',
+            '<IfModule mod_expires.c>',
+            '    ExpiresActive On',
+            '    ExpiresByType image/jpeg "access plus 1 year"',
+            '    ExpiresByType image/png "access plus 1 year"',
+            '    ExpiresByType image/webp "access plus 1 year"',
+            '    ExpiresByType image/svg+xml "access plus 1 year"',
+            '    ExpiresByType text/css "access plus 1 month"',
+            '    ExpiresByType application/javascript "access plus 1 month"',
+            '    ExpiresByType font/woff2 "access plus 1 year"',
+            '</IfModule>',
+            '# TEAMKAN SPEED END',
+            '',
+        ]);
+
+        self::saveFile($client, $htaccess, $rules . self::stripBlock($current, 'SPEED'));
+    }
+
+    /**
+     * محدودکردن صفحه‌ی ورود وردپرس به چند آی‌پی — جلوی حمله‌های حدس رمز را
+     * می‌گیرد، بدون افزونه.
+     *
+     * @param array<int, string> $ips
+     */
+    public static function protectWordpressLogin(CpanelClient $client, string $docroot, bool $enable, array $ips = []): array
+    {
+        $htaccess = self::normalizePath($docroot) . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+
+        if (!$enable) {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'WPLOGIN'));
+
+            return [];
+        }
+
+        $clean = [];
+        foreach ($ips as $entry) {
+            foreach (preg_split('/[\s,]+/', (string) $entry) ?: [] as $ip) {
+                $ip = trim((string) $ip);
+                if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) !== false) {
+                    $clean[$ip] = true;
+                }
+            }
+        }
+        $clean = array_keys($clean);
+        if ($clean === []) {
+            throw CpanelError::config(
+                'حداقل یک آی‌پی معتبر بدهید، وگرنه خودتان هم نمی‌توانید وارد پیشخوان شوید.'
+            );
+        }
+
+        $lines = [
+            '# TEAMKAN WPLOGIN START',
+            '<Files wp-login.php>',
+            '    <RequireAny>',
+        ];
+        foreach ($clean as $ip) {
+            $lines[] = '        Require ip ' . $ip;
+        }
+        $lines[] = '    </RequireAny>';
+        $lines[] = '</Files>';
+        $lines[] = '<Files xmlrpc.php>';
+        $lines[] = '    Require all denied';
+        $lines[] = '</Files>';
+        $lines[] = '# TEAMKAN WPLOGIN END';
+        $lines[] = '';
+
+        self::saveFile($client, $htaccess, implode("\n", $lines) . self::stripBlock($current, 'WPLOGIN'));
+
+        return $clean;
+    }
+
+    /**
+     * HSTS: به مرورگر می‌گوید این سایت را همیشه با https باز کن.
+     */
+    public static function setHsts(CpanelClient $client, string $docroot, bool $enable): void
+    {
+        $htaccess = self::normalizePath($docroot) . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+
+        if (!$enable) {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'HSTS'));
+
+            return;
+        }
+
+        $rules = implode("\n", [
+            '# TEAMKAN HSTS START',
+            '<IfModule mod_headers.c>',
+            '    Header always set Strict-Transport-Security "max-age=15552000"',
+            '</IfModule>',
+            '# TEAMKAN HSTS END',
+            '',
+        ]);
+
+        self::saveFile($client, $htaccess, $rules . self::stripBlock($current, 'HSTS'));
+    }
+
+    // ------------------------------------------------------------ DNS
+
+    /**
+     * خواندن رکورد از یک فایل زون و افزودنشان.
+     *
+     * @return array{added: array<int, string>, skipped: array<int, string>, failed: array<int, string>}
+     */
+    public static function importZone(CpanelClient $client, string $zone, string $text): array
+    {
+        $existing = [];
+        foreach (self::dnsZone($client, $zone)['records'] as $record) {
+            $existing[self::recordKey($record['type'], $record['name'], $record['data'])] = true;
+        }
+
+        $result = ['added' => [], 'skipped' => [], 'failed' => []];
+        $allowed = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV'];
+
+        foreach (preg_split('/\R/', $text) ?: [] as $line) {
+            $line = trim((string) $line);
+            if ($line === '' || str_starts_with($line, ';') || str_starts_with($line, '#') || str_starts_with($line, '$')) {
+                continue;
+            }
+
+            // name [ttl] [IN] TYPE data…
+            $parts = preg_split('/\s+/', $line) ?: [];
+            if (count($parts) < 3) {
+                continue;
+            }
+            $name = array_shift($parts);
+            $ttl = 14400;
+            if (ctype_digit((string) ($parts[0] ?? ''))) {
+                $ttl = (int) array_shift($parts);
+            }
+            if (strtoupper((string) ($parts[0] ?? '')) === 'IN') {
+                array_shift($parts);
+            }
+            $type = strtoupper((string) array_shift($parts));
+            if (!in_array($type, $allowed, true) || $parts === []) {
+                continue;
+            }
+
+            $data = array_values(array_map(
+                static fn (string $chunk): string => trim($chunk, '"'),
+                $parts,
+            ));
+            if ($type === 'TXT') {
+                $data = [trim(implode(' ', $data), '"')];
+            }
+
+            $label = $type . ' ' . rtrim($name, '.') . ' → ' . implode(' ', $data);
+            if (isset($existing[self::recordKey($type, $name, $data)])) {
+                $result['skipped'][] = $label;
+                continue;
+            }
+
+            try {
+                self::addDnsRecord($client, $zone, $name, $type, $data, $ttl);
+                $result['added'][] = $label;
+                $existing[self::recordKey($type, $name, $data)] = true;
+            } catch (Throwable $e) {
+                $result['failed'][] = $label . ' — ' . $e->getMessage();
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * تغییر آی‌پی همه‌ی دامنه‌ها — همان کاری که بعد از جابه‌جایی هاست باید
+     * روی همه‌ی زون‌ها انجام شود.
+     *
+     * @return array{changed: array<int, string>, failed: array<int, string>}
+     */
+    public static function repointDomains(CpanelClient $client, string $ip): array
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            throw CpanelError::config('آی‌پی معتبر نیست (فقط IPv4).');
+        }
+
+        $domains = self::domains($client);
+        $zones = array_values(array_filter(array_merge([$domains['main_domain']], $domains['addon_domains'])));
+
+        $changed = [];
+        $failed = [];
+        foreach ($zones as $zone) {
+            foreach ([$zone . '.', 'www.' . $zone . '.'] as $name) {
+                try {
+                    self::setARecord($client, $zone, $name, $ip);
+                    $changed[] = rtrim($name, '.');
+                } catch (Throwable $e) {
+                    $failed[] = rtrim($name, '.') . ' — ' . $e->getMessage();
+                }
+            }
+        }
+
+        return ['changed' => $changed, 'failed' => $failed];
+    }
+
+    /**
+     * گواهی واقعیِ سرو‌شده‌ی چند دامنه، از بیرون.
+     *
+     * @param array<int, string> $domains
+     *
+     * @return array<int, array{domain: string, ok: bool, days: ?int, issuer: string, covers: bool, error: string}>
+     */
+    public static function certificateSweep(array $domains, int $limit = 8): array
+    {
+        $out = [];
+        foreach (array_slice($domains, 0, $limit) as $domain) {
+            $domain = SiteCheck::cleanDomain((string) $domain);
+            if ($domain === '') {
+                continue;
+            }
+            $certificate = SiteCheck::certificateFor($domain);
+            if ($certificate === null) {
+                $out[] = ['domain' => $domain, 'ok' => false, 'days' => null, 'issuer' => '', 'covers' => false,
+                    'error' => 'گواهی خوانده نشد (سایت روی https جواب نداد).'];
+                continue;
+            }
+            $validTo = $certificate['valid_to'] ?? null;
+            $days = $validTo === null ? null : (int) floor(((int) $validTo - time()) / 86400);
+            $covers = (bool) ($certificate['covers_domain'] ?? false);
+            $out[] = [
+                'domain' => $domain,
+                'ok' => $covers && ($days === null || $days > 0),
+                'days' => $days,
+                'issuer' => (string) ($certificate['issuer'] ?? ''),
+                'covers' => $covers,
+                'error' => '',
+            ];
+        }
+
+        return $out;
+    }
+
+    // ------------------------------------------------------------ فایل‌ها
+
+    /**
+     * شمارش فایل هر پوشه‌ی سطح‌اول هوم — سقف «اینود» هاست‌های اشتراکی معمولاً
+     * قبل از سقف حجم پر می‌شود.
+     *
+     * @return array{rows: array<int, array{path: string, files: int}>, total: int, complete: bool}
+     */
+    public static function inodeUsage(CpanelClient $client, int $maxDirs = 40): array
+    {
+        $home = self::homeDir($client);
+        $rows = [];
+        $total = 0;
+        $scanned = 0;
+        $complete = true;
+
+        foreach (self::softCall(fn () => self::listFiles($client, $home), []) as $entry) {
+            if (!$entry['dir']) {
+                $total++;
+                continue;
+            }
+
+            $count = 0;
+            $queue = [$entry['path']];
+            while ($queue !== []) {
+                if ($scanned >= $maxDirs) {
+                    $complete = false;
+                    break;
+                }
+                $current = array_shift($queue);
+                $scanned++;
+                foreach (self::softCall(fn () => self::listFiles($client, $current), []) as $child) {
+                    if ($child['dir']) {
+                        $queue[] = $child['path'];
+                        continue;
+                    }
+                    $count++;
+                }
+            }
+
+            $rows[] = ['path' => $entry['path'], 'files' => $count];
+            $total += $count;
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['files'] <=> $a['files']);
+
+        return ['rows' => array_slice($rows, 0, 12), 'total' => $total, 'complete' => $complete];
+    }
+
+    /** فایل‌هایی که آدم معمولاً می‌خواهد سریع نگاهشان کند. */
+    private const IMPORTANT_FILES = [
+        '.htaccess', 'wp-config.php', 'robots.txt', '.user.ini', 'php.ini',
+        '.env', 'index.php', 'configuration.php', 'config.php', 'sitemap.xml',
+    ];
+
+    /**
+     * فایل‌های مهمی که واقعاً داخل این پوشه هستند.
+     *
+     * @return array<int, string>
+     */
+    public static function importantFiles(CpanelClient $client, string $docroot): array
+    {
+        $found = [];
+        foreach (self::softCall(fn () => self::listFiles($client, $docroot), []) as $entry) {
+            if (!$entry['dir'] && in_array(strtolower($entry['name']), self::IMPORTANT_FILES, true)) {
+                $found[] = $entry['path'];
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * جست‌وجو و جایگزینی متن در فایل‌های یک پوشه — همان کاری که بعد از عوض‌شدن
+     * دامنه باید در چند فایل انجام شود.
+     *
+     * @return array{changed: array<int, array{path: string, hits: int}>, scanned: int, complete: bool}
+     */
+    public static function replaceInFiles(
+        CpanelClient $client,
+        string $dir,
+        string $search,
+        string $replace,
+        int $maxFiles = 25,
+    ): array {
+        if (trim($search) === '') {
+            throw CpanelError::config('عبارت جست‌وجو خالی است.');
+        }
+
+        $changed = [];
+        $scanned = 0;
+        $complete = true;
+        $queue = [[self::normalizePath($dir), 0]];
+
+        while ($queue !== []) {
+            [$current, $depth] = array_shift($queue);
+
+            foreach (self::softCall(fn () => self::listFiles($client, $current), []) as $entry) {
+                if ($entry['dir']) {
+                    if ($depth < 1 && !in_array($entry['name'], ['node_modules', 'vendor', 'cache', '.git', 'mail'], true)) {
+                        $queue[] = [$entry['path'], $depth + 1];
+                    }
+                    continue;
+                }
+                if (preg_match('/\.(' . self::BINARY_FOR_GREP . ')$/i', $entry['name']) === 1
+                    || (float) ($entry['size'] ?? 0) > 524288) {
+                    continue;
+                }
+                if ($scanned >= $maxFiles) {
+                    $complete = false;
+                    break 2;
+                }
+
+                $scanned++;
+                $content = (string) self::softCall(fn () => self::readFile($client, $entry['path']), '');
+                if ($content === '' || !str_contains($content, $search)) {
+                    continue;
+                }
+
+                $hits = substr_count($content, $search);
+                self::saveFile($client, $entry['path'], str_replace($search, $replace, $content));
+                $changed[] = ['path' => $entry['path'], 'hits' => $hits];
+            }
+        }
+
+        return ['changed' => $changed, 'scanned' => $scanned, 'complete' => $complete];
+    }
+
+    /**
+     * مقایسه‌ی محتوای دو پوشه (سطح اول): چه چیزی فقط در یکی هست و کدام‌ها
+     * حجمشان فرق دارد.
+     *
+     * @return array{only_left: array<int, string>, only_right: array<int, string>, different: array<int, string>, same: int}
+     */
+    public static function compareDirectories(CpanelClient $client, string $left, string $right): array
+    {
+        $index = static function (array $entries): array {
+            $out = [];
+            foreach ($entries as $entry) {
+                $out[$entry['name']] = $entry;
+            }
+
+            return $out;
+        };
+
+        $a = $index(self::listFiles($client, $left));
+        $b = $index(self::listFiles($client, $right));
+
+        $onlyLeft = array_values(array_diff(array_keys($a), array_keys($b)));
+        $onlyRight = array_values(array_diff(array_keys($b), array_keys($a)));
+        $different = [];
+        $same = 0;
+
+        foreach (array_intersect(array_keys($a), array_keys($b)) as $name) {
+            $left1 = $a[$name];
+            $right1 = $b[$name];
+            if ($left1['dir'] !== $right1['dir'] || (float) ($left1['size'] ?? 0) !== (float) ($right1['size'] ?? 0)) {
+                $different[] = (string) $name;
+                continue;
+            }
+            $same++;
+        }
+
+        return ['only_left' => $onlyLeft, 'only_right' => $onlyRight, 'different' => $different, 'same' => $same];
+    }
+
+    // ------------------------------------------------------- کلید و کران
+
+    public static function authorizeSshKey(CpanelClient $client, string $name, bool $authorize): void
+    {
+        $client->uapi('SSH', $authorize ? 'authorize_key' : 'deauthorize_key', ['name' => $name]);
+    }
+
+    /** زمان‌بندی‌های آماده برای ساخت کران بدون نوشتن سینتکس. */
+    public const CRON_WHEN = [
+        '*/5 * * * *' => 'هر ۵ دقیقه',
+        '*/15 * * * *' => 'هر ۱۵ دقیقه',
+        '0 * * * *' => 'هر ساعت',
+        '0 */6 * * *' => 'هر ۶ ساعت',
+        '0 3 * * *' => 'هر شب ساعت ۳',
+        '0 3 * * 0' => 'هر هفته، جمعه‌شب ساعت ۳',
+        '0 3 1 * *' => 'اول هر ماه ساعت ۳',
+    ];
+
+    /**
+     * کپی محدودیت‌های PHP یک دامنه روی بقیه‌ی دامنه‌ها.
+     *
+     * @return array{applied: array<int, string>, failed: array<int, string>, directives: array<string, string>}
+     */
+    public static function copyPhpLimits(CpanelClient $client, string $source): array
+    {
+        $limits = self::phpLimits($client, $source);
+        $wanted = array_intersect_key($limits, self::PHP_DIRECTIVES);
+        if ($wanted === []) {
+            throw CpanelError::config("از «{$source}» محدودیتی خوانده نشد.");
+        }
+
+        $applied = [];
+        $failed = [];
+        foreach (self::phpVersions($client) as $vhost) {
+            $name = (string) $vhost['vhost'];
+            if ($name === '' || $name === $source) {
+                continue;
+            }
+            try {
+                foreach ($wanted as $directive => $value) {
+                    self::setPhpLimit($client, $name, (string) $directive, (string) $value);
+                }
+                $applied[] = $name;
+            } catch (Throwable $e) {
+                $failed[] = $name . ' — ' . $e->getMessage();
+            }
+        }
+
+        return ['applied' => $applied, 'failed' => $failed, 'directives' => $wanted];
+    }
+
+    /**
+     * بازکردن یک بکاپ داخل پوشه‌ی دلخواه.
+     */
+    public static function restoreBackup(CpanelClient $client, string $name, string $destination): string
+    {
+        $path = str_starts_with($name, '/') ? self::normalizePath($name) : self::homeDir($client) . '/' . $name;
+        $destination = self::normalizePath($destination);
+        self::extractArchive($client, $path, $destination);
+
+        return $destination;
+    }
+
+    // -------------------------------------------------------- کارهای WHM
+
+    public static function whmCreatePackage(CpanelClient $client, string $name, mixed $quotaMb, mixed $bandwidthMb): void
+    {
+        $client->whm('addpkg', [
+            'name' => $name,
+            'quota' => is_numeric($quotaMb) ? (int) $quotaMb : 0,
+            'bwlimit' => is_numeric($bandwidthMb) ? (int) $bandwidthMb : 0,
+            'maxsub' => 'unlimited',
+            'maxpop' => 'unlimited',
+            'maxsql' => 'unlimited',
+        ]);
+    }
+
+    public static function whmSetSiteIp(CpanelClient $client, string $user, string $ip): void
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            throw CpanelError::config('آی‌پی معتبر نیست.');
+        }
+
+        $client->whm('setsiteip', ['user' => $user, 'ip' => $ip]);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function whmVersion(CpanelClient $client): array
+    {
+        $raw = $client->whm('version');
+        $out = [];
+        if (is_array($raw)) {
+            foreach ($raw as $key => $value) {
+                if (is_scalar($value)) {
+                    $out[(string) $key] = (string) $value;
+                }
+            }
+        } elseif (is_scalar($raw)) {
+            $out['version'] = (string) $raw;
+        }
+
+        return $out;
+    }
+
+    /**
      * فراخوانی‌های «خوب‌است‌اگر‌باشد» — اگه ماژولش روی سرور نصب نباشه یا توکن
      * دسترسی نداشته باشه، کل خروجی نباید بترکه.
      *

@@ -429,8 +429,9 @@ final class UpdateHandler
                     ['💽 دیسک', Settings::ALERT_DISK],
                     ['🔢 اینود', Settings::ALERT_INODE],
                     ['🔒 روزهای مانده تا انقضای SSL', Settings::ALERT_SSL_DAYS],
+                    ['📶 پهنای‌باند', Settings::ALERT_BANDWIDTH],
                 ]],
-                ['key' => 'value', 'prompt' => "عدد جدید را بفرستید.\n\nبرای دیسک و اینود درصد (مثل <code>85</code>) و برای SSL تعداد روز (مثل <code>14</code>). عدد <code>0</code> یعنی این هشدار خاموش باشد."],
+                ['key' => 'value', 'prompt' => "عدد جدید را بفرستید.\n\nبرای دیسک، اینود و پهنای‌باند درصد (مثل <code>85</code>) و برای SSL تعداد روز (مثل <code>14</code>). عدد <code>0</code> یعنی این هشدار خاموش باشد."],
             ],
         ],
         'search' => [
@@ -1494,6 +1495,215 @@ final class UpdateHandler
                 ['key' => 'list', 'prompt' => "مسیر فایل‌هایی که نباید بی‌خبر عوض شوند، هر خط یکی:\n\n<code>/home/user/public_html/.htaccess\n/home/user/public_html/wp-config.php</code>\n\nبرای خاموش‌کردن، یک خط <code>-</code> بفرستید.", 'optional' => true, 'default' => ''],
             ],
         ],
+        'fwd_domain' => [
+            'title' => '📮 فوروارد کل دامنه',
+            'scope' => 'account',
+            'back' => 'email',
+            'confirm' => '⚠️ هر نامه‌ای که به هر آدرسی از <code>{domain}</code> برسد، به همان نام روی <code>{dest}</code> فرستاده می‌شود.',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => 'نامه‌های کدام دامنه فوروارد شوند؟', 'picker' => 'zones'],
+                ['key' => 'dest', 'prompt' => "به کدام دامنه بروند؟\n\n<code>newdomain.com</code>"],
+            ],
+        ],
+        'db_export_all' => [
+            'title' => '📦 خروجی همه‌ی دیتابیس‌ها',
+            'scope' => 'account',
+            'back' => 'db',
+            'confirm' => '⚠️ از همه‌ی دیتابیس‌ها خروجی گرفته می‌شود و فایل‌ها یکی‌یکی فرستاده می‌شوند. روی حساب‌های بزرگ چند دقیقه طول می‌کشد.',
+            'steps' => [
+                ['key' => 'limit', 'prompt' => 'حداکثر چند دیتابیس؟', 'choices' => [
+                    ['۳ تا', '3'],
+                    ['۵ تا', '5'],
+                    ['۱۰ تا', '10'],
+                ]],
+            ],
+        ],
+        'db_privs' => [
+            'title' => '🔍 دسترسی‌های یک کاربر',
+            'scope' => 'account',
+            'back' => 'db',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام کاربر دیتابیس؟', 'picker' => 'dbusers'],
+                ['key' => 'database', 'prompt' => 'روی کدام دیتابیس؟', 'picker' => 'databases'],
+            ],
+        ],
+        'canonical' => [
+            'title' => '🔗 یکسان‌سازی آدرس سایت',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'domain', 'prompt' => 'کدام دامنه؟', 'picker' => 'zones'],
+                ['key' => 'docroot', 'prompt' => 'پوشه‌ی همان سایت:', 'picker' => 'dirs'],
+                ['key' => 'mode', 'prompt' => "کدام نسخه اصل باشد؟\n\n💡 داشتن هر دو نسخه (با www و بدون www) هم برای گوگل بد است و هم گاهی باعث دردسر ورود می‌شود.", 'choices' => [
+                    ['بدون www (example.com)', 'root'],
+                    ['با www (www.example.com)', 'www'],
+                    ['↩️ بردار', 'off'],
+                ]],
+            ],
+        ],
+        'speed' => [
+            'title' => '⚡️ بهینه‌سازی سرعت سایت',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'docroot', 'prompt' => "پوشه‌ی کدام سایت؟\n\nدو چیز تنظیم می‌شود: فشرده‌سازی gzip و کش مرورگر — بیشترین تأثیر را روی سرعت دارند.", 'picker' => 'dirs'],
+                ['key' => 'state', 'prompt' => 'روشن یا خاموش؟', 'choices' => [
+                    ['⚡️ روشن', '1'],
+                    ['↩️ بردار', '0'],
+                ]],
+            ],
+        ],
+        'wp_protect' => [
+            'title' => '🛡 محافظت از ورود وردپرس',
+            'scope' => 'account',
+            'back' => 'dom',
+            'steps' => [
+                ['key' => 'docroot', 'prompt' => "پوشه‌ی سایت وردپرسی:", 'picker' => 'dirs'],
+                ['key' => 'state', 'prompt' => 'روشن یا خاموش؟', 'choices' => [
+                    ['🛡 روشن (فقط آی‌پی‌های من)', '1'],
+                    ['↩️ بردار', '0'],
+                ]],
+                ['key' => 'ips', 'prompt' => "آی‌پی‌هایی که اجازه‌ی باز کردن <code>wp-login.php</code> دارند، با فاصله:\n\n<code>1.2.3.4 5.6.7.8</code>\n\n⚠️ آی‌پی خودتان را حتماً بنویسید، وگرنه خودتان هم نمی‌توانید وارد پیشخوان شوید.\nبرای «بردار»، <code>/skip</code> را بزنید.", 'optional' => true, 'default' => ''],
+            ],
+        ],
+        'dns_import' => [
+            'title' => '📥 وارد کردن رکورد از فایل زون',
+            'scope' => 'account',
+            'back' => 'dns',
+            'confirm' => '⚠️ رکوردهای فایل روی زون <code>{zone}</code> ساخته می‌شوند (SOA و NS و رکوردهای تکراری رد می‌شوند).',
+            'steps' => [
+                ['key' => 'zone', 'prompt' => 'روی کدام دامنه؟', 'picker' => 'zones'],
+                ['key' => 'text', 'prompt' => "متن فایل زون را بفرستید (همان قالبی که «📤 خروجی فایل زون» می‌دهد):\n\n<code>www 14400 IN A 203.0.113.7\n@ 14400 IN MX 10 mail.example.com.</code>"],
+            ],
+        ],
+        'dns_repoint' => [
+            'title' => '🎯 تغییر آی‌پی همه‌ی دامنه‌ها',
+            'scope' => 'account',
+            'back' => 'dns',
+            'confirm' => '⚠️ رکورد A همه‌ی دامنه‌ها (با و بدون www) روی <code>{ip}</code> می‌رود.',
+            'steps' => [
+                ['key' => 'ip', 'prompt' => "آی‌پی تازه را بفرستید:\n\n<code>203.0.113.10</code>\n\n💡 این همان کاری است که بعد از جابه‌جایی هاست باید روی همه‌ی زون‌ها انجام شود."],
+            ],
+        ],
+        'hsts' => [
+            'title' => '🔐 اجبار همیشگی HTTPS (HSTS)',
+            'scope' => 'account',
+            'back' => 'ssl',
+            'steps' => [
+                ['key' => 'docroot', 'prompt' => "پوشه‌ی کدام سایت؟\n\nHSTS به مرورگر می‌گوید این سایت را از این به بعد همیشه با https باز کن.\n⚠️ اول مطمئن شوید گواهی SSL نصب و سالم است.", 'picker' => 'dirs'],
+                ['key' => 'state', 'prompt' => 'روشن یا خاموش؟', 'choices' => [
+                    ['🔐 روشن', '1'],
+                    ['↩️ بردار', '0'],
+                ]],
+            ],
+        ],
+        'quick_view' => [
+            'title' => '👀 دیدن فایل‌های مهم',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'docroot', 'prompt' => 'پوشه‌ی کدام سایت؟', 'picker' => 'dirs'],
+                ['key' => 'path', 'prompt' => 'کدام فایل؟', 'picker' => 'important_files'],
+            ],
+        ],
+        'file_replace' => [
+            'title' => '🔁 جست‌وجو و جایگزینی در فایل‌ها',
+            'scope' => 'account',
+            'back' => 'files',
+            'confirm' => "⚠️ در فایل‌های متنی <code>{dir}</code>، عبارت <code>{search}</code> با <code>{replace}</code> عوض می‌شود.\n\nاگر «بکاپ قبل از تغییر» روشن باشد، اول از پوشه یک نسخه‌ی پشتیبان گرفته می‌شود.",
+            'steps' => [
+                ['key' => 'dir', 'prompt' => "در کدام پوشه؟\n\n💡 کاربرد رایجش: بعد از عوض‌شدن دامنه، آدرس قدیمی را در فایل‌های سایت به آدرس تازه تبدیل کنید.", 'picker' => 'dirs'],
+                ['key' => 'search', 'prompt' => 'دنبال چه عبارتی بگردم؟'],
+                ['key' => 'replace', 'prompt' => 'به‌جایش چه بگذارم؟'],
+            ],
+        ],
+        'dir_diff' => [
+            'title' => '🔀 مقایسه‌ی دو پوشه',
+            'scope' => 'account',
+            'back' => 'files',
+            'steps' => [
+                ['key' => 'left', 'prompt' => 'پوشه‌ی اول:', 'picker' => 'dirs'],
+                ['key' => 'right', 'prompt' => 'پوشه‌ی دوم:', 'picker' => 'dirs'],
+            ],
+        ],
+        'sshkey_auth' => [
+            'title' => '🔓 مجاز/نامجاز کردن کلید SSH',
+            'scope' => 'account',
+            'back' => 'ftp',
+            'steps' => [
+                ['key' => 'name', 'prompt' => 'کدام کلید؟', 'picker' => 'ssh_keys'],
+                ['key' => 'state', 'prompt' => 'چه کارش کنم؟', 'choices' => [
+                    ['✅ مجاز کن', '1'],
+                    ['⛔️ نامجاز کن', '0'],
+                ]],
+            ],
+        ],
+        'cron_easy' => [
+            'title' => '🕒 ساخت کران با انتخاب زمان',
+            'scope' => 'account',
+            'back' => 'cron',
+            'steps' => [
+                ['key' => 'when', 'prompt' => "هر چند وقت یک‌بار اجرا شود؟\n\n(لازم نیست سینتکس کران بلد باشید.)", 'picker' => 'cron_when'],
+                ['key' => 'command', 'prompt' => "دستوری که اجرا شود:\n\n<code>/usr/local/bin/php /home/user/public_html/task.php</code>"],
+            ],
+        ],
+        'php_copy_limits' => [
+            'title' => '📋 کپی محدودیت‌های PHP',
+            'scope' => 'account',
+            'back' => 'php',
+            'confirm' => '⚠️ محدودیت‌های PHP دامنه‌ی <code>{source}</code> روی <b>همه‌ی</b> دامنه‌های دیگر کپی می‌شود.',
+            'steps' => [
+                ['key' => 'source', 'prompt' => "محدودیت‌های کدام دامنه سرمشق باشد؟", 'picker' => 'vhosts'],
+            ],
+        ],
+        'backup_restore' => [
+            'title' => '♻️ بازکردن یک بکاپ',
+            'scope' => 'account',
+            'back' => 'backup',
+            'confirm' => "⚠️ محتوای بکاپ <code>{name}</code> داخل <code>{dir}</code> باز می‌شود و فایل‌های هم‌نام رونویسی می‌شوند.\n\nمطمئن شوید پوشه‌ی مقصد درست است.",
+            'steps' => [
+                ['key' => 'name', 'prompt' => 'کدام بکاپ باز شود؟', 'picker' => 'backups'],
+                ['key' => 'dir', 'prompt' => "داخل کدام پوشه باز شود؟\n\n💡 برای اینکه اول محتوایش را ببینید، یک پوشه‌ی خالی بسازید و همان‌جا بازش کنید، نه مستقیم روی سایت.", 'picker' => 'dirs'],
+            ],
+        ],
+        'whm_addpkg' => [
+            'title' => '📦 ساخت پلن جدید',
+            'scope' => 'whm',
+            'back' => 'whm',
+            'steps' => [
+                ['key' => 'name', 'prompt' => "نام پلن:\n\n<code>bronze</code>"],
+                ['key' => 'quota', 'prompt' => 'سهمیه‌ی دیسک:', 'choices' => [
+                    ['♾ نامحدود', '0'],
+                    ['1 گیگابایت', '1024'],
+                    ['5 گیگابایت', '5120'],
+                    ['10 گیگابایت', '10240'],
+                ]],
+                ['key' => 'bandwidth', 'prompt' => 'سهمیه‌ی پهنای‌باند ماهانه:', 'choices' => [
+                    ['♾ نامحدود', '0'],
+                    ['10 گیگابایت', '10240'],
+                    ['50 گیگابایت', '51200'],
+                    ['100 گیگابایت', '102400'],
+                ]],
+            ],
+        ],
+        'whm_setip' => [
+            'title' => '🖧 تغییر آی‌پی حساب',
+            'scope' => 'whm',
+            'back' => 'whm',
+            'confirm' => '⚠️ آی‌پی سایت‌های حساب <code>{user}</code> به <code>{ip}</code> تغییر می‌کند و رکوردهای DNS همان لحظه به‌روز می‌شوند.',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام حساب؟', 'picker' => 'whm_accounts'],
+                ['key' => 'ip', 'prompt' => 'آی‌پی تازه:'],
+            ],
+        ],
+        'whm_webmail' => [
+            'title' => '📧 لینک ورود به وبمیل کاربر',
+            'scope' => 'whm',
+            'back' => 'whm',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'وبمیل کدام حساب باز شود؟', 'picker' => 'whm_accounts'],
+            ],
+        ],
         'srv_use' => [
             'title' => '🔀 انتخاب سرور فعال',
             'scope' => 'local',
@@ -1861,7 +2071,8 @@ final class UpdateHandler
                 [self::btn('🧽 پاک‌سازی Trash و Spam', 'f:mail_purge'), self::btn('📱 تنظیمات IMAP/SMTP', 'f:email_settings')],
                 [self::btn('📊 مصرف صندوق‌ها', 'a:maildisk'), self::btn('🧹 فیلترها', 'a:filters')],
                 [self::btn('📨 ردیابی ارسال ایمیل', 'f:mail_track'), self::btn('⛔️ تعلیق صندوق', 'f:email_suspend')],
-                [self::btn('📬 صندوق پیش‌فرض دامنه', 'f:catchall')],
+                [self::btn('📬 صندوق پیش‌فرض دامنه', 'f:catchall'), self::btn('📮 فوروارد کل دامنه', 'f:fwd_domain')],
+                [self::btn('📤 پرکارترین فرستنده‌ها', 'a:mailtop')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'db' => [self::databaseMenuText(), [
@@ -1873,6 +2084,7 @@ final class UpdateHandler
                 [self::btn('🛠 بررسی و تعمیر', 'f:db_repair'), self::btn('🌍 اتصال از راه دور', 'a:mysqlhosts')],
                 [self::btn('ℹ️ اطلاعات اتصال', 'a:dbinfo'), self::btn('📊 حجم دیتابیس‌ها', 'a:dbsizes')],
                 [self::btn('📤 خروجی SQL', 'f:db_export'), self::btn('🚀 ساخت کامل (سه قدم با هم)', 'f:db_setup')],
+                [self::btn('📦 خروجی همه‌ی دیتابیس‌ها', 'f:db_export_all'), self::btn('🔍 دسترسی‌های کاربر', 'f:db_privs')],
                 [self::btn('🗑 حذف دیتابیس', 'f:db_del'), self::btn('🗑 حذف کاربر', 'f:dbuser_del')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1885,7 +2097,8 @@ final class UpdateHandler
                 [self::btn('🩺 بررسی سلامت دامنه', 'f:site_check'), self::btn('🔒 SSL', 'm:ssl')],
                 [self::btn('🛠 حالت تعمیر سایت', 'f:maintenance'), self::btn('⛔️ مسدودکردن آی‌پی', 'f:ip_block')],
                 [self::btn('🖼 جلوگیری از هات‌لینک', 'f:hotlink'), self::btn('🚧 صفحه‌ی خطای سفارشی', 'f:error_pages')],
-                [self::btn('🅿️ دامنه‌های پارک‌شده', 'a:parked')],
+                [self::btn('🅿️ دامنه‌های پارک‌شده', 'a:parked'), self::btn('🔗 یکسان‌سازی آدرس', 'f:canonical')],
+                [self::btn('⚡️ بهینه‌سازی سرعت', 'f:speed'), self::btn('🛡 محافظت ورود وردپرس', 'f:wp_protect')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'files' => ["📂 <b>فایل‌های هاست</b>\n\nسورس سایت را از همین‌جا آپلود کنید: فایل (یا zip) را بفرستید، و اگر آرشیو بود همان‌جا بازش کنید.\n"
@@ -1906,6 +2119,8 @@ final class UpdateHandler
                 [self::btn('🧱 سخت‌سازی سایت', 'f:harden'), self::btn('🧯 حذف فایل‌های قدیمی', 'f:file_prune')],
                 [self::btn('🔍 جست‌وجوی متن', 'f:file_grep'), self::btn('📏 اندازه‌ی پوشه', 'f:dir_size')],
                 [self::btn('🌐 گرفتن فایل از اینترنت', 'f:file_from_url'), self::btn('🗑 سطل زباله', 'a:trash')],
+                [self::btn('🔁 جایگزینی متن', 'f:file_replace'), self::btn('🔀 مقایسه‌ی دو پوشه', 'f:dir_diff')],
+                [self::btn('👀 فایل‌های مهم', 'f:quick_view'), self::btn('🔢 تعداد فایل‌ها (اینود)', 'a:inodes')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'ftp' => ["📁 <b>حساب‌های FTP</b>\n\nبرای وصل‌شدن با نرم‌افزارهایی مثل FileZilla.", [
@@ -1913,7 +2128,7 @@ final class UpdateHandler
                 [self::btn('➕ افزودن', 'f:ftp_add'), self::btn('🗑 حذف', 'f:ftp_del')],
                 [self::btn('🔑 تغییر رمز', 'f:ftp_passwd'), self::btn('📦 سهمیه', 'f:ftp_quota')],
                 [self::btn('🔌 نشست‌های باز', 'a:ftpsessions'), self::btn('🔑 کلیدهای SSH', 'a:sshkeys')],
-                [self::btn('💽 وب‌دیسک', 'a:webdisk')],
+                [self::btn('💽 وب‌دیسک', 'a:webdisk'), self::btn('🔓 مجاز کردن کلید SSH', 'f:sshkey_auth')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'cron' => ["⏰ <b>کران‌جاب‌ها</b>\n\nدستورهایی که سرور خودکار و سر وقت اجرا می‌کند (مثل کران وردپرس یا بکاپ روزانه).", [
@@ -1922,6 +2137,7 @@ final class UpdateHandler
                 [self::btn('🗑 حذف', 'f:cron_del'), self::btn('📧 ایمیل خروجی کران', 'f:cron_email')],
                 [self::btn('🧩 کران آماده', 'f:cron_template')],
                 [self::btn('⏸ توقف موقت', 'f:cron_pause'), self::btn('▶️ برگرداندن', 'f:cron_resume')],
+                [self::btn('🕒 ساخت با انتخاب زمان', 'f:cron_easy')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'dns' => ["🧭 <b>رکوردهای DNS</b>\n\nمشخص می‌کند دامنه به کجا اشاره کند (A برای آی‌پی، CNAME برای نام، MX برای ایمیل، TXT برای تأییدیه‌ها).", [
@@ -1930,26 +2146,29 @@ final class UpdateHandler
                 [self::btn('🛠 اصلاح رکورد A', 'f:dns_fix'), self::btn('🧭 رکورد گروهی', 'f:dns_bulk')],
                 [self::btn('🧩 قالب آماده', 'f:dns_template'), self::btn('📤 خروجی فایل زون', 'f:dns_export')],
                 [self::btn('🌍 مقایسه با دنیای بیرون', 'f:dns_check'), self::btn('⏱ تغییر TTL', 'f:dns_ttl')],
+                [self::btn('📥 وارد کردن فایل زون', 'f:dns_import'), self::btn('🎯 تغییر آی‌پی همه', 'f:dns_repoint')],
                 [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
             'ssl' => ["🔒 <b>گواهی SSL</b>\n\nگواهی همان چیزی است که قفل سبز مرورگر و آدرس <code>https</code> را می‌سازد. روی اکثر هاست‌ها cPanel خودش رایگان صادر می‌کند (AutoSSL).", [
                 [self::btn('📋 گواهی‌های نصب‌شده', 'a:ssl')],
                 [self::btn('🔄 درخواست صدور/تمدید خودکار', 'a:autossl'), self::btn('🔐 اجبار HTTPS', 'f:force_https')],
                 [self::btn('📥 نصب گواهی دستی', 'f:ssl_install'), self::btn('🗑 حذف گواهی', 'f:ssl_del')],
-                [self::btn('📝 ساخت CSR و کلید', 'f:ssl_csr')],
+                [self::btn('📝 ساخت CSR و کلید', 'f:ssl_csr'), self::btn('🔐 HSTS', 'f:hsts')],
+                [self::btn('🔎 بررسی گواهی‌ها از بیرون', 'a:sslcheck')],
                 [self::btn('⬅️ بازگشت', 'm:dom')],
             ]],
             'php' => ["🐘 <b>نسخه‌ی PHP</b>\n\nنسخه‌ی PHP هر دامنه را جدا می‌شود عوض کرد (MultiPHP).", [
                 [self::btn('📋 نسخه‌ی هر دامنه', 'a:php')],
                 [self::btn('🔧 تغییر نسخه', 'f:php_set'), self::btn('⚙️ محدودیت‌ها', 'f:php_limits')],
                 [self::btn('🧪 تست زنده‌ی PHP', 'f:php_test'), self::btn('🎚 تغییر محدودیت‌ها', 'f:php_limit_set')],
-                [self::btn('🐘 نسخه‌ی همه‌ی دامنه‌ها', 'f:php_set_all')],
+                [self::btn('🐘 نسخه‌ی همه‌ی دامنه‌ها', 'f:php_set_all'), self::btn('📋 کپی محدودیت‌ها', 'f:php_copy_limits')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'backup' => ["💾 <b>بکاپ</b>\n\nبکاپ کامل حساب در پوشه‌ی هوم ساخته می‌شود و بعد می‌توانید دانلودش کنید.", [
                 [self::btn('📋 بکاپ‌های موجود', 'a:backups')],
                 [self::btn('💾 گرفتن بکاپ کامل', 'f:backup_run'), self::btn('⬇️ دانلود بکاپ', 'f:backup_download')],
                 [self::btn('📡 بکاپ روی FTP راه دور', 'f:backup_ftp'), self::btn('🗑 حذف بکاپ', 'f:backup_del')],
+                [self::btn('♻️ بازکردن یک بکاپ', 'f:backup_restore')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'whm' => ["🖥 <b>مدیریت سرور (WHM)</b>\n\nکارهای سطح سرور: حساب‌ها، پلن‌ها و سرویس‌ها.", [
@@ -1962,7 +2181,9 @@ final class UpdateHandler
                 [self::btn('👥 تعلیق/رفع تعلیق گروهی', 'f:whm_bulk'), self::btn('📊 پرمصرف‌ترین حساب‌ها', 'a:whmtop')],
                 [self::btn('⛔️ حساب‌های معلق', 'a:whmsusp'), self::btn('📊 سهمیه‌ی دیسک حساب', 'f:whm_quota')],
                 [self::btn('🖧 آی‌پی‌های سرور', 'a:whmips'), self::btn('📈 نمای کلی سرور', 'a:whmstats')],
-                [self::btn('🔎 پیدا کردن حساب از روی دامنه', 'f:whm_find')],
+                [self::btn('🔎 پیدا کردن حساب از روی دامنه', 'f:whm_find'), self::btn('🧩 نسخه‌ی سرور', 'a:whmversion')],
+                [self::btn('📦 ساخت پلن', 'f:whm_addpkg'), self::btn('🖧 تغییر آی‌پی حساب', 'f:whm_setip')],
+                [self::btn('📧 ورود به وبمیل کاربر', 'f:whm_webmail')],
                 [self::btn('🎯 انتخاب کاربر مقصد', 'f:whm_user')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
@@ -1973,6 +2194,8 @@ final class UpdateHandler
                 [self::btn('✉️ ساخت ایمیل جدید', 'h:email')],
                 [self::btn('🔒 گرفتن SSL برای دامنه', 'h:ssl')],
                 [self::btn('💾 گرفتن بکاپ', 'h:backup')],
+                [self::btn('📦 انتقال سایت از هاست قدیمی', 'h:migrate')],
+                [self::btn('🛡 امن‌کردن سایت', 'h:security')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'fav' => [self::favoritesMenuText(), array_merge(
@@ -1994,16 +2217,21 @@ final class UpdateHandler
                 [self::btn('📋 لیست ادمین‌ها', 'a:admins')],
                 [self::btn('➕ افزودن ادمین', 'f:admin_add'), self::btn('🗑 حذف ادمین', 'f:admin_del')],
                 [self::btn('⏳ دسترسی موقت', 'f:guest_invite'), self::btn('🚫 لغو دسترسی‌های موقت', 'a:revokeguests')],
+                [self::btn('📊 فعالیت ادمین‌ها', 'a:actors')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
             'srv' => ["🖥 <b>سرورها</b>\n\nهر تعداد هاست cPanel یا سرور WHM می‌توانید اضافه کنید و بینشان جابه‌جا شوید.", array_merge(
-                [[self::btn('📋 لیست سرورها', 'a:servers'), self::btn('🔌 تست اتصال', 'a:ping')]],
+                [
+                    [self::btn('📋 لیست سرورها', 'a:servers'), self::btn('🔌 تست اتصال', 'a:ping')],
+                    [self::btn('🗂 همه‌ی هاست‌ها در یک نگاه', 'a:dashboard'), self::btn('🔌 تست همه', 'a:pingall')],
+                ],
                 self::serverPickerRows(),
                 [
                     [self::btn('➕ افزودن سرور', 'f:srv_add'), self::btn('🗑 حذف سرور', 'f:srv_del')],
                     [self::btn('⚖️ مقایسه‌ی دو هاست', 'f:srv_compare')],
                     [self::btn('✏️ تغییر نام', 'f:srv_rename'), self::btn('🔑 تغییر توکن', 'f:srv_token')],
                     [self::btn('🧩 اجرای ربات با کران روی هاست', 'f:selfhost_cron')],
+                    [self::btn('🧾 خروجی تنظیمات ربات', 'a:configexport')],
                     [self::btn('⬅️ بازگشت', 'menu')],
                 ],
             )],
@@ -2455,6 +2683,139 @@ final class UpdateHandler
             return;
         }
 
+        if ($action === 'dashboard') {
+            $api->sendChatAction($chatId);
+            $rows = [];
+            foreach (ServerStore::all() as $id => $server) {
+                $label = (string) $server['label'] . ' (' . $id . ')';
+                try {
+                    $client = ServerStore::client((string) $id);
+                    if ($client->isWhm() && $client->targetUser() === '') {
+                        $status = CpanelService::whmServerStatus($client);
+                        $load = (string) ($status['load'] ?? '');
+                        $rows[] = ['id' => (string) $id, 'label' => $label, 'state' => 'ok',
+                            'detail' => 'سرور WHM' . ($load !== '' ? ' — بار سیستم: ' . $load : '')];
+                        continue;
+                    }
+
+                    $snapshot = CpanelService::snapshot($client, $label);
+                    if ($snapshot['error'] !== '') {
+                        $rows[] = ['id' => (string) $id, 'label' => $label, 'state' => 'bad', 'detail' => $snapshot['error']];
+                        continue;
+                    }
+
+                    $worst = 0.0;
+                    $parts = [];
+                    foreach ($snapshot['usage'] as $item) {
+                        if ($item['percent'] === null) {
+                            continue;
+                        }
+                        $worst = max($worst, (float) $item['percent']);
+                        $parts[] = $item['label'] . ' ' . Format::percent($item['percent']);
+                    }
+                    $parts[] = '✉️ ' . ($snapshot['counts']['emails'] ?? 0) . '   🗄 ' . ($snapshot['counts']['databases'] ?? 0);
+
+                    $rows[] = [
+                        'id' => (string) $id,
+                        'label' => $label,
+                        'state' => $worst >= 90 ? 'bad' : ($worst >= 80 ? 'warn' : 'ok'),
+                        'detail' => implode('   ', $parts),
+                    ];
+                } catch (Throwable $e) {
+                    $rows[] = ['id' => (string) $id, 'label' => $label, 'state' => 'bad', 'detail' => $e->getMessage()];
+                }
+            }
+            self::respond($api, $chatId, Render::dashboard($rows), self::backKeyboard('srv'));
+
+            return;
+        }
+
+        if ($action === 'pingall') {
+            $api->sendChatAction($chatId);
+            $lines = ['🔌 <b>تست اتصال همه‌ی سرورها</b>', ''];
+            foreach (ServerStore::all() as $id => $server) {
+                try {
+                    $info = ServerStore::client((string) $id)->ping();
+                    $lines[] = '✅ <b>' . Format::escapeHtml((string) $server['label']) . '</b> — <code>'
+                        . Format::escapeHtml((string) ($info['user'] ?? '')) . '</code>';
+                } catch (Throwable $e) {
+                    $lines[] = '❌ <b>' . Format::escapeHtml((string) $server['label']) . '</b> — '
+                        . Format::escapeHtml(mb_substr($e->getMessage(), 0, 120));
+                }
+            }
+            if (count($lines) === 2) {
+                $lines[] = 'سروری تعریف نشده است.';
+            }
+            self::respond($api, $chatId, implode("\n", $lines), self::backKeyboard('srv'));
+
+            return;
+        }
+
+        if ($action === 'configexport') {
+            $config = [
+                'exported_at' => gmdate('c'),
+                'settings' => Settings::all(),
+                'favorites' => Favorites::all(),
+                'servers' => [],
+            ];
+            foreach (ServerStore::all() as $id => $server) {
+                // توکن‌ها عمداً بیرون می‌مانند؛ این فایل قرار است جابه‌جا شود.
+                $config['servers'][] = [
+                    'id' => (string) $id,
+                    'label' => (string) $server['label'],
+                    'type' => (string) $server['type'],
+                    'host' => (string) $server['host'],
+                    'port' => (int) $server['port'],
+                    'user' => (string) $server['user'],
+                ];
+            }
+            self::attachFile(
+                'teamkan-config-' . gmdate('Ymd') . '.json',
+                (string) json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            );
+            self::respond(
+                $api,
+                $chatId,
+                "🧾 خروجی تنظیمات ربات آماده شد (سرورها، آستانه‌ها، سوییچ‌ها و میان‌برها).\n\n"
+                . '⚠️ توکن‌ها عمداً داخلش نیستند؛ بعد از انتقال، توکن هر سرور را دوباره وارد کنید.',
+                self::backKeyboard('srv'),
+            );
+            $files = self::$pendingFiles;
+            self::$pendingFiles = [];
+            foreach ($files as $file) {
+                try {
+                    $api->sendDocument($chatId, $file['name'], $file['content']);
+                } catch (Throwable $e) {
+                    $api->sendHtml($chatId, Render::error($e));
+                }
+            }
+
+            return;
+        }
+
+        if ($action === 'actors') {
+            $rows = [];
+            foreach (AuditLog::tail(200) as $line) {
+                $entry = json_decode((string) $line, true);
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $actor = (string) ($entry['actor'] ?? 'unknown');
+                if (!isset($rows[$actor])) {
+                    $rows[$actor] = ['actor' => $actor, 'count' => 0, 'last' => '', 'failed' => 0];
+                }
+                $rows[$actor]['count']++;
+                if (($entry['ok'] ?? true) === false) {
+                    $rows[$actor]['failed']++;
+                }
+                $rows[$actor]['last'] = (string) ($entry['action'] ?? '');
+            }
+            usort($rows, static fn (array $a, array $b): int => $b['count'] <=> $a['count']);
+            self::respond($api, $chatId, Render::actors(array_values($rows)), self::backKeyboard('adm'));
+
+            return;
+        }
+
         if ($action === 'parked') {
             $api->sendChatAction($chatId);
             try {
@@ -2611,6 +2972,20 @@ final class UpdateHandler
                 'health' => Render::health(CpanelService::healthCheck(self::accountClient())),
                 'whmips' => Render::whmIps(CpanelService::whmIps(self::whmClient())),
                 'whmstats' => Render::whmOverview(CpanelService::whmOverview(self::whmClient())),
+                'whmversion' => "🧩 <b>نسخه‌ی سرور</b>\n\n" . implode("\n", array_map(
+                    static fn (string $key, string $value): string => '• ' . Format::escapeHtml($key) . ': <code>'
+                        . Format::escapeHtml($value) . '</code>',
+                    array_keys(CpanelService::whmVersion(self::whmClient())),
+                    array_values(CpanelService::whmVersion(self::whmClient())),
+                )),
+                'mailtop' => Render::topSenders(CpanelService::topSenders(self::accountClient())),
+                'inodes' => Render::inodes(CpanelService::inodeUsage(self::accountClient())),
+                'sslcheck' => Render::certificateSweep(CpanelService::certificateSweep(
+                    array_values(array_filter(array_merge(
+                        [CpanelService::domains(self::accountClient())['main_domain']],
+                        CpanelService::domains(self::accountClient())['addon_domains'],
+                    ))),
+                )),
                 'whmsusp' => Render::whmSuspended(CpanelService::whmSuspended(self::whmClient())),
                 'maildisk' => Render::mailboxUsage(CpanelService::mailboxUsage(CpanelService::emails(self::accountClient()))),
                 'dbsizes' => Render::databaseSizes(CpanelService::databaseSizes(CpanelService::databases(self::accountClient()))),
@@ -2668,6 +3043,10 @@ final class UpdateHandler
             'health' => [[self::btn('⬅️ خلاصه‌ی حساب', 'a:summary'), self::btn('🔄 بررسی دوباره', 'a:health')]],
             'whmsusp' => [[self::btn('✅ رفع تعلیق', 'f:whm_unsuspend')]],
             'parked' => [[self::btn('🅿️ پارک دامنه‌ی جدید', 'f:park_add'), self::btn('🗑 حذف پارک', 'f:park_del')]],
+            'mailtop' => [[self::btn('⛔️ تعلیق صندوق', 'f:email_suspend'), self::btn('📨 ردیابی ارسال', 'f:mail_track')]],
+            'inodes' => [[self::btn('🧹 پاک‌سازی هوشمند', 'a:cleanup'), self::btn('📏 اندازه‌ی پوشه', 'f:dir_size')]],
+            'sslcheck' => [[self::btn('🔄 درخواست صدور/تمدید خودکار', 'a:autossl'), self::btn('📋 گواهی‌های نصب‌شده', 'a:ssl')]],
+            'dashboard' => [[self::btn('🔌 تست همه', 'a:pingall'), self::btn('🔄 تازه‌سازی', 'a:dashboard')]],
             'acctfeatures' => [[self::btn('⬅️ خلاصه‌ی حساب', 'a:summary')]],
             'domains' => [[self::btn('🩺 بررسی سلامت دامنه', 'f:site_check')]],
             'bigfiles', 'recentfiles' => [[self::btn('🗂 مرور فایل‌ها', 'a:files')]],
@@ -2761,6 +3140,37 @@ final class UpdateHandler
                 [
                     [self::btn('💾 گرفتن بکاپ کامل', 'f:backup_run')],
                     [self::btn('📋 بکاپ‌های موجود', 'a:backups')],
+                ],
+            ],
+            'migrate' => [
+                "📦 <b>انتقال سایت از هاست قدیمی</b>\n\n"
+                . "۱️⃣ روی هاست قدیمی بکاپ کامل بگیرید و فایلش را بردارید\n"
+                . "۲️⃣ اینجا دامنه (یا ادان‌دامنه) و دیتابیس را بسازید\n"
+                . "۳️⃣ سورس را آپلود کنید (یا اگر لینک مستقیم دارید، «گرفتن فایل از اینترنت»)\n"
+                . "۴️⃣ آدرس قدیمی را در فایل‌های سایت با آدرس تازه عوض کنید\n"
+                . "۵️⃣ قبل از تغییر DNS، TTL را روی ۵ دقیقه بگذارید تا جابه‌جایی زود اثر کند\n"
+                . "۶️⃣ رکورد A همه‌ی دامنه‌ها را روی آی‌پی هاست تازه ببرید\n"
+                . '۷️⃣ با «مقایسه با دنیای بیرون» مطمئن شوید تغییر اثر کرده، بعد SSL بگیرید',
+                [
+                    [self::btn('۲ 🚀 ساخت کامل دیتابیس', 'f:db_setup'), self::btn('۳ 📂 فایل‌ها', 'm:files')],
+                    [self::btn('۴ 🔁 جایگزینی متن', 'f:file_replace')],
+                    [self::btn('۵ ⏱ تغییر TTL', 'f:dns_ttl'), self::btn('۶ 🎯 تغییر آی‌پی همه', 'f:dns_repoint')],
+                    [self::btn('۷ 🌍 مقایسه با بیرون', 'f:dns_check'), self::btn('🔒 SSL', 'm:ssl')],
+                ],
+            ],
+            'security' => [
+                "🛡 <b>امن‌کردن سایت</b>\n\n"
+                . "۱️⃣ «گزارش امنیتی» را بگیرید تا فایل‌های لو‌رفته و دسترسی‌های باز را ببینید\n"
+                . "۲️⃣ «سخت‌سازی سایت» را بزنید (بستن لیست پوشه‌ها، فایل‌های حساس و اجرای PHP در آپلودها)\n"
+                . "۳️⃣ اگر وردپرس دارید، ورودش را به آی‌پی خودتان محدود کنید\n"
+                . "۴️⃣ SSL بگیرید و بعد HSTS را روشن کنید\n"
+                . "۵️⃣ چند فایل حساس را «تحت‌نظر» بگذارید تا تغییر بی‌خبرشان را خبر بدهم\n"
+                . '۶️⃣ بکاپ خودکار را روشن کنید — امن‌ترین سایت هم روزی به بکاپ نیاز دارد',
+                [
+                    [self::btn('۱ 🛡 گزارش امنیتی', 'a:security'), self::btn('۲ 🧱 سخت‌سازی', 'f:harden')],
+                    [self::btn('۳ 🛡 محافظت وردپرس', 'f:wp_protect')],
+                    [self::btn('۴ 🔒 SSL', 'm:ssl'), self::btn('🔐 HSTS', 'f:hsts')],
+                    [self::btn('۵ 📝 فایل‌های تحت‌نظر', 'f:watch_files'), self::btn('۶ 🗓 بکاپ خودکار', 'f:backup_schedule')],
                 ],
             ],
             default => ['این راهنما را نمی‌شناسم.', []],
@@ -3121,8 +3531,12 @@ final class UpdateHandler
             'sshkeys', 'webdisk' => 'ftp',
             'trash', 'trashempty' => 'files',
             'parked' => 'dom',
-            'whmstats' => 'whm',
-            'whmips', 'whmsusp' => 'whm',
+            'whmips', 'whmsusp', 'whmstats', 'whmversion' => 'whm',
+            'mailtop' => 'email',
+            'inodes' => 'files',
+            'sslcheck' => 'ssl',
+            'dashboard', 'pingall', 'configexport' => 'srv',
+            'actors' => 'adm',
             'health' => null,
             'dbsizes' => 'db',
             'queue' => 'alerts',
@@ -3609,6 +4023,22 @@ final class UpdateHandler
                         'label' => $item['schedule'] . ' — ' . $item['command'],
                         'value' => $item['id'],
                     ];
+                }
+
+                return $options;
+
+            case 'important_files':
+                $docroot = (string) ($data['docroot'] ?? '');
+                if ($docroot === '') {
+                    return [];
+                }
+
+                return $simple(CpanelService::importantFiles(self::accountClient(), $docroot));
+
+            case 'cron_when':
+                $options = [];
+                foreach (CpanelService::CRON_WHEN as $value => $label) {
+                    $options[] = ['label' => $label, 'value' => (string) $value];
                 }
 
                 return $options;
@@ -5247,6 +5677,294 @@ final class UpdateHandler
                 $paths,
             ))
             . "\n\n💡 اولین بررسی فقط وضعیت فعلی را ثبت می‌کند؛ هشدار از تغییر بعدی شروع می‌شود.";
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFwdDomain(array $data): string
+    {
+        CpanelService::addDomainForwarder(self::accountClient(), (string) $data['domain'], (string) $data['dest']);
+
+        return '📮 همه‌ی نامه‌های <code>' . Format::escapeHtml((string) $data['domain']) . '</code> به <code>'
+            . Format::escapeHtml((string) $data['dest']) . "</code> فرستاده می‌شوند.\n\n"
+            . '💡 آدرس‌های تکی همان دامنه هنوز کار می‌کنند؛ این تنظیم فقط برای بقیه است.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbExportAll(array $data): string
+    {
+        $client = self::accountClient();
+        $limit = max(1, (int) ($data['limit'] ?? 3));
+
+        $done = [];
+        $failed = [];
+        foreach (array_slice(CpanelService::databases($client), 0, $limit) as $database) {
+            $name = (string) $database['name'];
+            try {
+                $export = CpanelService::exportDatabase($client, $name);
+                if (strlen($export['content']) > self::MAX_DOWNLOAD) {
+                    $failed[] = $name . ' — بزرگ‌تر از سقف تلگرام';
+                    continue;
+                }
+                self::attachFile($export['name'], $export['content']);
+                $done[] = $name;
+            } catch (Throwable $e) {
+                $failed[] = $name . ' — ' . $e->getMessage();
+            }
+        }
+
+        if ($done === []) {
+            return "⚠️ از هیچ دیتابیسی خروجی گرفته نشد:\n"
+                . Format::escapeHtml(implode("\n", array_slice($failed, 0, 5)));
+        }
+
+        $text = '📦 خروجی ' . count($done) . " دیتابیس آماده شد.";
+        if ($failed !== []) {
+            $text .= "\n\n⚠️ این‌ها نشدند:\n" . Format::escapeHtml(implode("\n", array_slice($failed, 0, 5)));
+        }
+
+        return $text;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDbPrivs(array $data): string
+    {
+        $user = (string) $data['user'];
+        $database = (string) $data['database'];
+        $privileges = CpanelService::databasePrivileges(self::accountClient(), $user, $database);
+
+        if ($privileges === []) {
+            return '🔍 کاربر <code>' . Format::escapeHtml($user) . '</code> هیچ دسترسی‌ای روی <code>'
+                . Format::escapeHtml($database) . "</code> ندارد.\n\n"
+                . '💡 با «🔗 وصل‌کردن کاربر به دیتابیس» دسترسی بدهید.';
+        }
+
+        return '🔍 دسترسی‌های <code>' . Format::escapeHtml($user) . '</code> روی <code>'
+            . Format::escapeHtml($database) . "</code>:\n\n"
+            . '<code>' . Format::escapeHtml(implode('، ', $privileges)) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runCanonical(array $data): string
+    {
+        $mode = (string) $data['mode'];
+        CpanelService::setCanonical(
+            self::accountClient(),
+            (string) $data['docroot'],
+            (string) $data['domain'],
+            $mode,
+        );
+
+        if ($mode === 'off') {
+            return '↩️ یکسان‌سازی آدرس برداشته شد.';
+        }
+
+        $domain = SiteCheck::cleanDomain((string) $data['domain']);
+        $domain = (string) preg_replace('/^www\./', '', $domain);
+        $target = $mode === 'www' ? 'www.' . $domain : $domain;
+
+        return '🔗 از این به بعد همه‌ی آدرس‌ها به <code>https://' . Format::escapeHtml($target) . "/</code> می‌روند.\n\n"
+            . '💡 اگر سایت وردپرسی است، همین آدرس را در تنظیمات وردپرس هم بگذارید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSpeed(array $data): string
+    {
+        $enable = (string) ($data['state'] ?? '1') === '1';
+        CpanelService::setSpeedRules(self::accountClient(), (string) $data['docroot'], $enable);
+
+        return $enable
+            ? "⚡️ فشرده‌سازی gzip و کش مرورگر روشن شد.\n\n"
+                . '💡 اگر بعد از تغییر سایت، مرورگر نسخه‌ی قدیمی را نشان داد، یک‌بار با Ctrl+F5 باز کنید.'
+            : '↩️ تنظیمات سرعت برداشته شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWpProtect(array $data): string
+    {
+        $enable = (string) ($data['state'] ?? '1') === '1';
+        $ips = CpanelService::protectWordpressLogin(
+            self::accountClient(),
+            (string) $data['docroot'],
+            $enable,
+            [(string) ($data['ips'] ?? '')],
+        );
+
+        if (!$enable) {
+            return '↩️ محدودیت ورود وردپرس برداشته شد.';
+        }
+
+        return '🛡 حالا فقط ' . count($ips) . " آی‌پی می‌توانند صفحه‌ی ورود وردپرس را باز کنند و <code>xmlrpc.php</code> هم بسته شد.\n\n"
+            . '<code>' . Format::escapeHtml(implode('، ', $ips)) . "</code>\n\n"
+            . '⚠️ اگر آی‌پی شما ثابت نیست، بعد از عوض‌شدنش دوباره همین‌جا به‌روزش کنید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDnsImport(array $data): string
+    {
+        $zone = (string) $data['zone'];
+        $result = CpanelService::importZone(self::accountClient(), $zone, (string) $data['text']);
+
+        if ($result['added'] === [] && $result['skipped'] === [] && $result['failed'] === []) {
+            return '⚠️ در متنی که فرستادید رکورد قابل‌خواندنی پیدا نشد.';
+        }
+
+        return Render::dnsTemplate($zone, 'فایل زون', $result);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDnsRepoint(array $data): string
+    {
+        $ip = trim((string) $data['ip']);
+        $result = CpanelService::repointDomains(self::accountClient(), $ip);
+
+        $text = '🎯 رکورد A ' . count($result['changed']) . ' نام روی <code>' . Format::escapeHtml($ip) . '</code> رفت.';
+        if ($result['failed'] !== []) {
+            $text .= "\n\n⚠️ این‌ها نشدند:\n" . Format::escapeHtml(implode("\n", array_slice($result['failed'], 0, 5)));
+        }
+
+        return $text . "\n\n💡 با «🌍 مقایسه با دنیای بیرون» ببینید تغییر کی همه‌جا اثر کرده.";
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runHsts(array $data): string
+    {
+        $enable = (string) ($data['state'] ?? '1') === '1';
+        CpanelService::setHsts(self::accountClient(), (string) $data['docroot'], $enable);
+
+        return $enable
+            ? "🔐 HSTS روشن شد؛ مرورگرها تا ۶ ماه این سایت را فقط با https باز می‌کنند.\n\n"
+                . '⚠️ اگر روزی گواهی SSL خراب شود، سایت تا رفع مشکل اصلاً باز نمی‌شود — پس تمدید خودکار را روشن نگه دارید.'
+            : '↩️ HSTS برداشته شد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runQuickView(array $data): string
+    {
+        $client = self::accountClient();
+        $path = (string) $data['path'];
+        $content = CpanelService::readFile($client, $path);
+
+        if (trim($content) === '') {
+            return '📄 <code>' . Format::escapeHtml($path) . '</code> خالی است.';
+        }
+
+        self::attachFile(basename($path) . '.txt', $content);
+
+        $preview = mb_substr($content, 0, 1200);
+
+        return '👀 <code>' . Format::escapeHtml($path) . '</code>' . "\n\n"
+            . '<pre>' . Format::escapeHtml($preview) . '</pre>'
+            . (mb_strlen($content) > 1200 ? "\n\n(ادامه‌اش داخل فایل پیوست است.)" : '')
+            . "\n\n💡 برای تغییرش، «📝 ویرایش فایل» را با همین مسیر بزنید.";
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runFileReplace(array $data): string
+    {
+        $client = self::accountClient();
+        $dir = (string) $data['dir'];
+        $backup = self::backupBeforeChange($client, $dir);
+
+        $result = CpanelService::replaceInFiles(
+            $client,
+            $dir,
+            (string) $data['search'],
+            (string) $data['replace'],
+        );
+
+        return Render::replaceResult((string) $data['search'], (string) $data['replace'], $result) . $backup;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runDirDiff(array $data): string
+    {
+        $left = (string) $data['left'];
+        $right = (string) $data['right'];
+        if ($left === $right) {
+            return '⚠️ دو پوشه‌ی متفاوت انتخاب کنید.';
+        }
+
+        return Render::directoryDiff($left, $right, CpanelService::compareDirectories(self::accountClient(), $left, $right));
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSshkeyAuth(array $data): string
+    {
+        $authorize = (string) ($data['state'] ?? '1') === '1';
+        CpanelService::authorizeSshKey(self::accountClient(), (string) $data['name'], $authorize);
+
+        return ($authorize ? '✅ کلید ' : '⛔️ کلید ') . '<code>' . Format::escapeHtml((string) $data['name']) . '</code> '
+            . ($authorize ? 'مجاز شد؛ حالا می‌شود با آن وصل شد.' : 'نامجاز شد و دیگر با آن نمی‌شود وصل شد.');
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runCronEasy(array $data): string
+    {
+        $when = (string) $data['when'];
+        $schedule = CpanelService::parseSchedule($when);
+        if ($schedule === null) {
+            throw CpanelError::config('زمان‌بندی انتخاب‌شده معتبر نیست.');
+        }
+
+        CpanelService::addCron(self::accountClient(), $schedule, (string) $data['command']);
+
+        return '⏰ کران ساخته شد — ' . Format::escapeHtml(CpanelService::CRON_WHEN[$when] ?? $when) . "\n"
+            . '<code>' . Format::escapeHtml((string) $data['command']) . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runPhpCopyLimits(array $data): string
+    {
+        $source = (string) $data['source'];
+        $result = CpanelService::copyPhpLimits(self::accountClient(), $source);
+
+        $text = '📋 محدودیت‌های <code>' . Format::escapeHtml($source) . '</code> روی '
+            . count($result['applied']) . " دامنه کپی شد:\n";
+        foreach ($result['directives'] as $directive => $value) {
+            $text .= '• <code>' . Format::escapeHtml((string) $directive) . '</code> = <code>'
+                . Format::escapeHtml((string) $value) . "</code>\n";
+        }
+        if ($result['failed'] !== []) {
+            $text .= "\n⚠️ این‌ها نشدند:\n" . Format::escapeHtml(implode("\n", array_slice($result['failed'], 0, 5)));
+        }
+
+        return $text;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runBackupRestore(array $data): string
+    {
+        $dir = CpanelService::restoreBackup(self::accountClient(), (string) $data['name'], (string) $data['dir']);
+
+        return '♻️ بکاپ داخل <code>' . Format::escapeHtml($dir) . "</code> باز شد.\n\n"
+            . '💡 فایل‌های حساب معمولاً داخل پوشه‌ی <code>homedir</code> همان بکاپ‌اند؛ از «🗂 مرور فایل‌ها» ببینیدشان و هرچه لازم بود سر جایش کپی کنید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWhmAddpkg(array $data): string
+    {
+        CpanelService::whmCreatePackage(self::whmClient(), (string) $data['name'], $data['quota'], $data['bandwidth']);
+
+        return '📦 پلن <code>' . Format::escapeHtml((string) $data['name']) . "</code> ساخته شد.\n\n"
+            . '💡 حالا موقع «🆕 ساخت حساب» می‌توانید همین پلن را انتخاب کنید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWhmSetip(array $data): string
+    {
+        CpanelService::whmSetSiteIp(self::whmClient(), (string) $data['user'], (string) $data['ip']);
+
+        return '🖧 آی‌پی حساب <code>' . Format::escapeHtml((string) $data['user']) . '</code> به <code>'
+            . Format::escapeHtml((string) $data['ip']) . '</code> تغییر کرد.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runWhmWebmail(array $data): string
+    {
+        $url = CpanelService::whmLoginUrl(self::whmClient(), (string) $data['user'], 'webmaild');
+
+        return '📧 لینک یک‌بارمصرف ورود به وبمیل <code>' . Format::escapeHtml((string) $data['user']) . "</code>:\n\n"
+            . $url . "\n\n⚠️ این لینک چند دقیقه معتبر است؛ بعدش دوباره بسازید.";
     }
 
     /**
