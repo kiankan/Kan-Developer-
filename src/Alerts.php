@@ -114,6 +114,11 @@ final class Alerts
             Settings::set(Settings::LAST_SERVER_IP, $ip);
         }
 
+        // ---- فایل‌های حساسی که نباید بی‌خبر عوض شوند
+        foreach (self::watchedFiles($client) as $message) {
+            $messages[] = $message;
+        }
+
         // ---- کارهای زمان‌بندی‌شده‌ای که وقتشان رسیده
         foreach (self::runQueue($client) as $message) {
             $messages[] = $message;
@@ -194,6 +199,64 @@ final class Alerts
         self::saveState($state);
 
         return $messages;
+    }
+
+    /**
+     * فایل‌هایی که کاربر زیر نظر گرفته: اگر محتوایشان عوض شود خبر می‌دهیم.
+     *
+     * تغییر ناگهانی <code>.htaccess</code> یا <code>wp-config.php</code>
+     * معمولاً یا کار یک افزونه است یا نشانه‌ی نفوذ؛ هر دو ارزش دانستن دارند.
+     *
+     * @return array<int, string>
+     */
+    public static function watchedFiles(CpanelClient $client): array
+    {
+        $paths = array_values(array_filter(array_map(
+            'trim',
+            preg_split('/[\s,\n]+/', Settings::get(Settings::WATCH_FILES)) ?: [],
+        )));
+        if ($paths === []) {
+            return [];
+        }
+
+        $state = self::loadState();
+        $messages = [];
+
+        foreach (array_slice($paths, 0, 10) as $path) {
+            $content = self::softRead($client, $path);
+            $key = 'file:' . substr(sha1($path), 0, 12);
+
+            if ($content === null) {
+                if (($state[$key] ?? 0) !== 0) {
+                    $messages[] = "🗑 فایل تحت‌نظر <code>{$path}</code> دیگر خوانده نمی‌شود (پاک یا جابه‌جا شده).";
+                    unset($state[$key]);
+                }
+                continue;
+            }
+
+            // فقط یک عدد نگه می‌داریم، نه خود فایل: هم سبک است هم محتوای
+            // حساس (رمز دیتابیس) جایی ذخیره نمی‌شود.
+            $hash = (int) hexdec(substr(sha1($content), 0, 12));
+            $known = (int) ($state[$key] ?? 0);
+            if ($known !== 0 && $known !== $hash) {
+                $messages[] = "📝 فایل تحت‌نظر <code>{$path}</code> عوض شده است.\n\n"
+                    . '💡 اگر کار خودتان نبوده، «📂 فایل‌ها → 🛡 گزارش امنیتی» و «↩️ بازگردانی آخرین بکاپ» را ببینید.';
+            }
+            $state[$key] = $hash;
+        }
+
+        self::saveState($state);
+
+        return $messages;
+    }
+
+    private static function softRead(CpanelClient $client, string $path): ?string
+    {
+        try {
+            return CpanelService::readFile($client, $path);
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
     /**

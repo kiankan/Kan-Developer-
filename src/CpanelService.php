@@ -1134,6 +1134,19 @@ final class CpanelService
             case 'NS':
                 $params['nsdname'] = $value;
                 break;
+            case 'CAA':
+                // «0 issue letsencrypt.org» → پرچم، برچسب و مقدار
+                $params['flag'] = $data[0] ?? '0';
+                $params['tag'] = $data[1] ?? 'issue';
+                $params['value'] = $data[2] ?? '';
+                break;
+            case 'SRV':
+                // «10 5 443 target.example.com.»
+                $params['priority'] = $data[0] ?? '0';
+                $params['weight'] = $data[1] ?? '0';
+                $params['port'] = $data[2] ?? '';
+                $params['target'] = $data[3] ?? '';
+                break;
             default:
                 $params['address'] = $value;
         }
@@ -3250,7 +3263,7 @@ final class CpanelService
     /**
      * @return array{0: int, 1: string, 2: string}
      */
-    private static function httpGet(string $url, int $timeout = 15): array
+    private static function httpGet(string $url, int $timeout = 15, int $maxBytes = 0): array
     {
         $ch = curl_init($url);
         if ($ch === false) {
@@ -3266,7 +3279,23 @@ final class CpanelService
             CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_USERAGENT => 'cPanelTeamKan/1.0 (+php-test)',
         ]);
+
+        // با سقف حجم، خودمان بایت‌ها را جمع می‌کنیم تا بشود وسط کار قطع کرد و
+        // یک فایل چندگیگابایتی حافظه‌ی سرور را نخورد.
+        $buffer = '';
+        if ($maxBytes > 0) {
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+            curl_setopt($ch, CURLOPT_WRITEFUNCTION, static function ($handle, string $chunk) use (&$buffer, $maxBytes): int {
+                $buffer .= $chunk;
+
+                return strlen($buffer) > $maxBytes ? 0 : strlen($chunk);
+            });
+        }
+
         $body = curl_exec($ch);
+        if ($maxBytes > 0) {
+            $body = $buffer;
+        }
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
         curl_close($ch);
@@ -4285,6 +4314,620 @@ final class CpanelService
         $max = max(1, count($checks) * 2);
 
         return ['checks' => $checks, 'score' => (int) round($score / $max * 100)];
+    }
+
+    // -------------------------------------------------- فیلتر و صندوق ایمیل
+
+    public static function toggleEmailFilter(CpanelClient $client, string $name, bool $enable, string $account = ''): void
+    {
+        $params = ['filtername' => $name];
+        if ($account !== '') {
+            $params['account'] = $account;
+        }
+
+        $client->uapi('Email', $enable ? 'enable_filter' : 'disable_filter', $params);
+    }
+
+    /** حالت‌های تعلیق یک صندوق ایمیل. */
+    public const MAIL_SUSPEND = [
+        'outgoing' => 'جلوگیری از ارسال (صندوق اسپم می‌فرستد)',
+        'incoming' => 'جلوگیری از دریافت',
+        'none' => 'برداشتن هر دو محدودیت',
+    ];
+
+    /**
+     * تعلیق ارسال یا دریافت یک صندوق — همان کاری که وقتی صندوقی هک شده و
+     * دارد اسپم می‌فرستد باید فوری انجام داد.
+     */
+    public static function setMailSuspension(CpanelClient $client, string $email, string $mode): void
+    {
+        if (!isset(self::MAIL_SUSPEND[$mode])) {
+            throw CpanelError::config('حالت انتخاب‌شده معتبر نیست.');
+        }
+
+        if ($mode === 'none') {
+            self::softCall(fn () => $client->uapi('Email', 'unsuspend_outgoing', ['email' => $email]), null);
+            self::softCall(fn () => $client->uapi('Email', 'unsuspend_incoming', ['email' => $email]), null);
+
+            return;
+        }
+
+        $client->uapi('Email', $mode === 'outgoing' ? 'suspend_outgoing' : 'suspend_incoming', ['email' => $email]);
+    }
+
+    /** کاری که با نامه‌های رسیده به آدرس‌های ناموجود یک دامنه می‌شود. */
+    public const CATCHALL_MODES = [
+        'fail' => 'برگرداندن با پیام خطا (پیشنهاد می‌شود)',
+        'blackhole' => 'دور ریختن بی‌صدا',
+        'fwd' => 'فرستادن به یک صندوق',
+    ];
+
+    /**
+     * «صندوق پیش‌فرض» دامنه: تکلیف نامه‌هایی که به آدرس ناموجود می‌رسند.
+     *
+     * روی نسخه‌های تازه UAPI این کار را می‌کند و روی بقیه API2؛ چون اینجا
+     * ممکن است خود تابع نباشد (نه ماژول)، هر خطای منطقی را هم fallback
+     * حساب می‌کنیم.
+     */
+    public static function setCatchAll(CpanelClient $client, string $domain, string $mode, string $destination = ''): void
+    {
+        if (!isset(self::CATCHALL_MODES[$mode])) {
+            throw CpanelError::config('حالت انتخاب‌شده معتبر نیست.');
+        }
+        if ($mode === 'fwd' && trim($destination) === '') {
+            throw CpanelError::config('برای فرستادن نامه‌ها، آدرس مقصد را هم بدهید.');
+        }
+
+        $message = 'این آدرس روی این دامنه وجود ندارد.';
+        try {
+            $client->uapi('Email', 'set_default_address', [
+                'domain' => $domain,
+                'fwdopt' => $mode,
+                'fwdemail' => $mode === 'fwd' ? trim($destination) : '',
+                'failmsgs' => $mode === 'fail' ? $message : '',
+            ]);
+
+            return;
+        } catch (CpanelError $e) {
+            if (in_array($e->kind, [CpanelError::KIND_AUTH, CpanelError::KIND_TRANSPORT], true)) {
+                throw $e;
+            }
+        }
+
+        $client->api2('Email', 'setdefaultaddress', [
+            'domain' => $domain,
+            'fwdopt' => $mode,
+            'fwdemail' => $mode === 'fwd' ? trim($destination) : '',
+            'failmsgs' => $mode === 'fail' ? $message : '',
+        ]);
+    }
+
+    // ------------------------------------------------ راه‌اندازی دیتابیس
+
+    /**
+     * ساخت دیتابیس، کاربر و دادن دسترسی کامل — سه قدمی که همیشه با هم لازم‌اند.
+     *
+     * @return array{database: string, user: string, password: string, host: string, done: array<int, string>}
+     */
+    public static function setupDatabase(CpanelClient $client, string $name, string $user, string $password): array
+    {
+        $done = [];
+
+        self::createDatabase($client, $name);
+        $done[] = 'دیتابیس ساخته شد';
+
+        try {
+            self::createDatabaseUser($client, $user, $password);
+            $done[] = 'کاربر ساخته شد';
+        } catch (Throwable $e) {
+            // اگر دیتابیس ساخته شده ولی کاربر نه، نصفه‌کاره رها نمی‌کنیم.
+            self::softCall(fn () => self::deleteDatabase($client, $name), null);
+
+            throw $e;
+        }
+
+        try {
+            self::grantDatabaseUser($client, $user, $name);
+            $done[] = 'دسترسی کامل داده شد';
+        } catch (Throwable $e) {
+            self::softCall(fn () => self::deleteDatabaseUser($client, $user), null);
+            self::softCall(fn () => self::deleteDatabase($client, $name), null);
+
+            throw $e;
+        }
+
+        $info = self::softCall(fn () => self::mysqlServerInfo($client), []);
+
+        return [
+            'database' => $name,
+            'user' => $user,
+            'password' => $password,
+            'host' => (string) (is_array($info) ? ($info['host'] ?? 'localhost') : 'localhost'),
+            'done' => $done,
+        ];
+    }
+
+    // ------------------------------------------------- صفحه‌های خطای سایت
+
+    /** کدهای خطایی که صفحه‌ی سفارشی برایشان ساخته می‌شود. */
+    public const ERROR_CODES = ['400', '401', '403', '404', '500'];
+
+    /**
+     * صفحه‌ی خطای سفارشی: به‌جای صفحه‌ی سفید و انگلیسی سرور، یک صفحه‌ی فارسی
+     * با لینک بازگشت به خانه.
+     *
+     * @param array<int, string> $codes
+     *
+     * @return array<int, string> فایل‌هایی که ساخته شدند
+     */
+    public static function setErrorPages(CpanelClient $client, string $docroot, bool $enable, array $codes = ['404', '500']): array
+    {
+        $docroot = self::normalizePath($docroot);
+        $htaccess = $docroot . '/.htaccess';
+        $current = (string) self::softCall(fn () => self::readFile($client, $htaccess), '');
+        $codes = array_values(array_intersect($codes, self::ERROR_CODES));
+        if ($codes === []) {
+            $codes = ['404', '500'];
+        }
+
+        if (!$enable) {
+            self::saveFile($client, $htaccess, self::stripBlock($current, 'ERRORPAGES'));
+            $removed = [];
+            foreach (self::ERROR_CODES as $code) {
+                $path = $docroot . '/' . $code . '.html';
+                if (self::softCall(fn () => self::deletePath($client, $path), null) !== null) {
+                    $removed[] = $path;
+                }
+            }
+
+            return $removed;
+        }
+
+        $lines = ['# TEAMKAN ERRORPAGES START'];
+        $created = [];
+        foreach ($codes as $code) {
+            $lines[] = 'ErrorDocument ' . $code . ' /' . $code . '.html';
+            $path = $docroot . '/' . $code . '.html';
+            self::saveFile($client, $path, self::errorPage($code));
+            $created[] = $path;
+        }
+        $lines[] = '# TEAMKAN ERRORPAGES END';
+        $lines[] = '';
+
+        self::saveFile($client, $htaccess, implode("\n", $lines) . self::stripBlock($current, 'ERRORPAGES'));
+
+        return $created;
+    }
+
+    private static function errorPage(string $code): string
+    {
+        $title = match ($code) {
+            '400' => 'درخواست نامعتبر',
+            '401' => 'ورود لازم است',
+            '403' => 'دسترسی ندارید',
+            '404' => 'صفحه پیدا نشد',
+            default => 'خطای سرور',
+        };
+        $body = match ($code) {
+            '404' => 'آدرسی که دنبالش بودید روی این سایت نیست. شاید منتقل شده باشد.',
+            '403' => 'اجازه‌ی دیدن این بخش را ندارید.',
+            '401' => 'برای دیدن این صفحه باید وارد شوید.',
+            '400' => 'درخواست شما درست فرستاده نشد؛ دوباره تلاش کنید.',
+            default => 'مشکلی در سرور پیش آمده. کمی بعد دوباره امتحان کنید.',
+        };
+
+        return implode("\n", [
+            '<!doctype html>',
+            '<html lang="fa" dir="rtl">',
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            '<title>' . $code . ' — ' . $title . '</title>',
+            '<style>body{font-family:system-ui,Tahoma,sans-serif;display:flex;min-height:100vh;'
+                . 'align-items:center;justify-content:center;margin:0;background:#f6f6f8;color:#222;'
+                . 'text-align:center;padding:2rem}div{max-width:32rem;line-height:2}'
+                . 'b{font-size:3rem;display:block;color:#888}a{color:#2563eb}</style>',
+            '<div><b>' . $code . '</b><h1>' . $title . '</h1><p>' . $body . '</p>'
+                . '<p><a href="/">بازگشت به صفحه‌ی اول</a></p></div>',
+            '',
+        ]);
+    }
+
+    // ---------------------------------------------------------- TTL زون
+
+    /**
+     * تغییر TTL همه‌ی رکوردهای معمولی یک زون.
+     *
+     * قبل از جابه‌جایی هاست، TTL را پایین می‌آورند تا تغییر آی‌پی زود همه‌جا
+     * اثر کند؛ بعدش دوباره بالا می‌برند تا فشار روی DNS کم شود.
+     *
+     * @return array{changed: int, skipped: int}
+     */
+    public static function setZoneTtl(CpanelClient $client, string $zone, int $ttl): array
+    {
+        if ($ttl < 60 || $ttl > 86400) {
+            throw CpanelError::config('TTL باید بین ۶۰ تا ۸۶۴۰۰ ثانیه باشد.');
+        }
+
+        $zoneData = self::dnsZone($client, $zone);
+        $editable = ['A', 'AAAA', 'CNAME', 'MX', 'TXT'];
+        $changed = 0;
+        $skipped = 0;
+
+        if ($zoneData['api2']) {
+            foreach ($zoneData['records'] as $record) {
+                if (!in_array($record['type'], $editable, true)) {
+                    $skipped++;
+                    continue;
+                }
+                $params = self::api2RecordParams($zone, $record['name'], $record['type'], $record['data'], $ttl);
+                $params['line'] = $record['line'];
+                self::softCall(fn () => $client->api2('ZoneEdit', 'edit_zone_record', $params), null);
+                $changed++;
+            }
+
+            return ['changed' => $changed, 'skipped' => $skipped];
+        }
+
+        if ($zoneData['serial'] === null) {
+            throw CpanelError::api("سریال SOA برای زون «{$zone}» پیدا نشد؛ چیزی تغییر نکرد.");
+        }
+
+        $edits = [];
+        foreach ($zoneData['records'] as $record) {
+            if (!in_array($record['type'], $editable, true)) {
+                $skipped++;
+                continue;
+            }
+            if (($record['ttl'] ?? null) === $ttl) {
+                continue;
+            }
+            $edits[] = json_encode([
+                'line_index' => $record['line'],
+                'dname' => $record['name'],
+                'ttl' => $ttl,
+                'record_type' => $record['type'],
+                'data' => array_values($record['data']),
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $changed++;
+        }
+
+        if ($edits !== []) {
+            // همه‌ی تغییرها در یک درخواست می‌روند، وگرنه سریال SOA بعد از
+            // اولین تغییر عوض می‌شود و بقیه رد می‌شوند.
+            $client->uapi('DNS', 'mass_edit_zone', [
+                'zone' => $zone,
+                'serial' => $zoneData['serial'],
+                'edit' => $edits,
+            ]);
+        }
+
+        return ['changed' => $changed, 'skipped' => $skipped];
+    }
+
+    // ------------------------------------------------------- CSR و کلید
+
+    /**
+     * ساخت کلید خصوصی و درخواست امضای گواهی (CSR) — برای وقتی که گواهی را از
+     * یک صادرکننده‌ی تجاری می‌خرید.
+     *
+     * این کار روی خود ربات انجام می‌شود، نه روی هاست؛ پس به هیچ تابعی از
+     * cPanel وابسته نیست.
+     *
+     * @param array<string, string> $subject
+     *
+     * @return array{key: string, csr: string}
+     */
+    public static function generateCsr(string $domain, array $subject = []): array
+    {
+        if (!function_exists('openssl_pkey_new')) {
+            throw CpanelError::config('افزونه‌ی openssl روی این سرور نصب نیست؛ CSR را از خود cPanel بگیرید.');
+        }
+
+        $domain = SiteCheck::cleanDomain($domain);
+        if ($domain === '') {
+            throw CpanelError::config('نام دامنه معتبر نیست.');
+        }
+
+        $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        if ($key === false) {
+            throw CpanelError::config('ساخت کلید خصوصی انجام نشد.');
+        }
+
+        $dn = [
+            'commonName' => $domain,
+            'countryName' => strtoupper(substr(trim($subject['country'] ?? 'IR'), 0, 2)),
+            'organizationName' => trim($subject['organization'] ?? '') ?: $domain,
+        ];
+        if (trim($subject['email'] ?? '') !== '') {
+            $dn['emailAddress'] = trim($subject['email']);
+        }
+
+        $csr = openssl_csr_new($dn, $key, ['digest_alg' => 'sha256']);
+        if ($csr === false) {
+            throw CpanelError::config('ساخت CSR انجام نشد: ' . (string) openssl_error_string());
+        }
+
+        openssl_csr_export($csr, $csrOut);
+        openssl_pkey_export($key, $keyOut);
+
+        return ['key' => (string) $keyOut, 'csr' => (string) $csrOut];
+    }
+
+    // ------------------------------------------------ سطل زباله‌ی فایل‌منیجر
+
+    public static function trashDir(CpanelClient $client): string
+    {
+        return self::homeDir($client) . '/.trash';
+    }
+
+    /**
+     * @return array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int, permissions: string}>
+     */
+    public static function trashItems(CpanelClient $client): array
+    {
+        return self::softCall(fn () => self::listFiles($client, self::trashDir($client)), []);
+    }
+
+    /**
+     * برگرداندن یک مورد از سطل زباله به پوشه‌ی دلخواه.
+     */
+    public static function restoreFromTrash(CpanelClient $client, string $name, string $destination): string
+    {
+        $source = self::trashDir($client) . '/' . ltrim($name, '/');
+        self::movePath($client, $source, self::normalizePath($destination));
+
+        return rtrim(self::normalizePath($destination), '/') . '/' . basename($name);
+    }
+
+    /**
+     * خالی‌کردن سطل زباله.
+     *
+     * @return array{deleted: int, freed: float}
+     */
+    public static function emptyTrash(CpanelClient $client): array
+    {
+        $deleted = 0;
+        $freed = 0.0;
+
+        foreach (self::trashItems($client) as $item) {
+            if (self::softCall(function () use ($client, $item): bool {
+                self::deletePath($client, $item['path']);
+
+                return true;
+            }, false) === true) {
+                $deleted++;
+                $freed += (float) ($item['size'] ?? 0);
+            }
+        }
+
+        return ['deleted' => $deleted, 'freed' => $freed];
+    }
+
+    // ------------------------------------------------- گرفتن فایل از اینترنت
+
+    /**
+     * دانلود یک فایل از اینترنت و گذاشتنش روی هاست.
+     *
+     * سقف حجم دارد و آدرس‌های داخلی شبکه رد می‌شوند تا نشود از ربات برای
+     * دیدن سرویس‌های داخلی سرور استفاده کرد.
+     *
+     * @return array{name: string, size: int, path: string}
+     */
+    public static function fetchToHost(CpanelClient $client, string $url, string $dir, string $name = '', int $maxBytes = 47185920): array
+    {
+        $url = trim($url);
+        $parts = parse_url($url);
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = (string) ($parts['host'] ?? '');
+
+        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
+            throw CpanelError::config('فقط آدرس‌های <code>http</code> و <code>https</code> پذیرفته می‌شوند.');
+        }
+        if (self::isInternalHost($host)) {
+            throw CpanelError::config('آدرس‌های داخلی شبکه (localhost و آی‌پی‌های خصوصی) پذیرفته نمی‌شوند.');
+        }
+
+        [$status, $body, $error] = self::httpGet($url, 120, $maxBytes + 1024);
+        if ($status === 0) {
+            throw CpanelError::transport($error !== '' ? $error : 'فایل دانلود نشد.');
+        }
+        if ($status !== 200) {
+            throw CpanelError::http($status, 'آدرس داده‌شده فایل نداد.');
+        }
+
+        $size = strlen($body);
+        if ($size === 0) {
+            throw CpanelError::config('فایل خالی بود.');
+        }
+        if ($size > $maxBytes) {
+            throw CpanelError::config(
+                'حجم فایل حدود ' . round($size / 1048576, 1) . ' مگابایت است و سقف '
+                . round($maxBytes / 1048576) . ' مگابایت است.'
+            );
+        }
+
+        $name = trim($name) !== '' ? trim($name) : basename((string) ($parts['path'] ?? ''));
+        $name = (string) preg_replace('#[/\\\\]#', '', $name);
+        if ($name === '' || $name === '.') {
+            $name = 'download-' . gmdate('Ymd-His');
+        }
+
+        self::uploadFile($client, $dir, $name, $body);
+
+        return ['name' => $name, 'size' => $size, 'path' => rtrim(self::normalizePath($dir), '/') . '/' . $name];
+    }
+
+    public static function isInternalHost(string $host): bool
+    {
+        $host = strtolower(trim($host, "[] \t\n\r"));
+        if ($host === '' || $host === 'localhost' || str_ends_with($host, '.localhost') || str_ends_with($host, '.internal')) {
+            return true;
+        }
+        if (filter_var($host, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+
+        return filter_var(
+            $host,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
+        ) === false;
+    }
+
+    // ---------------------------------------------------------- وب‌دیسک
+
+    /**
+     * @return array<int, array{login: string, dir: string, private: bool}>
+     */
+    public static function webDiskUsers(CpanelClient $client): array
+    {
+        $raw = $client->uapi('WebDisk', 'list_users');
+        $out = [];
+
+        foreach (self::normalizeList($raw) as $row) {
+            if (is_string($row)) {
+                $out[] = ['login' => $row, 'dir' => '', 'private' => false];
+                continue;
+            }
+            if (!is_array($row)) {
+                continue;
+            }
+            $login = (string) ($row['login'] ?? ($row['user'] ?? ''));
+            if ($login === '') {
+                continue;
+            }
+            $out[] = [
+                'login' => $login,
+                'dir' => (string) ($row['homedir'] ?? ($row['dir'] ?? '')),
+                'private' => (string) ($row['private'] ?? '0') === '1',
+            ];
+        }
+
+        return $out;
+    }
+
+    public static function addWebDiskUser(CpanelClient $client, string $user, string $domain, string $password, string $dir): void
+    {
+        $client->uapi('WebDisk', 'create_user', [
+            'user' => $user,
+            'domain' => $domain,
+            'password' => $password,
+            'homedir' => self::normalizePath($dir),
+            'perms' => 'rw',
+            'enabledigest' => 1,
+            'private' => 1,
+        ]);
+    }
+
+    public static function deleteWebDiskUser(CpanelClient $client, string $login): void
+    {
+        [$user, $domain] = self::splitEmail($login);
+        $client->uapi('WebDisk', 'delete_user', ['user' => $user, 'domain' => $domain, 'destroy' => 0]);
+    }
+
+    // ------------------------------------------------------------ کران
+
+    /**
+     * تغییر نسخه‌ی PHP همه‌ی دامنه‌ها با هم.
+     *
+     * @return array{changed: array<int, string>, failed: array<int, string>}
+     */
+    public static function setPhpVersionForAll(CpanelClient $client, string $version): array
+    {
+        $changed = [];
+        $failed = [];
+
+        foreach (self::phpVersions($client) as $vhost) {
+            $name = (string) $vhost['vhost'];
+            if ($name === '') {
+                continue;
+            }
+            if ((string) $vhost['version'] === $version) {
+                continue;
+            }
+            try {
+                self::setPhpVersion($client, $name, $version);
+                $changed[] = $name;
+            } catch (Throwable $e) {
+                $failed[] = $name . ' — ' . $e->getMessage();
+            }
+        }
+
+        return ['changed' => $changed, 'failed' => $failed];
+    }
+
+    // ----------------------------------------------------------- بکاپ
+
+    public static function deleteBackup(CpanelClient $client, string $name): string
+    {
+        $name = trim($name);
+        if ($name === '' || str_contains($name, '..')) {
+            throw CpanelError::config('نام بکاپ معتبر نیست.');
+        }
+
+        $path = str_starts_with($name, '/') ? self::normalizePath($name) : self::homeDir($client) . '/' . $name;
+        self::deletePath($client, $path);
+
+        return $path;
+    }
+
+    /**
+     * بکاپ کامل روی یک سرور FTP بیرونی — تا نسخه‌ی پشتیبان روی همان هاستی
+     * نماند که ممکن است از دست برود.
+     */
+    public static function backupToFtp(
+        CpanelClient $client,
+        string $host,
+        string $user,
+        string $password,
+        string $directory = '',
+        string $email = '',
+        int $port = 21,
+    ): void {
+        $params = [
+            'host' => trim($host),
+            'username' => trim($user),
+            'password' => $password,
+            'port' => $port,
+            'rdir' => trim($directory),
+        ];
+        $params['email'] = trim($email);
+        $params['email_radio'] = trim($email) === '' ? 0 : 1;
+
+        $client->uapi('Backup', 'fullbackup_to_ftp', $params);
+    }
+
+    // ------------------------------------------------------- آمار WHM
+
+    /**
+     * نمای کلی سرور از روی فهرست حساب‌ها.
+     *
+     * @return array{accounts: int, suspended: int, disk: float, plans: array<string, int>, newest: array<int, string>}
+     */
+    public static function whmOverview(CpanelClient $client): array
+    {
+        $accounts = self::whmAccounts($client);
+        $disk = 0.0;
+        $suspended = 0;
+        $plans = [];
+
+        foreach ($accounts as $account) {
+            $disk += self::parseSize((string) ($account['disk_used'] ?? ''));
+            if ($account['suspended']) {
+                $suspended++;
+            }
+            $plan = trim((string) ($account['plan'] ?? '')) ?: '—';
+            $plans[$plan] = ($plans[$plan] ?? 0) + 1;
+        }
+        arsort($plans);
+
+        return [
+            'accounts' => count($accounts),
+            'suspended' => $suspended,
+            'disk' => $disk,
+            'plans' => $plans,
+            'newest' => array_slice(array_column($accounts, 'user'), -5),
+        ];
     }
 
     /**

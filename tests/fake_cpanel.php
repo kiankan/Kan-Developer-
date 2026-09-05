@@ -147,6 +147,13 @@ while (time() < $deadline) {
         str_contains($path, 'Ftp/list_sessions') => ['status' => 1, 'data' => [
             ['user' => 'deploy@example.com', 'host' => '203.0.113.9', 'pid' => '2471', 'file' => '/public_html/app.zip'],
         ]],
+        str_contains($path, 'Cron/list_lines') => ['status' => 1, 'data' => [
+            ['linekey' => 'k1', 'minute' => '*/5', 'hour' => '*', 'day' => '*', 'month' => '*', 'weekday' => '*',
+                'command' => '/usr/local/bin/php /home/demo/public_html/wp-cron.php'],
+        ]],
+        str_contains($path, 'WebDisk/list_users') => ['status' => 1, 'data' => [
+            ['login' => 'deploy@example.com', 'homedir' => '/home/demo/public_html', 'private' => 1],
+        ]],
         str_contains($path, 'Email/list_filters') => ['status' => 1, 'data' => [
             ['filtername' => 'حذف تبلیغات', 'enabled' => 1, 'filter' => 'if $header_subject: contains "viagra"'],
             ['filtername' => 'بایگانی فاکتورها', 'enabled' => 1, 'filter' => 'if $header_from: contains "billing"'],

@@ -1810,6 +1810,275 @@ check('چک‌آپ، نمره و راهکار می‌دهد', function (): void 
     assertTrue(str_contains($text, 'بکاپ خودکار را روشن کنید'), 'راهکار باید نمایش داده شود');
 });
 
+echo "\nصندوق پیش‌فرض، تعلیق صندوق و راه‌اندازی دیتابیس\n";
+
+check('تعلیق صندوق: حالت نامعتبر رد می‌شود و «برداشتن» هر دو را برمی‌دارد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    assertThrows(
+        static fn () => CpanelService::setMailSuspension($client, 'a@b.c', 'هرچیزی'),
+        CpanelError::KIND_CONFIG,
+    );
+
+    CpanelService::setMailSuspension($client, 'a@b.c', 'outgoing');
+    assertTrue(str_contains($captured[0]['url'], 'suspend_outgoing'), 'تابع درست صدا زده نشد');
+
+    $captured = [];
+    CpanelService::setMailSuspension($client, 'a@b.c', 'none');
+    assertSame(2, count($captured), 'برداشتن محدودیت باید هر دو را صدا بزند');
+    assertTrue(str_contains($captured[0]['url'], 'unsuspend_outgoing'));
+    assertTrue(str_contains($captured[1]['url'], 'unsuspend_incoming'));
+});
+
+check('صندوق پیش‌فرض: اگر UAPI نداشت، API2 امتحان می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["Unknown function"]}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{}]}}'],
+    ], $captured));
+
+    CpanelService::setCatchAll($client, 'example.com', 'fail');
+
+    assertSame(2, count($captured), 'باید بعد از رد شدن UAPI، API2 صدا زده شود');
+    assertTrue(str_contains($captured[0]['url'], 'set_default_address'), 'اول UAPI');
+    assertTrue(str_contains($captured[1]['url'], 'json-api/cpanel'), 'بعد API2');
+
+    // فرستادن به صندوق، بدون آدرس مقصد بی‌معنی است.
+    assertThrows(
+        static fn () => CpanelService::setCatchAll($client, 'example.com', 'fwd'),
+        CpanelError::KIND_CONFIG,
+    );
+});
+
+check('راه‌اندازی دیتابیس: اگر کاربر ساخته نشود، دیتابیس هم برمی‌گردد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":[]}'],                          // ساخت دیتابیس
+        ['body' => '{"status":0,"errors":["user exists"]}'],           // ساخت کاربر: شکست
+        ['body' => '{"status":1,"data":[]}'],                          // حذف دیتابیس (پاک‌سازی)
+    ], $captured));
+
+    assertThrows(static fn () => CpanelService::setupDatabase($client, 'demo_shop', 'demo_u', 'pw'));
+    assertSame(3, count($captured), 'دیتابیس نصفه‌کاره نباید بماند');
+    assertTrue(str_contains($captured[2]['url'], 'delete_database'), 'دیتابیس باید حذف شود');
+});
+
+echo "\nصفحه‌ی خطا، TTL زون و CSR\n";
+
+check('صفحه‌ی خطای سفارشی، هم فایل می‌سازد هم ErrorDocument', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":""}}'], $captured));
+
+    $files = CpanelService::setErrorPages($client, '/home/demo/public_html', true, ['404']);
+    assertSame(['/home/demo/public_html/404.html'], $files);
+
+    $bodies = implode(' ', array_map(static fn (array $c): string => urldecode($c['body']), $captured));
+    assertTrue(str_contains($bodies, 'ErrorDocument 404 /404.html'), 'قانون ErrorDocument نوشته نشد');
+    assertTrue(str_contains($bodies, 'صفحه پیدا نشد'), 'متن فارسی صفحه‌ی خطا نوشته نشد');
+    assertTrue(str_contains($bodies, 'TEAMKAN ERRORPAGES START'), 'بلوک باید نشان‌دار باشد');
+});
+
+check('TTL زون در یک درخواست و فقط برای رکوردهای معمولی عوض می‌شود', function (): void {
+    $captured = [];
+    $zone = json_encode(['status' => 1, 'data' => [
+        ['type' => 'record', 'line_index' => 1, 'record_type' => 'SOA', 'ttl' => 86400,
+            'dname_b64' => base64_encode('example.com.'),
+            'data_b64' => array_map('base64_encode', ['ns1.example.com.', 'root.example.com.', '2024010101'])],
+        ['type' => 'record', 'line_index' => 2, 'record_type' => 'NS', 'ttl' => 86400,
+            'dname_b64' => base64_encode('example.com.'), 'data_b64' => [base64_encode('ns1.example.com.')]],
+        ['type' => 'record', 'line_index' => 3, 'record_type' => 'A', 'ttl' => 14400,
+            'dname_b64' => base64_encode('example.com.'), 'data_b64' => [base64_encode('203.0.113.7')]],
+        ['type' => 'record', 'line_index' => 4, 'record_type' => 'MX', 'ttl' => 14400,
+            'dname_b64' => base64_encode('example.com.'), 'data_b64' => array_map('base64_encode', ['0', 'mail.example.com.'])],
+    ]]);
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => $zone],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $result = CpanelService::setZoneTtl($client, 'example.com', 300);
+
+    assertSame(2, $result['changed'], 'فقط A و MX باید عوض شوند');
+    assertSame(2, $result['skipped'], 'SOA و NS باید دست‌نخورده بمانند');
+    assertSame(2, count($captured), 'همه‌ی تغییرها باید در یک درخواست بروند');
+    $body = urldecode($captured[1]['body']);
+    assertTrue(str_contains($body, 'serial=2024010101'), 'سریال SOA باید فرستاده شود');
+    assertTrue(substr_count($body, '"ttl":300') === 2, "هر دو رکورد باید TTL تازه بگیرند: $body");
+
+    assertThrows(static fn () => CpanelService::setZoneTtl($client, 'example.com', 5), CpanelError::KIND_CONFIG);
+});
+
+check('CSR و کلید خصوصی واقعی ساخته می‌شوند', function (): void {
+    $result = CpanelService::generateCsr('shop.example.com', ['organization' => 'TeamKan', 'country' => 'ir']);
+
+    assertTrue(str_contains($result['csr'], 'BEGIN CERTIFICATE REQUEST'), 'CSR ساخته نشد');
+    assertTrue(str_contains($result['key'], 'PRIVATE KEY'), 'کلید خصوصی ساخته نشد');
+
+    $subject = openssl_csr_get_subject($result['csr']);
+    assertSame('shop.example.com', $subject['CN'] ?? '', 'دامنه در CSR درست ننشسته');
+    assertSame('IR', $subject['C'] ?? '', 'کد کشور باید بزرگ و دوحرفی باشد');
+});
+
+echo "\nسطل زباله، گرفتن از اینترنت، وب‌دیسک و کران متوقف‌شده\n";
+
+check('آدرس داخلی شبکه برای دانلود رد می‌شود', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":[]}'], $captured));
+
+    foreach (['http://localhost/a.zip', 'http://127.0.0.1/a.zip', 'https://10.1.2.3/a.zip', 'https://192.168.1.5/a.zip'] as $url) {
+        assertThrows(static fn () => CpanelService::fetchToHost($client, $url, '/home/demo'), CpanelError::KIND_CONFIG);
+    }
+    assertThrows(
+        static fn () => CpanelService::fetchToHost($client, 'ftp://example.com/a.zip', '/home/demo'),
+        CpanelError::KIND_CONFIG,
+    );
+    assertSame([], $captured, 'هیچ درخواستی نباید به هاست برود');
+
+    assertTrue(!CpanelService::isInternalHost('example.com'), 'دامنه‌ی معمولی باید مجاز باشد');
+    assertTrue(CpanelService::isInternalHost('LOCALHOST'), 'بزرگی حروف نباید مهم باشد');
+});
+
+check('بازگردانی از سطل زباله، مسیر درست را می‌سازد', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":{"home":"/home/demo"}}'],       // homeDir
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{}]}}'], // move
+    ], $captured));
+
+    $path = CpanelService::restoreFromTrash($client, 'site.zip', '/home/demo/public_html');
+    assertSame('/home/demo/public_html/site.zip', $path);
+
+    $body = urldecode($captured[1]['body']);
+    assertTrue(str_contains($body, '/home/demo/.trash/site.zip'), "مبدأ باید داخل سطل زباله باشد: $body");
+});
+
+check('حساب وب‌دیسک: خواندن فهرست و جدا کردن نام از دامنه', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":[{"login":"deploy@example.com","homedir":"/home/demo/public_html","private":1}]}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $users = CpanelService::webDiskUsers($client);
+    assertSame('deploy@example.com', $users[0]['login']);
+    assertTrue($users[0]['private']);
+
+    CpanelService::deleteWebDiskUser($client, 'deploy@example.com');
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'user=deploy'), "نام کاربری جدا نشد: $body");
+    assertTrue(str_contains($body, 'domain=example.com'), 'دامنه جدا نشد');
+});
+
+check('کران متوقف‌شده ذخیره و دقیقاً همان برگردانده می‌شود', function (): void {
+    CronVault::clear();
+    $id = CronVault::put('srv-1', '*/5 * * * *', 'php /home/demo/wp-cron.php');
+    CronVault::put('srv-2', '0 3 * * *', 'php /home/other/cleanup.php');
+
+    assertSame(2, count(CronVault::all()));
+    assertSame(1, count(CronVault::all('srv-1')), 'فقط کران همان سرور باید برگردد');
+
+    $taken = CronVault::take($id);
+    assertSame('php /home/demo/wp-cron.php', $taken['command'] ?? '');
+    assertSame(null, CronVault::take($id), 'برداشتن دوباره نباید چیزی بدهد');
+    assertSame(1, count(CronVault::all()));
+    CronVault::clear();
+});
+
+echo "\nPHP گروهی، بکاپ، سرور و فایل‌های تحت‌نظر\n";
+
+check('تغییر گروهی نسخه‌ی PHP، دامنه‌های هم‌نسخه را دست نمی‌زند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":1,"data":[{"vhost":"a.com","version":"ea-php74"},{"vhost":"b.com","version":"ea-php82"}]}'],
+        ['body' => '{"status":1,"data":[]}'],
+    ], $captured));
+
+    $result = CpanelService::setPhpVersionForAll($client, 'ea-php82');
+    assertSame(['a.com'], $result['changed'], 'فقط دامنه‌ی قدیمی باید عوض شود');
+    assertSame([], $result['failed']);
+    assertSame(2, count($captured), 'برای دامنه‌ی هم‌نسخه نباید درخواستی برود');
+});
+
+check('حذف بکاپ، نام خطرناک را رد می‌کند', function (): void {
+    $captured = [];
+    $client = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"home":"/home/demo"}}'], $captured));
+
+    assertThrows(static fn () => CpanelService::deleteBackup($client, '../../etc/passwd'), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => CpanelService::deleteBackup($client, '  '), CpanelError::KIND_CONFIG);
+    assertSame([], $captured, 'نام نامعتبر نباید به سرور برسد');
+});
+
+check('ویرایش سرور: فایل‌محور ویرایش می‌شود، سرور .env نه', function (): void {
+    $id = ServerStore::add(['label' => 'قدیمی', 'type' => 'cpanel', 'host' => 'h.example.com', 'user' => 'u', 'token' => 'T1']);
+
+    ServerStore::update($id, ['label' => 'تازه', 'token' => 'T2']);
+    $server = ServerStore::get($id);
+    assertSame('تازه', $server['label']);
+    assertSame('T2', $server['token']);
+
+    // مقدار خالی نباید چیزی را پاک کند.
+    ServerStore::update($id, ['label' => '  ']);
+    assertSame('تازه', ServerStore::get($id)['label']);
+
+    assertThrows(static fn () => ServerStore::update('env-cpanel', ['label' => 'x']), CpanelError::KIND_CONFIG);
+    ServerStore::delete($id);
+});
+
+check('فایل تحت‌نظر: بار اول ثبت، بار دوم هشدار تغییر', function (): void {
+    Settings::set(Settings::WATCH_FILES, '/home/demo/public_html/.htaccess');
+    @unlink(Paths::data('alerts.json'));
+
+    $captured = [];
+    $first = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":"# original"}}'], $captured));
+    assertSame([], Alerts::watchedFiles($first), 'بار اول فقط ثبت می‌شود، نه هشدار');
+
+    $second = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":"# HACKED"}}'], $captured));
+    $messages = Alerts::watchedFiles($second);
+    assertSame(1, count($messages), 'تغییر محتوا باید هشدار بدهد');
+    assertTrue(str_contains($messages[0], '.htaccess'), 'نام فایل باید در هشدار باشد');
+
+    // بدون تغییر، دیگر هشدار تکرار نمی‌شود.
+    $third = new CpanelClient(cpanelServer(), fakeTransport(['body' => '{"status":1,"data":{"content":"# HACKED"}}'], $captured));
+    assertSame([], Alerts::watchedFiles($third), 'محتوای ثابت نباید دوباره هشدار بدهد');
+
+    Settings::set(Settings::WATCH_FILES, '');
+    @unlink(Paths::data('alerts.json'));
+});
+
+check('نمای کلی سرور، حساب‌ها و پلن‌ها را جمع می‌زند', function (): void {
+    $captured = [];
+    $whm = new CpanelClient(
+        cpanelServer(['type' => CpanelClient::TYPE_WHM, 'port' => 2087, 'user' => 'root']),
+        fakeTransport([
+            'body' => '{"data":{"acct":[{"user":"ali","plan":"basic","diskused":"512M","suspended":0},'
+                . '{"user":"sara","plan":"basic","diskused":"1G","suspended":1},'
+                . '{"user":"reza","plan":"pro","diskused":"2G","suspended":0}]},"metadata":{"result":1}}',
+        ], $captured),
+    );
+
+    $overview = CpanelService::whmOverview($whm);
+    assertSame(3, $overview['accounts']);
+    assertSame(1, $overview['suspended']);
+    assertSame(2, $overview['plans']['basic'] ?? 0, 'شمارش پلن‌ها درست نیست');
+    assertTrue($overview['disk'] > 3.0e9 && $overview['disk'] < 4.0e9, 'مجموع دیسک درست جمع نشده');
+});
+
+check('رکوردهای CAA و SRV هم پشتیبانی می‌شوند', function (): void {
+    $captured = [];
+    // زون API2 (بدون parse_zone) تا مسیر ZoneEdit تست شود.
+    $client = new CpanelClient(cpanelServer(), fakeTransport([
+        ['body' => '{"status":0,"errors":["Failed to load module \"DNS\""]}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{"type":"A","name":"example.com.","address":"203.0.113.7","Line":5}]}}'],
+        ['body' => '{"cpanelresult":{"event":{"result":1},"data":[{}]}}'],
+    ], $captured));
+
+    CpanelService::addDnsRecord($client, 'example.com', 'example.com.', 'CAA', ['0', 'issue', 'letsencrypt.org']);
+    $body = urldecode(end($captured)['body']);
+    assertTrue(str_contains($body, 'tag=issue'), "برچسب CAA فرستاده نشد: $body");
+    assertTrue(str_contains($body, 'value=letsencrypt.org'), 'مقدار CAA فرستاده نشد');
+});
+
 echo "\nState و AuditLog\n";
 
 check('جریان چندمرحله‌ای ذخیره و پاک می‌شود', function (): void {

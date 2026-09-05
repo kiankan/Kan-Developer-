@@ -1353,6 +1353,226 @@ if (is_resource($cpanelProcess)) {
         expect(str_contains(tg_last_text(), 'کلید عمومی'), 'باید هشدار بدهد که کلید عمومی لازم است');
     });
 
+    scenario('تعلیق صندوق و صندوق پیش‌فرض دامنه', function (): void {
+        press('m:email');
+        foreach (['f:email_suspend', 'f:catchall'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی ایمیل نبود");
+        }
+
+        press('f:email_suspend');
+        press('c:0');                                   // info@example.com
+        press('c:0');                                   // جلوگیری از ارسال
+        press('ok');
+        $calls = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'suspend_outgoing'));
+        expect($calls !== [], 'درخواست تعلیق ارسال نرفت');
+        expect(str_contains(tg_last_text(), 'رمز آن صندوق را هم عوض کنید'), 'راهنمای بعد از تعلیق نیامد');
+
+        press('f:catchall');
+        press('c:0');                                   // example.com
+        press('c:0');                                   // برگرداندن با خطا
+        press('skip');
+        expect(str_contains(tg_last_text(), 'آدرس‌های ناموجود'), 'نتیجه‌ی صندوق پیش‌فرض نیامد');
+    });
+
+    scenario('ساخت کامل دیتابیس در یک قدم، اطلاعات اتصال را می‌دهد', function (): void {
+        press('m:db');
+        expect(in_array('f:db_setup', tg_last_buttons(), true), 'دکمه‌ی ساخت کامل در منوی دیتابیس نبود');
+
+        press('f:db_setup');
+        send_text('shop');
+        send_text('shopuser');
+        send_text('/gen');
+        $text = tg_last_text();
+        expect(str_contains($text, 'دیتابیس آماده شد'), 'نتیجه‌ی راه‌اندازی نیامد');
+        expect(str_contains($text, 'shopuser'), 'نام کاربر در نتیجه نیست');
+        expect(str_contains($text, 'رمز'), 'رمز ساخته‌شده باید نشان داده شود');
+
+        $grants = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'set_privileges_on_database'));
+        expect($grants !== [], 'دسترسی کاربر به دیتابیس داده نشد');
+    });
+
+    scenario('صفحه‌ی خطای سفارشی و دامنه‌های پارک‌شده', function (): void {
+        press('m:dom');
+        foreach (['f:error_pages', 'a:parked'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی دامنه‌ها نبود");
+        }
+
+        press('f:error_pages');
+        press('c:1');                                   // public_html
+        press('c:0');                                   // بساز
+        $bodies = implode(' ', array_map(
+            static fn (array $c): string => urldecode($c['body']),
+            array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'save_file_content')),
+        ));
+        expect(str_contains($bodies, 'ErrorDocument 404'), 'قانون ErrorDocument نوشته نشد');
+        expect(str_contains(tg_last_text(), 'صفحه‌های خطای فارسی'), 'پیام موفقیت نیامد');
+
+        press('a:parked');
+        expect(str_contains(tg_last_text(), 'پارک‌شده'), 'فهرست دامنه‌های پارک‌شده نیامد');
+    });
+
+    scenario('تغییر TTL همه‌ی رکوردها در یک درخواست', function (): void {
+        press('m:dns');
+        expect(in_array('f:dns_ttl', tg_last_buttons(), true), 'دکمه‌ی تغییر TTL در منوی DNS نبود');
+
+        press('f:dns_ttl');
+        press('c:0');                                   // example.com
+        press('c:0');                                   // ۵ دقیقه
+        press('ok');
+
+        $edits = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'mass_edit_zone'));
+        expect($edits !== [], 'درخواست تغییر زون نرفت');
+        $body = urldecode((string) (array_values($edits)[array_key_last(array_values($edits))]['body'] ?? ''));
+        expect(str_contains($body, '"ttl":300'), "مقدار TTL تازه فرستاده نشد: $body");
+    });
+
+    scenario('CSR و کلید خصوصی به‌صورت دو فایل فرستاده می‌شوند', function (): void {
+        $before = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+
+        press('m:ssl');
+        expect(in_array('f:ssl_csr', tg_last_buttons(), true), 'دکمه‌ی ساخت CSR در منوی SSL نبود');
+
+        press('f:ssl_csr');
+        send_text('shop.example.com');
+        press('skip');                                  // بدون نام سازمان
+        press('c:0');                                   // ایران
+
+        $after = count(array_filter(tg_calls(), static fn (array $c): bool => $c['method'] === 'sendDocument'));
+        expect($after === $before + 2, 'باید دو فایل (CSR و کلید) فرستاده شود');
+        expect(str_contains(tg_last_text(), 'کلید خصوصی'), 'هشدار نگهداری کلید نیامد');
+    });
+
+    scenario('سطل زباله: فهرست، بازگردانی و خالی‌کردن', function (): void {
+        press('m:files');
+        foreach (['a:trash', 'f:file_from_url'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی فایل‌ها نبود");
+        }
+
+        press('a:trash');
+        expect(str_contains(tg_last_text(), 'سطل زباله'), 'عنوان سطل زباله نیامد');
+        expect(in_array('f:trash_restore', tg_last_buttons(), true), 'دکمه‌ی بازگردانی نبود');
+
+        press('f:trash_restore');
+        press('c:2');                                   // یکی از موردها
+        press('c:1');                                   // به public_html
+        $moves = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains(urldecode($c['body']), '.trash'));
+        expect($moves !== [], 'مسیر سطل زباله در درخواست نبود');
+        expect(str_contains(tg_last_text(), 'برگردانده شد'), 'پیام بازگردانی نیامد');
+    });
+
+    scenario('گرفتن فایل از آدرس داخلی شبکه رد می‌شود', function (): void {
+        press('f:file_from_url');
+        send_text('http://127.0.0.1/secret.zip');
+        press('c:0');
+        press('skip');
+        expect(str_contains(tg_last_text(), 'آدرس‌های داخلی'), 'آدرس داخلی باید رد شود');
+    });
+
+    scenario('وب‌دیسک: فهرست و ساخت حساب', function (): void {
+        press('m:ftp');
+        expect(in_array('a:webdisk', tg_last_buttons(), true), 'دکمه‌ی وب‌دیسک در منوی FTP نبود');
+
+        press('a:webdisk');
+        expect(str_contains(tg_last_text(), 'deploy@example.com'), 'حساب موجود وب‌دیسک نیامد');
+
+        press('f:webdisk_add');
+        send_text('kian');
+        press('c:0');                                   // example.com
+        send_text('/gen');
+        press('c:1');                                   // public_html
+        $calls = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'WebDisk/create_user'));
+        expect($calls !== [], 'حساب وب‌دیسک ساخته نشد');
+        expect(str_contains(tg_last_text(), '2078'), 'راهنمای اتصال وب‌دیسک نیامد');
+    });
+
+    scenario('توقف موقت کران و برگرداندنش', function (): void {
+        CronVault::clear();
+
+        press('m:cron');
+        foreach (['f:cron_pause', 'f:cron_resume'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی کران نبود");
+        }
+
+        press('f:cron_pause');
+        press('c:0');
+        press('ok');
+        expect(str_contains(tg_last_text(), 'کران متوقف شد'), 'پیام توقف نیامد');
+        expect(count(CronVault::all()) === 1, 'کران در انبار ذخیره نشد');
+
+        press('f:cron_resume');
+        press('c:0');
+        $adds = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'Cron/add_line'));
+        expect($adds !== [], 'کران دوباره ساخته نشد');
+        expect(str_contains(tg_last_text(), 'کران برگشت'), 'پیام برگشت نیامد');
+        expect(CronVault::all() === [], 'کران برگشته باید از انبار برداشته شود');
+    });
+
+    scenario('تغییر نسخه‌ی PHP همه‌ی دامنه‌ها با تأیید', function (): void {
+        press('m:php');
+        expect(in_array('f:php_set_all', tg_last_buttons(), true), 'دکمه‌ی نسخه‌ی همه‌ی دامنه‌ها نبود');
+
+        press('f:php_set_all');
+        $buttons = tg_last_buttons();
+        expect(in_array('c:0', $buttons, true), 'نسخه‌ها باید دکمه شوند');
+        press('c:0');
+        expect(in_array('ok', tg_last_buttons(), true), 'تغییر گروهی باید تأیید بگیرد');
+        press('no');
+        expect(str_contains(tg_last_text(), 'لغو شد'), 'انصراف کار نکرد');
+    });
+
+    scenario('حذف بکاپ و بکاپ روی FTP راه دور', function (): void {
+        press('m:backup');
+        foreach (['f:backup_del', 'f:backup_ftp'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی بکاپ نبود");
+        }
+
+        press('f:backup_del');
+        press('c:0');
+        expect(in_array('ok', tg_last_buttons(), true), 'حذف بکاپ باید تأیید بگیرد');
+        press('ok');
+        expect(str_contains(tg_last_text(), 'پاک شد'), 'پیام حذف بکاپ نیامد');
+
+        press('f:backup_ftp');
+        send_text('backup.example.com');
+        send_text('ftpuser');
+        send_text('rmz-123');
+        press('skip');
+        press('skip');
+        $calls = array_filter(cpanel_calls(), static fn (array $c): bool => str_contains($c['path'], 'fullbackup_to_ftp'));
+        expect($calls !== [], 'درخواست بکاپ روی FTP نرفت');
+        $body = urldecode((string) (array_values($calls)[0]['body'] ?? ''));
+        expect(str_contains($body, 'host=backup.example.com'), "آدرس مقصد فرستاده نشد: $body");
+    });
+
+    scenario('ویرایش نام و توکن سرور از داخل ربات', function (): void {
+        press('m:srv');
+        foreach (['f:srv_rename', 'f:srv_token'] as $expected) {
+            expect(in_array($expected, tg_last_buttons(), true), "دکمه‌ی $expected در منوی سرورها نبود");
+        }
+
+        press('f:srv_rename');
+        press('c:0');
+        send_text('هاست اصلی');
+        expect(str_contains(tg_last_text(), 'هاست اصلی'), 'نام تازه اعمال نشد');
+
+        $active = ServerStore::active();
+        expect(($active['label'] ?? '') === 'هاست اصلی', 'نام سرور در فایل ذخیره نشد');
+    });
+
+    scenario('فایل‌های تحت‌نظر از منوی هشدارها تنظیم می‌شوند', function (): void {
+        press('m:alerts');
+        expect(in_array('f:watch_files', tg_last_buttons(), true), 'دکمه‌ی فایل‌های تحت‌نظر نبود');
+
+        press('f:watch_files');
+        send_text("/home/demo/public_html/.htaccess\n/home/demo/public_html/wp-config.php");
+        expect(str_contains(tg_last_text(), 'زیر نظر گرفته شد'), 'پیام ثبت نیامد');
+        expect(str_contains(Settings::get(Settings::WATCH_FILES), 'wp-config.php'), 'فهرست ذخیره نشد');
+
+        press('f:watch_files');
+        send_text('-');
+        expect(Settings::get(Settings::WATCH_FILES) === '', 'خاموش‌کردن دیده‌بانی کار نکرد');
+    });
+
     proc_terminate($cpanelProcess);
     proc_close($cpanelProcess);
 } else {

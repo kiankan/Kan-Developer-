@@ -21,6 +21,7 @@ final class Settings
     public const BACKUP_EVERY = 'backup_every';
     public const BACKUP_KEEP = 'backup_keep';
     public const LAST_SERVER_IP = 'last_server_ip';
+    public const WATCH_FILES = 'watch_files';
 
     private const DEFAULTS = [
         self::SAFE_DELETE => '1',
@@ -34,6 +35,7 @@ final class Settings
         self::BACKUP_EVERY => 'off',
         self::BACKUP_KEEP => '3',
         self::LAST_SERVER_IP => '',
+        self::WATCH_FILES => '',
     ];
 
     public static function get(string $key, string $default = ''): string

@@ -98,6 +98,37 @@ final class ServerStore
         return $id;
     }
 
+    /**
+     * ویرایش یک سرورِ ذخیره‌شده روی دیسک (اسم یا توکن). سرورهای تعریف‌شده در
+     * .env عمداً از داخل ربات قابل ویرایش نیستند تا با هر آپدیت برنگردند.
+     *
+     * @param array<string, mixed> $fields
+     */
+    public static function update(string $id, array $fields): void
+    {
+        $state = self::load();
+        if (!isset($state['servers'][$id])) {
+            $known = self::get($id);
+            throw CpanelError::config(
+                $known === null
+                    ? "سروری با شناسه‌ی «{$id}» پیدا نشد."
+                    : 'این سرور در فایل <code>.env</code> تعریف شده و از داخل ربات ویرایش نمی‌شود؛'
+                        . ' مقدارش را روی سرور در <code>.env</code> عوض کنید.'
+            );
+        }
+
+        foreach (['label', 'user', 'token'] as $key) {
+            if (isset($fields[$key]) && self::str($fields[$key]) !== '') {
+                $state['servers'][$id][$key] = self::str($fields[$key]);
+            }
+        }
+        if (isset($fields['ssl_verify'])) {
+            $state['servers'][$id]['ssl_verify'] = (bool) $fields['ssl_verify'];
+        }
+
+        self::save($state);
+    }
+
     public static function delete(string $id): void
     {
         $state = self::load();

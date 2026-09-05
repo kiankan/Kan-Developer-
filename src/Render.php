@@ -965,6 +965,17 @@ final class Render
             'cron_template' => 'ساخت کران آماده', 'backup_download' => 'دانلود بکاپ',
             'sshkey_add' => 'افزودن کلید SSH', 'sshkey_del' => 'حذف کلید SSH',
             'whm_quota' => 'تغییر سهمیه‌ی حساب',
+            'filter_toggle' => 'روشن/خاموش کردن فیلتر', 'email_suspend' => 'تعلیق صندوق ایمیل',
+            'catchall' => 'صندوق پیش‌فرض دامنه', 'db_setup' => 'راه‌اندازی کامل دیتابیس',
+            'error_pages' => 'صفحه‌ی خطای سفارشی', 'park_del' => 'حذف دامنه‌ی پارک‌شده',
+            'dns_ttl' => 'تغییر TTL زون', 'ssl_csr' => 'ساخت CSR',
+            'trash_restore' => 'بازگردانی از سطل زباله', 'file_from_url' => 'گرفتن فایل از اینترنت',
+            'webdisk_add' => 'ساخت حساب وب‌دیسک', 'webdisk_del' => 'حذف حساب وب‌دیسک',
+            'cron_pause' => 'توقف موقت کران', 'cron_resume' => 'برگرداندن کران',
+            'php_set_all' => 'تغییر نسخه PHP همه‌ی دامنه‌ها', 'backup_del' => 'حذف بکاپ',
+            'backup_ftp' => 'بکاپ روی FTP راه دور', 'whm_find' => 'پیدا کردن حساب از روی دامنه',
+            'srv_rename' => 'تغییر نام سرور', 'srv_token' => 'تغییر توکن سرور',
+            'watch_files' => 'تنظیم فایل‌های تحت‌نظر',
         ];
 
         $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];
@@ -1583,6 +1594,129 @@ final class Render
         $lines[] = '💡 با «✅ رفع تعلیق» هرکدام را برمی‌گردانید.';
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{name: string, path: string, dir: bool, size: ?float, mtime: ?int, permissions: string}> $items
+     */
+    public static function trash(array $items): string
+    {
+        if ($items === []) {
+            return "🗑 <b>سطل زباله</b>\n\nخالی است.\n\n"
+                . 'ℹ️ هرچه از فایل‌منیجر cPanel حذف شود اول اینجا می‌آید و می‌شود برش گرداند.';
+        }
+
+        $total = 0.0;
+        foreach ($items as $item) {
+            $total += (float) ($item['size'] ?? 0);
+        }
+
+        $lines = ['🗑 <b>سطل زباله</b> (' . count($items) . ') — ' . Format::bytes($total), ''];
+        foreach (array_slice($items, 0, 15) as $item) {
+            $line = ($item['dir'] ? '📁' : '📄') . ' <code>' . self::e($item['name']) . '</code>';
+            if (($item['size'] ?? null) !== null && !$item['dir']) {
+                $line .= ' — ' . Format::bytes($item['size']);
+            }
+            $lines[] = $line;
+        }
+        if (count($items) > 15) {
+            $lines[] = '… و ' . (count($items) - 15) . ' مورد دیگر.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{login: string, dir: string, private: bool}> $users
+     */
+    public static function webDisk(array $users): string
+    {
+        if ($users === []) {
+            return "💽 <b>وب‌دیسک</b>\n\nهنوز حسابی ساخته نشده.\n\n"
+                . '💡 وب‌دیسک پوشه‌ی هاست را مثل یک درایو در ویندوز/مک بالا می‌آورد؛ فایل را می‌کشید و رها می‌کنید.';
+        }
+
+        $lines = ['💽 <b>حساب‌های وب‌دیسک</b> (' . count($users) . ')', ''];
+        foreach ($users as $user) {
+            $lines[] = '• <code>' . self::e($user['login']) . '</code>'
+                . ($user['private'] ? ' 🔒' : '');
+            if ($user['dir'] !== '') {
+                $lines[] = '   📂 <code>' . self::e($user['dir']) . '</code>';
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{id: string, server: string, schedule: string, command: string, paused_at: int}> $items
+     */
+    public static function pausedCrons(array $items): string
+    {
+        if ($items === []) {
+            return '⏸ کران متوقف‌شده‌ای نیست.';
+        }
+
+        $lines = ['⏸ <b>کران‌های متوقف‌شده</b> (' . count($items) . ')', ''];
+        foreach ($items as $item) {
+            $lines[] = '• <code>' . self::e($item['schedule']) . '</code> — <code>'
+                . self::e(mb_substr($item['command'], 0, 70)) . '</code>';
+            if ($item['paused_at'] > 0) {
+                $lines[] = '   ⏱ از ' . self::e(Format::timestampWithRemaining($item['paused_at']));
+            }
+        }
+        $lines[] = '';
+        $lines[] = 'ℹ️ تا وقتی برنگردانید، سرور اجرایشان نمی‌کند.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{accounts: int, suspended: int, disk: float, plans: array<string, int>, newest: array<int, string>} $overview
+     */
+    public static function whmOverview(array $overview): string
+    {
+        $lines = [
+            '📈 <b>نمای کلی سرور</b>',
+            '',
+            '👥 حساب‌ها: <b>' . $overview['accounts'] . '</b>'
+                . ($overview['suspended'] > 0 ? '   ⛔️ معلق: ' . $overview['suspended'] : ''),
+            '💽 مجموع مصرف دیسک: ' . Format::bytes($overview['disk']),
+        ];
+
+        if ($overview['plans'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>پلن‌ها:</b>';
+            foreach (array_slice($overview['plans'], 0, 8, true) as $plan => $count) {
+                $lines[] = '• <code>' . self::e((string) $plan) . '</code> — ' . $count . ' حساب';
+            }
+        }
+
+        if ($overview['newest'] !== []) {
+            $lines[] = '';
+            $lines[] = '🆕 تازه‌ترین حساب‌ها: <code>' . self::e(implode('، ', $overview['newest'])) . '</code>';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{database: string, user: string, password: string, host: string, done: array<int, string>} $result
+     */
+    public static function databaseSetup(array $result): string
+    {
+        return implode("\n", [
+            '✅ <b>دیتابیس آماده شد</b>',
+            '',
+            '🗄 نام دیتابیس: <code>' . self::e($result['database']) . '</code>',
+            '👤 کاربر: <code>' . self::e($result['user']) . '</code>',
+            '🔑 رمز: <code>' . self::e($result['password']) . '</code>',
+            '🖥 میزبان: <code>' . self::e($result['host']) . '</code>',
+            '',
+            'همین چهار مقدار را در فایل تنظیمات سایت بگذارید (مثل <code>wp-config.php</code>).',
+            '',
+            '⚠️ رمز را همین حالا جای امنی ذخیره کنید؛ دیگر نشانتان نمی‌دهم.',
+        ]);
     }
 
     public static function error(Throwable $error): string
