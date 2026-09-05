@@ -31,6 +31,20 @@ if ($server === null) {
 $api = new TelegramApi(kanpanel_bot_token());
 
 try {
+    // سرور SSH پنل ندارد؛ برایش وضعیت خود ماشین را می‌سنجیم.
+    if (($server['type'] ?? '') === SshClient::TYPE) {
+        $messages = Alerts::serverAlerts(ServerStore::ssh());
+        foreach ($messages as $message) {
+            foreach ($admins as $admin) {
+                $api->sendHtml($admin, '🖧 <b>' . htmlspecialchars((string) $server['label']) . "</b>\n\n" . $message);
+            }
+        }
+        if ($messages !== []) {
+            AuditLog::record('alerts', (string) (ServerStore::activeId() ?? '-'), 'alerts_sent', ['count' => count($messages)]);
+        }
+        exit(0);
+    }
+
     $client = ServerStore::client();
     if ($client->isWhm() && $client->targetUser() === '') {
         exit(0);

@@ -76,10 +76,31 @@ final class ServerStore
         $state = self::load();
         $id = self::uniqueId(self::str($server['label'] ?? '') ?: self::str($server['host'] ?? 'server'), $state['servers']);
 
-        $type = ($server['type'] ?? CpanelClient::TYPE_CPANEL) === CpanelClient::TYPE_WHM
-            ? CpanelClient::TYPE_WHM
-            : CpanelClient::TYPE_CPANEL;
+        $type = match ($server['type'] ?? CpanelClient::TYPE_CPANEL) {
+            CpanelClient::TYPE_WHM => CpanelClient::TYPE_WHM,
+            SshClient::TYPE => SshClient::TYPE,
+            default => CpanelClient::TYPE_CPANEL,
+        };
         $address = self::str($server['host'] ?? '');
+
+        if ($type === SshClient::TYPE) {
+            $port = (int) self::str($server['port'] ?? '');
+            $state['servers'][$id] = [
+                'label' => self::str($server['label'] ?? '') ?: Address::host($address) ?: $id,
+                'type' => SshClient::TYPE,
+                'host' => Address::host($address),
+                'port' => $port > 0 ? $port : (Address::port($address) ?? 22),
+                'user' => self::str($server['user'] ?? '') ?: 'root',
+                'password' => self::str($server['password'] ?? ''),
+                'key' => self::str($server['key'] ?? ''),
+            ];
+            if ($state['active'] === null) {
+                $state['active'] = $id;
+            }
+            self::save($state);
+
+            return $id;
+        }
 
         $state['servers'][$id] = [
             'label' => self::str($server['label'] ?? '') ?: Address::host($address) ?: $id,
@@ -117,7 +138,7 @@ final class ServerStore
             );
         }
 
-        foreach (['label', 'user', 'token'] as $key) {
+        foreach (['label', 'user', 'token', 'password', 'key'] as $key) {
             if (isset($fields[$key]) && self::str($fields[$key]) !== '') {
                 $state['servers'][$id][$key] = self::str($fields[$key]);
             }
@@ -198,6 +219,12 @@ final class ServerStore
         }
 
         $server = $id === null ? self::active() : self::get($id);
+        if ($server !== null && ($server['type'] ?? '') === SshClient::TYPE) {
+            throw CpanelError::config(
+                'سرور فعال از نوع SSH است و API سی‌پنل ندارد؛ برای کارهای این سرور از «🖧 مدیریت سرور» استفاده کنید،'
+                . ' یا از «⚙️ سرورها» یک هاست cPanel را فعال کنید.'
+            );
+        }
         if ($server === null && $id !== null) {
             $known = implode('، ', array_keys(self::all())) ?: '(هیچ سروری تعریف نشده)';
             throw CpanelError::config("سروری با شناسه‌ی «{$id}» پیدا نشد. شناسه‌های موجود: {$known}");
@@ -209,6 +236,24 @@ final class ServerStore
         }
 
         return new CpanelClient($server);
+    }
+
+    /**
+     * کلاینت SSH همان سرور (فقط برای سرورهای از نوع ssh).
+     */
+    public static function ssh(?string $id = null): SshClient
+    {
+        $server = $id === null ? self::active() : self::get($id);
+        if ($server === null) {
+            throw CpanelError::config('هیچ سروری تعریف نشده است.');
+        }
+        if (($server['type'] ?? '') !== SshClient::TYPE) {
+            throw CpanelError::config(
+                'این سرور از نوع SSH نیست؛ از «⚙️ سرورها → ➕ افزودن سرور SSH» یک سرور با آی‌پی و رمز اضافه کنید.'
+            );
+        }
+
+        return new SshClient($server);
     }
 
     /**

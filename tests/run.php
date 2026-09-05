@@ -1127,7 +1127,7 @@ check('هر جریان یک متد اجرای متناظر دارد', function (
 check('تعریف مرحله‌های هر جریان کامل است', function (): void {
     foreach (flows() as $name => $definition) {
         assertTrue(isset($definition['title']), "جریان $name عنوان ندارد");
-        assertTrue(in_array($definition['scope'] ?? '', ['account', 'whm', 'local'], true), "scope جریان $name نامعتبر است");
+        assertTrue(in_array($definition['scope'] ?? '', ['account', 'whm', 'ssh', 'local'], true), "scope جریان $name نامعتبر است");
         assertTrue(($definition['steps'] ?? []) !== [], "جریان $name مرحله‌ای ندارد");
         // هر جریان باید بداند بعد از تمام‌شدن، دکمه‌ی بازگشتش به کدام منوست.
         assertTrue(isset($definition['back']), "جریان $name دکمه‌ی بازگشت (back) ندارد");
@@ -2361,6 +2361,337 @@ check('داشبورد و فعالیت ادمین‌ها متن خوانا می�
     ]));
     assertTrue(str_contains($actors, 'tg:555'), 'شناسه‌ی ادمین نیامد');
     assertTrue(str_contains($actors, '2 ناموفق'), 'تعداد ناموفق‌ها نیامد');
+});
+
+echo "\nمدیریت سرور با SSH\n";
+
+/**
+ * اجراکننده‌ی ساختگی SSH: به‌جای وصل‌شدن به سرور، برای هر دستور یک خروجی
+ * از پیش آماده می‌دهد و آخرین دستور را برای بازرسی نگه می‌دارد.
+ *
+ * @param array<string, string> $responses جفت «تکه‌ای از دستور» => «خروجی»
+ */
+function fakeSsh(array $responses, array &$captured, int $code = 0): callable
+{
+    return static function (string $command, array $server, string $stdin) use ($responses, &$captured, $code): array {
+        $captured[] = ['command' => $command, 'server' => $server, 'stdin' => $stdin];
+        foreach ($responses as $needle => $output) {
+            if ($needle === '*' || str_contains($command, (string) $needle)) {
+                return ['code' => $code, 'out' => (string) $output, 'err' => ''];
+            }
+        }
+
+        return ['code' => $code, 'out' => '', 'err' => ''];
+    };
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function sshServer(array $overrides = []): array
+{
+    return $overrides + [
+        'id' => 'srv-ssh',
+        'label' => 'سرور تستی',
+        'type' => SshClient::TYPE,
+        'host' => '203.0.113.10',
+        'port' => 22,
+        'user' => 'root',
+        'password' => 'rmz-test',
+        'key' => '',
+    ];
+}
+
+/** خروجی ساختگی دستور «وضعیت کامل» با همان نشانه‌گذارهای واقعی. */
+function fakeFactsOutput(): string
+{
+    return implode("\n", [
+        '###TEAMKAN:host', 'srv1.example.com',
+        '###TEAMKAN:os', 'PRETTY_NAME="Ubuntu 22.04.4 LTS"', 'NAME="Ubuntu"',
+        '###TEAMKAN:kernel', '5.15.0-91-generic',
+        '###TEAMKAN:uptime', '360000.42 700000.11',
+        '###TEAMKAN:load', '2.50 1.80 1.20 3/512 9999',
+        '###TEAMKAN:cores', '4',
+        '###TEAMKAN:cpu', ' Intel(R) Xeon(R) CPU E5-2680',
+        '###TEAMKAN:mem',
+        'MemTotal:        8192000 kB',
+        'MemFree:          512000 kB',
+        'MemAvailable:    2048000 kB',
+        'Buffers:          100000 kB',
+        'SwapTotal:       2048000 kB',
+        'SwapFree:        2048000 kB',
+        '###TEAMKAN:disk',
+        'Filesystem     1024-blocks     Used Available Capacity Mounted on',
+        '/dev/vda1         51475068 45000000   6475068      88% /',
+        '/dev/vdb1        103081248 10000000  93081248      10% /home',
+        '###TEAMKAN:ip', '203.0.113.10 10.0.0.5',
+        '###TEAMKAN:ps', '212',
+    ]);
+}
+
+check('وضعیت سرور از خروجی خام لینوکس درست خوانده می‌شود', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => fakeFactsOutput()], $captured));
+
+    $facts = SshService::facts($client);
+
+    assertSame('srv1.example.com', $facts['hostname']);
+    assertSame('Ubuntu 22.04.4 LTS', $facts['os']);
+    assertSame('5.15.0-91-generic', $facts['kernel']);
+    assertSame([2.5, 1.8, 1.2], $facts['load']);
+    assertSame(4, $facts['cpu']['cores']);
+    assertSame(212, $facts['processes']);
+    assertSame(['203.0.113.10', '10.0.0.5'], $facts['ips']);
+
+    // ۸ گیگ کل، ۲ گیگ در دسترس → ۶ گیگ مصرف‌شده
+    assertSame(8192000.0 * 1024, $facts['memory']['total']);
+    assertSame(6144000.0 * 1024, $facts['memory']['used']);
+    assertSame(2048000.0 * 1024, $facts['swap']['total']);
+    assertSame(0.0, $facts['swap']['used']);
+
+    // پرترین پارتیشن باید اول باشد
+    assertSame('/', $facts['disks'][0]['mount']);
+    assertSame(88.0, $facts['disks'][0]['percent']);
+    assertSame(2, count($facts['disks']));
+
+    // یک اتصال، نه چند تا
+    assertSame(1, count($captured), 'همه‌ی دستورها باید در یک اتصال بروند');
+});
+
+check('گزارش وضعیت، پرشدن دیسک و فشار را هشدار می‌دهد', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => fakeFactsOutput()], $captured));
+    $text = Render::toPlain(Render::serverFacts(SshService::facts($client)));
+
+    assertTrue(str_contains($text, 'Ubuntu 22.04.4 LTS'), 'سیستم‌عامل نیامد');
+    assertTrue(str_contains($text, '203.0.113.10'), 'آی‌پی نیامد');
+    assertTrue(str_contains($text, '4 هسته'), 'تعداد هسته نیامد');
+    assertTrue(str_contains($text, 'نزدیک پرشدن'), 'هشدار دیسک نیامد');
+    assertTrue(str_contains($text, 'بالا بوده'), 'مدت بالا بودن سرور نیامد');
+});
+
+check('هشدار خودکار سرور: دیسک، بار و حافظه', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => fakeFactsOutput()], $captured));
+
+    $messages = SshService::alerts($client);
+    assertSame(1, count($messages), 'فقط دیسک باید هشدار بدهد');
+    assertTrue(str_contains($messages[0], '88'), 'درصد دیسک در هشدار نیست');
+
+    // با آستانه‌ی بالاتر، هیچ هشداری نباید بیاید.
+    assertSame([], SshService::alerts($client, 95, 10.0));
+});
+
+check('فشار سیستم: سنگین‌ترین پردازش‌ها خوانده می‌شوند', function (): void {
+    $captured = [];
+    $output = implode("\n", [
+        '###TEAMKAN:load', '0.50 0.40 0.30 1/200 8888',
+        '###TEAMKAN:cores', '2',
+        '###TEAMKAN:mem', 'MemTotal:        4096000 kB', 'MemFree: 1000000 kB', 'MemAvailable:    2048000 kB',
+        '###TEAMKAN:cpu_top',
+        '%CPU %MEM   PID COMMAND',
+        '45.2  10.1  1234 mysqld',
+        ' 7.5   2.0  4321 nginx',
+        '###TEAMKAN:mem_top',
+        '%CPU %MEM   PID COMMAND',
+        '45.2  10.1  1234 mysqld',
+        '###TEAMKAN:io', 'some avg10=1.20 avg60=0.80',
+    ]);
+    $client = new SshClient(sshServer(), fakeSsh(['*' => $output], $captured));
+
+    $pressure = SshService::pressure($client);
+    assertSame(2, count($pressure['cpu_top']));
+    assertSame('mysqld', $pressure['cpu_top'][0]['name']);
+    assertSame(1234, $pressure['cpu_top'][0]['pid']);
+    assertSame(45.2, $pressure['cpu_top'][0]['cpu']);
+
+    $text = Render::toPlain(Render::serverPressure($pressure));
+    assertTrue(str_contains($text, 'mysqld'), 'نام پردازش نیامد');
+    assertTrue(str_contains($text, 'فشار در حد عادی'), 'وضعیت بار درست ترجمه نشد');
+});
+
+check('سرویس‌ها: فعال، خاموش و خراب از هم جدا می‌شوند', function (): void {
+    $captured = [];
+    $output = implode("\n", [
+        '###TEAMKAN:systemd', 'yes',
+        '###TEAMKAN:known',
+        'nginx active',
+        'apache2 missing',
+        'mysql inactive',
+        'redis failed',
+        '###TEAMKAN:failed',
+        '● redis.service loaded failed failed Redis',
+    ]);
+    $client = new SshClient(sshServer(), fakeSsh(['*' => $output], $captured));
+
+    $services = SshService::services($client);
+    $names = array_column($services['known'], 'name');
+    assertTrue(in_array('nginx', $names, true), 'سرویس فعال باید بیاید');
+    assertTrue(!in_array('apache2', $names, true), 'سرویس نصب‌نشده نباید بیاید');
+    assertTrue(in_array('mysql', $names, true), 'سرویس خاموش باید بیاید');
+    assertSame(['redis.service'], $services['failed']);
+
+    $text = Render::toPlain(Render::serverServices($services));
+    assertTrue(str_contains($text, 'در حال اجرا'), 'وضعیت فارسی نشد');
+    assertTrue(str_contains($text, 'خراب'), 'سرویس خراب گزارش نشد');
+});
+
+check('پورت‌های باز: عمومی و داخلی از هم جدا می‌شوند', function (): void {
+    $captured = [];
+    $output = implode("\n", [
+        'tcp   LISTEN 0      511          0.0.0.0:80        0.0.0.0:*    users:(("nginx",pid=1,fd=6))',
+        'tcp   LISTEN 0      70         127.0.0.1:3306      0.0.0.0:*    users:(("mysqld",pid=2,fd=7))',
+        'udp   UNCONN 0      0            0.0.0.0:53        0.0.0.0:*',
+    ]);
+    $client = new SshClient(sshServer(), fakeSsh(['*' => $output], $captured));
+
+    $ports = SshService::ports($client);
+    assertSame(3, count($ports));
+    assertSame('53', $ports[0]['port'], 'باید بر اساس شماره‌ی پورت مرتب شود');
+    $text = Render::toPlain(Render::serverPorts($ports));
+    assertTrue(str_contains($text, 'MySQL'), 'نام سرویس پورت ۳۳۰۶ نیامد');
+    assertTrue(str_contains($text, 'وب'), 'نام سرویس پورت ۸۰ نیامد');
+});
+
+check('کاربران سرور: قفل‌بودن و ورودهای اخیر', function (): void {
+    $captured = [];
+    $output = implode("\n", [
+        '###TEAMKAN:passwd',
+        'root:0:/root:/bin/bash',
+        'kian:1000:/home/kian:/bin/bash',
+        'deploy:1001:/home/deploy:/usr/sbin/nologin',
+        '###TEAMKAN:locked',
+        'root:P',
+        'kian:L',
+        '###TEAMKAN:online',
+        'root pts/0 2026-09-05 10:00 (203.0.113.55)',
+        '###TEAMKAN:last',
+        'root pts/0 203.0.113.55 Fri Sep 5 10:00 still logged in',
+    ]);
+    $client = new SshClient(sshServer(), fakeSsh(['*' => $output], $captured));
+
+    $data = SshService::users($client);
+    assertSame(3, count($data['users']));
+    assertSame(true, $data['users'][1]['locked'], 'کاربر قفل‌شده باید مشخص شود');
+    assertSame(false, $data['users'][0]['locked'], 'کاربر رمزدار نباید قفل حساب شود');
+    assertSame(1, count($data['online']));
+
+    $text = Render::toPlain(Render::serverUsers($data));
+    assertTrue(str_contains($text, 'kian'), 'نام کاربر نیامد');
+    assertTrue(str_contains($text, 'قفل'), 'وضعیت قفل نیامد');
+});
+
+check('رمز کاربر از ورودی استاندارد می‌رود، نه از خط فرمان', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => ''], $captured));
+
+    CpanelService::randomPassword();  // فقط برای اطمینان از بارگذاری کلاس
+    SshService::changePassword($client, 'kian', 'rmz-1234-abcd');
+
+    assertSame('chpasswd', $captured[0]['command'], 'دستور باید chpasswd خالی باشد');
+    assertSame("kian:rmz-1234-abcd\n", $captured[0]['stdin'], 'رمز باید از stdin برود');
+    assertTrue(!str_contains($captured[0]['command'], 'rmz-1234'), 'رمز نباید در دستور دیده شود');
+
+    assertThrows(static fn () => SshService::changePassword($client, 'kian', 'کوتاه'), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => SshService::changePassword($client, 'kian; rm -rf /', 'rmz-1234-abcd'), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => SshService::changePassword($client, 'kian', "abcdefgh:x"), CpanelError::KIND_CONFIG);
+});
+
+check('نام سرویس و کاربر پیش از رفتن به سرور اعتبارسنجی می‌شوند', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => 'active'], $captured));
+
+    assertThrows(static fn () => SshService::restartService($client, 'nginx; reboot'), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => SshService::lockUser($client, '$(whoami)', true), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => SshService::lockUser($client, 'root', true), CpanelError::KIND_CONFIG);
+    assertSame([], $captured, 'ورودی نامعتبر نباید به سرور برسد');
+
+    SshService::restartService($client, 'nginx');
+    assertTrue(str_contains($captured[0]['command'], "systemctl restart 'nginx'"), 'نام سرویس باید داخل نقل‌قول برود');
+});
+
+check('اجرای دستور: پاک‌کردن کل سیستم فایل رد می‌شود', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => 'ok'], $captured));
+
+    assertThrows(static fn () => SshService::command($client, 'rm -rf /'), CpanelError::KIND_CONFIG);
+    assertThrows(static fn () => SshService::command($client, '   '), CpanelError::KIND_CONFIG);
+    assertSame([], $captured);
+
+    $result = SshService::command($client, 'df -h');
+    assertSame('ok', $result['out']);
+    assertSame(0, $result['code']);
+});
+
+check('مسدودکردن آی‌پی روی فایروال سرور', function (): void {
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => 'ufw'], $captured));
+
+    assertThrows(static fn () => SshService::blockIp($client, 'الکی', true), CpanelError::KIND_CONFIG);
+
+    assertSame('ufw', SshService::blockIp($client, '203.0.113.55', true));
+    assertTrue(str_contains($captured[0]['command'], "ufw deny from '203.0.113.55'"), 'دستور فایروال درست نیست');
+
+    SshService::blockIp($client, '203.0.113.55', false);
+    assertTrue(str_contains(end($captured)['command'], 'ufw delete deny'), 'آزادکردن آی‌پی درست نیست');
+});
+
+check('نقل‌قول امن، خروج از رشته را نمی‌دهد', function (): void {
+    assertSame("'nginx'", SshClient::quote('nginx'));
+    assertSame("'a'\\''b'", SshClient::quote("a'b"));
+    assertSame("'; reboot #'", SshClient::quote('; reboot #'));
+});
+
+check('سرور SSH بدون رمز و بدون کلید ساخته نمی‌شود', function (): void {
+    assertThrows(
+        static fn () => new SshClient(sshServer(['password' => '', 'key' => ''])),
+        CpanelError::KIND_CONFIG,
+    );
+    assertThrows(static fn () => new SshClient(sshServer(['host' => ''])), CpanelError::KIND_CONFIG);
+
+    $client = new SshClient(sshServer(['port' => 0]));
+    assertSame(22, $client->port(), 'پورت پیش‌فرض SSH باید ۲۲ باشد');
+    assertSame('203.0.113.10', $client->host());
+});
+
+check('هشدار سرور تا شش ساعت تکرار نمی‌شود', function (): void {
+    @unlink(Paths::data('alerts.json'));
+    $captured = [];
+    $client = new SshClient(sshServer(), fakeSsh(['*' => fakeFactsOutput()], $captured));
+
+    $first = Alerts::serverAlerts($client);
+    assertSame(1, count($first), 'بار اول باید هشدار بدهد');
+
+    $second = Alerts::serverAlerts($client);
+    assertSame([], $second, 'همان هشدار نباید بلافاصله تکرار شود');
+
+    @unlink(Paths::data('alerts.json'));
+});
+
+check('سرور SSH در فهرست سرورها با نوع درست و رمز پوشانده می‌آید', function (): void {
+    $id = ServerStore::add([
+        'label' => 'سرور لینوکسی',
+        'type' => SshClient::TYPE,
+        'host' => '203.0.113.10:2222',
+        'user' => 'root',
+        'password' => 'rmz-super-secret',
+    ]);
+
+    $server = ServerStore::get($id);
+    assertSame('ssh', $server['type']);
+    assertSame(2222, $server['port'], 'پورت چسبیده به آدرس باید برداشته شود');
+    assertSame('rmz-super-secret', $server['password']);
+
+    $text = Render::toPlain(Render::servers(ServerStore::all(), $id));
+    assertTrue(str_contains($text, 'SSH (سرور لینوکسی)'), 'نوع سرور در فهرست نیامد');
+    assertTrue(!str_contains($text, 'rmz-super-secret'), 'رمز نباید در فهرست دیده شود!');
+
+    // کلاینت سی‌پنل برای سرور SSH نباید ساخته شود.
+    ServerStore::setActive($id);
+    assertThrows(static fn () => ServerStore::client(), CpanelError::KIND_CONFIG);
+    assertTrue(ServerStore::ssh() instanceof SshClient, 'کلاینت SSH باید ساخته شود');
+
+    ServerStore::delete($id);
 });
 
 echo "\nState و AuditLog\n";

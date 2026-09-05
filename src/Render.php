@@ -14,7 +14,14 @@ final class Render
         $lines = ['✅ <b>اتصال برقرار شد</b>'];
         $lines[] = '🖥 سرور: <code>' . self::e((string) $info['host']) . '</code>';
         $lines[] = '🔑 کاربر: <code>' . self::e((string) $info['user']) . '</code>';
-        $lines[] = '🧩 نوع: ' . ($info['type'] === CpanelClient::TYPE_WHM ? 'WHM (سطح سرور)' : 'cPanel (سطح حساب)');
+        $lines[] = '🧩 نوع: ' . match ($info['type'] ?? '') {
+            CpanelClient::TYPE_WHM => 'WHM (سطح سرور)',
+            SshClient::TYPE => 'SSH (سرور لینوکسی)',
+            default => 'cPanel (سطح حساب)',
+        };
+        if (!empty($info['uptime'])) {
+            $lines[] = '⏱ <code>' . self::e((string) $info['uptime']) . '</code>';
+        }
         if (!empty($info['hostname'])) {
             $lines[] = '🏷 هاست‌نیم: <code>' . self::e((string) $info['hostname']) . '</code>';
         }
@@ -873,11 +880,19 @@ final class Render
         $lines = ['🖥 <b>سرورها</b> (' . count($servers) . ')', ''];
         foreach ($servers as $id => $server) {
             $mark = $id === $activeId ? '✅' : '▫️';
-            $type = $server['type'] === CpanelClient::TYPE_WHM ? 'WHM' : 'cPanel';
+            $type = match ($server['type']) {
+                CpanelClient::TYPE_WHM => 'WHM',
+                SshClient::TYPE => 'SSH (سرور لینوکسی)',
+                default => 'cPanel',
+            };
             $lines[] = "$mark <b>" . self::e((string) $server['label']) . "</b> — $type";
             $lines[] = '   🔗 <code>' . self::e((string) $server['host']) . ':' . (int) $server['port'] . '</code>';
-            $lines[] = '   👤 <code>' . self::e((string) $server['user']) . '</code>  🔑 '
-                . self::e(Format::maskSecret((string) $server['token']));
+            $secret = $server['type'] === SshClient::TYPE
+                ? (trim((string) ($server['key'] ?? '')) !== ''
+                    ? '🗝 کلید: ' . self::e((string) $server['key'])
+                    : '🔑 ' . self::e(Format::maskSecret((string) ($server['password'] ?? ''))))
+                : '🔑 ' . self::e(Format::maskSecret((string) ($server['token'] ?? '')));
+            $lines[] = '   👤 <code>' . self::e((string) $server['user']) . '</code>  ' . $secret;
             if (($server['as_user'] ?? '') !== '') {
                 $lines[] = '   🎯 کاربر مقصد: <code>' . self::e((string) $server['as_user']) . '</code>';
             }
@@ -986,6 +1001,10 @@ final class Render
             'php_copy_limits' => 'کپی محدودیت‌های PHP', 'backup_restore' => 'بازکردن بکاپ',
             'whm_addpkg' => 'ساخت پلن', 'whm_setip' => 'تغییر آی‌پی حساب',
             'whm_webmail' => 'لینک ورود به وبمیل', 'trash_empty' => 'خالی‌کردن سطل زباله',
+            'ssh_add' => 'افزودن سرور SSH', 'sys_service' => 'ری‌استارت سرویس سرور',
+            'sys_passwd' => 'تغییر رمز کاربر سرور', 'sys_lock' => 'قفل/بازکردن کاربر سرور',
+            'sys_block' => 'مسدودکردن آی‌پی روی سرور', 'sys_run' => 'اجرای دستور روی سرور',
+            'sys_upgrade' => 'به‌روزرسانی سیستم', 'sys_reboot' => 'ری‌استارت سرور',
         ];
 
         $out = ['🧾 <b>آخرین عملیات‌ها</b>', ''];
@@ -1918,6 +1937,327 @@ final class Render
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{hostname: string, os: string, kernel: string, uptime: string, load: array<int, float>, cpu: array{cores: int, model: string, percent: ?float}, memory: array{total: float, used: float, percent: ?float}, swap: array{total: float, used: float}, disks: array<int, array{mount: string, size: float, used: float, percent: ?float}>, ips: array<int, string>, processes: int} $facts
+     */
+    public static function serverFacts(array $facts): string
+    {
+        $lines = ['🖧 <b>وضعیت سرور</b>', ''];
+
+        if ($facts['hostname'] !== '') {
+            $lines[] = '🏷 نام: <code>' . self::e($facts['hostname']) . '</code>';
+        }
+        if ($facts['os'] !== '') {
+            $lines[] = '🐧 سیستم‌عامل: ' . self::e($facts['os']);
+        }
+        if ($facts['kernel'] !== '') {
+            $lines[] = '⚙️ کرنل: <code>' . self::e($facts['kernel']) . '</code>';
+        }
+        if ($facts['ips'] !== []) {
+            $lines[] = '🖧 آی‌پی: <code>' . self::e(implode('، ', $facts['ips'])) . '</code>';
+        }
+        if ($facts['uptime'] !== '') {
+            $lines[] = '⏱ بالا بوده: ' . self::e($facts['uptime']);
+        }
+
+        $lines[] = '';
+        $lines[] = '<b>فشار سیستم:</b>';
+        $cpu = $facts['cpu'];
+        if ($facts['load'] !== []) {
+            $lines[] = '📈 بار: <code>' . implode('  ', array_map(
+                static fn (float $value): string => number_format($value, 2),
+                $facts['load'],
+            )) . '</code>  (۱، ۵ و ۱۵ دقیقه)';
+        }
+        $lines[] = '🧮 پردازنده: ' . $cpu['cores'] . ' هسته'
+            . ($cpu['percent'] !== null ? '  ' . Format::bar($cpu['percent'], 8) . ' ' . Format::percent($cpu['percent']) : '');
+        if ($cpu['model'] !== '') {
+            $lines[] = '   ' . self::e($cpu['model']);
+        }
+
+        $memory = $facts['memory'];
+        $lines[] = '🧠 حافظه: ' . Format::bytes($memory['used']) . ' از ' . Format::bytes($memory['total'])
+            . ($memory['percent'] !== null ? '  ' . Format::bar($memory['percent'], 8) . ' ' . Format::percent($memory['percent']) : '');
+        if ($facts['swap']['total'] > 0) {
+            $lines[] = '💤 سواپ: ' . Format::bytes($facts['swap']['used']) . ' از ' . Format::bytes($facts['swap']['total']);
+        }
+        if ($facts['processes'] > 0) {
+            $lines[] = '🔧 پردازش‌های در حال اجرا: ' . $facts['processes'];
+        }
+
+        if ($facts['disks'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>دیسک‌ها:</b>';
+            foreach (array_slice($facts['disks'], 0, 8) as $disk) {
+                $lines[] = '💽 <code>' . self::e($disk['mount']) . '</code> — '
+                    . Format::bytes($disk['used']) . ' از ' . Format::bytes($disk['size'])
+                    . ($disk['percent'] !== null ? '  ' . Format::bar($disk['percent'], 8) . ' ' . Format::percent($disk['percent']) : '');
+            }
+        }
+
+        $warnings = [];
+        foreach ($facts['disks'] as $disk) {
+            if (($disk['percent'] ?? 0) >= 85) {
+                $warnings[] = 'پارتیشن ' . $disk['mount'] . ' نزدیک پرشدن است';
+            }
+        }
+        if (($facts['load'][0] ?? 0) > $cpu['cores'] * 2) {
+            $warnings[] = 'بار سیستم خیلی بالاتر از تعداد هسته‌هاست';
+        }
+        if (($memory['percent'] ?? 0) >= 90) {
+            $warnings[] = 'حافظه تقریباً پر است';
+        }
+        if ($warnings !== []) {
+            $lines[] = '';
+            $lines[] = '⚠️ ' . self::e(implode('، ', $warnings));
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{load: array<int, float>, cores: int, memory: array{total: float, used: float, percent: ?float}, cpu_top: array<int, array{cpu: float, mem: float, pid: int, name: string}>, mem_top: array<int, array{cpu: float, mem: float, pid: int, name: string}>, io: string} $pressure
+     */
+    public static function serverPressure(array $pressure): string
+    {
+        $lines = ['📈 <b>فشار سرور</b>', ''];
+
+        if ($pressure['load'] !== []) {
+            $ratio = $pressure['load'][0] / max(1, $pressure['cores']) * 100;
+            $lines[] = 'بار: <code>' . implode('  ', array_map(
+                static fn (float $value): string => number_format($value, 2),
+                $pressure['load'],
+            )) . '</code>  روی ' . $pressure['cores'] . ' هسته';
+            $lines[] = Format::bar(min(100.0, $ratio), 10) . ' ' . Format::percent(min(100.0, $ratio));
+            $lines[] = $ratio >= 100
+                ? '🔴 سرور بیشتر از توانش کار دارد؛ درخواست‌ها در صف می‌مانند.'
+                : ($ratio >= 70 ? '🟡 فشار محسوس است.' : '🟢 فشار در حد عادی است.');
+        }
+
+        $memory = $pressure['memory'];
+        $lines[] = '';
+        $lines[] = '🧠 حافظه: ' . Format::bytes($memory['used']) . ' از ' . Format::bytes($memory['total'])
+            . ($memory['percent'] !== null ? '  ' . Format::percent($memory['percent']) : '');
+
+        $table = static function (string $title, array $rows) use (&$lines): void {
+            if ($rows === []) {
+                return;
+            }
+            $lines[] = '';
+            $lines[] = $title;
+            foreach (array_slice($rows, 0, 6) as $row) {
+                $lines[] = '• <code>' . self::e($row['name']) . '</code> — CPU '
+                    . number_format($row['cpu'], 1) . '٪، حافظه ' . number_format($row['mem'], 1)
+                    . '٪ (pid ' . $row['pid'] . ')';
+            }
+        };
+
+        $table('<b>سنگین‌ترین پردازش‌ها روی پردازنده:</b>', $pressure['cpu_top']);
+        $table('<b>سنگین‌ترین پردازش‌ها روی حافظه:</b>', $pressure['mem_top']);
+
+        if ($pressure['io'] !== '') {
+            $lines[] = '';
+            $lines[] = '💾 فشار دیسک (PSI):';
+            $lines[] = '<code>' . self::e($pressure['io']) . '</code>';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{known: array<int, array{name: string, state: string}>, failed: array<int, string>, systemd: bool} $services
+     */
+    public static function serverServices(array $services): string
+    {
+        if (!$services['systemd']) {
+            return "⚙️ این سرور systemd ندارد، پس وضعیت سرویس‌ها از این راه خوانده نمی‌شود.\n\n"
+                . '💡 می‌توانید از «🧪 اجرای دستور» استفاده کنید (مثلاً <code>service --status-all</code>).';
+        }
+
+        $lines = ['⚙️ <b>سرویس‌های سرور</b>', ''];
+        if ($services['known'] === []) {
+            $lines[] = 'از سرویس‌های شناخته‌شده چیزی روی این سرور نصب نیست.';
+        }
+        foreach ($services['known'] as $service) {
+            $icon = match ($service['state']) {
+                'active' => '🟢',
+                'inactive' => '⚪️',
+                'failed' => '🔴',
+                default => '🟡',
+            };
+            $state = match ($service['state']) {
+                'active' => 'در حال اجرا',
+                'inactive' => 'خاموش',
+                'failed' => 'خراب',
+                default => $service['state'],
+            };
+            $lines[] = $icon . ' <code>' . self::e($service['name']) . '</code> — ' . self::e($state);
+        }
+
+        if ($services['failed'] !== []) {
+            $lines[] = '';
+            $lines[] = '🔴 <b>سرویس‌های خراب:</b>';
+            foreach ($services['failed'] as $name) {
+                $lines[] = '• <code>' . self::e($name) . '</code>';
+            }
+            $lines[] = '';
+            $lines[] = '💡 با «♻️ ری‌استارت سرویس» دوباره راهشان بیندازید.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array<int, array{proto: string, address: string, port: string, process: string}> $ports
+     */
+    public static function serverPorts(array $ports): string
+    {
+        if ($ports === []) {
+            return '🔌 پورت بازی گزارش نشد.';
+        }
+
+        $known = [
+            '21' => 'FTP', '22' => 'SSH', '25' => 'ایمیل (SMTP)', '53' => 'DNS', '80' => 'وب',
+            '110' => 'POP3', '143' => 'IMAP', '443' => 'وب امن', '465' => 'SMTP امن', '587' => 'SMTP',
+            '993' => 'IMAP امن', '995' => 'POP3 امن', '2082' => 'cPanel', '2083' => 'cPanel امن',
+            '2086' => 'WHM', '2087' => 'WHM امن', '3306' => 'MySQL', '5432' => 'PostgreSQL',
+            '6379' => 'Redis', '27017' => 'MongoDB',
+        ];
+
+        $lines = ['🔌 <b>پورت‌های باز</b> (' . count($ports) . ')', ''];
+        $public = 0;
+        foreach (array_slice($ports, 0, 30) as $port) {
+            $isPublic = in_array($port['address'], ['0.0.0.0', '*', '[::]', '::'], true);
+            if ($isPublic) {
+                $public++;
+            }
+            $lines[] = ($isPublic ? '🌍' : '🏠') . ' <code>' . self::e($port['port']) . '</code>'
+                . (isset($known[$port['port']]) ? ' — ' . $known[$port['port']] : '')
+                . ($port['process'] !== '' ? '  (' . self::e($port['process']) . ')' : '');
+        }
+
+        $lines[] = '';
+        $lines[] = '🌍 = از بیرون قابل دسترس، 🏠 = فقط داخل خود سرور';
+        if ($public > 0) {
+            $lines[] = '💡 هر پورتی که از بیرون باز است باید دلیلی داشته باشد؛ بقیه را با فایروال ببندید.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{users: array<int, array{name: string, uid: int, home: string, shell: string, locked: ?bool}>, online: array<int, string>, last: array<int, string>} $data
+     */
+    public static function serverUsers(array $data): string
+    {
+        $lines = ['👥 <b>کاربران سرور</b>', ''];
+
+        foreach ($data['users'] as $user) {
+            $icon = $user['locked'] === true ? '🔒' : '👤';
+            $lines[] = $icon . ' <code>' . self::e($user['name']) . '</code> (uid ' . $user['uid'] . ')'
+                . ($user['locked'] === true ? ' — قفل' : '');
+            if ($user['shell'] !== '' && !str_contains($user['shell'], 'nologin') && !str_contains($user['shell'], 'false')) {
+                $lines[] = '   🖥 <code>' . self::e($user['shell']) . '</code>';
+            }
+        }
+        if ($data['users'] === []) {
+            $lines[] = 'کاربری خوانده نشد.';
+        }
+
+        if ($data['online'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>همین حالا وصل‌اند:</b>';
+            foreach ($data['online'] as $line) {
+                $lines[] = '• <code>' . self::e($line) . '</code>';
+            }
+        }
+
+        if ($data['last'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>آخرین ورودها:</b>';
+            foreach ($data['last'] as $line) {
+                $lines[] = '• <code>' . self::e(mb_substr($line, 0, 70)) . '</code>';
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{firewall: string, failed_logins: int, root_login: string, updates: int, updater: string, reboot_required: bool, notes: array<int, string>} $security
+     */
+    public static function serverSecurity(array $security): string
+    {
+        $lines = [
+            '🔐 <b>وضعیت امنیتی سرور</b>',
+            '',
+            '🧱 فایروال: <code>' . self::e($security['firewall']) . '</code>',
+            '🚪 ورود ناموفق SSH (لاگ موجود): ' . $security['failed_logins'],
+        ];
+
+        if ($security['root_login'] !== '') {
+            $lines[] = '🔑 <code>' . self::e($security['root_login']) . '</code>';
+        }
+        $lines[] = '📦 به‌روزرسانی در انتظار: ' . $security['updates']
+            . ($security['updater'] !== 'unknown' ? ' (' . self::e($security['updater']) . ')' : '');
+        if ($security['reboot_required']) {
+            $lines[] = '🔄 سرور برای کامل‌شدن به‌روزرسانی‌ها نیاز به ری‌استارت دارد.';
+        }
+
+        if ($security['notes'] !== []) {
+            $lines[] = '';
+            $lines[] = '<b>چه چیزی جای بهتر شدن دارد:</b>';
+            foreach ($security['notes'] as $note) {
+                $lines[] = '• ' . self::e($note);
+            }
+        } else {
+            $lines[] = '';
+            $lines[] = '✅ از این چند مورد، چیز نگران‌کننده‌ای دیده نشد.';
+        }
+
+        if ($security['failed_logins'] > 500) {
+            $lines[] = '';
+            $lines[] = '⚠️ تعداد تلاش‌های ناموفق ورود بالاست؛ بستن ورود root و محدودکردن SSH به آی‌پی خودتان کمک می‌کند.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{updater: string, count: int, packages: array<int, string>} $updates
+     */
+    public static function serverUpdates(array $updates): string
+    {
+        if ($updates['count'] === 0) {
+            return '📦 همه‌ی بسته‌ها به‌روزند.';
+        }
+
+        $lines = ['📦 <b>' . $updates['count'] . ' بسته به‌روزرسانی دارد</b> (' . self::e($updates['updater']) . ')', ''];
+        foreach (array_slice($updates['packages'], 0, 20) as $package) {
+            $lines[] = '• <code>' . self::e($package) . '</code>';
+        }
+        if ($updates['count'] > 20) {
+            $lines[] = '… و ' . ($updates['count'] - 20) . ' بسته‌ی دیگر.';
+        }
+        $lines[] = '';
+        $lines[] = '💡 با «⬆️ نصب به‌روزرسانی‌ها» همه را یک‌جا نصب کنید (چند دقیقه طول می‌کشد).';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array{code: int, out: string, err: string} $result
+     */
+    public static function commandResult(string $command, array $result): string
+    {
+        $body = trim($result['out']) !== '' ? trim($result['out']) : trim($result['err']);
+        $body = $body === '' ? '(بدون خروجی)' : mb_substr($body, 0, 3000);
+
+        return ($result['code'] === 0 ? '✅' : '❌ کد ' . $result['code'])
+            . ' <code>' . self::e($command) . "</code>\n\n"
+            . '<pre>' . self::e($body) . '</pre>';
     }
 
     public static function error(Throwable $error): string

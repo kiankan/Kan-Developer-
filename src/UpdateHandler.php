@@ -1704,6 +1704,96 @@ final class UpdateHandler
                 ['key' => 'user', 'prompt' => 'وبمیل کدام حساب باز شود؟', 'picker' => 'whm_accounts'],
             ],
         ],
+        'ssh_add' => [
+            'title' => '🖧 افزودن سرور SSH',
+            'scope' => 'local',
+            'back' => 'srv',
+            'steps' => [
+                ['key' => 'label', 'prompt' => 'یک اسم دلخواه برای این سرور (مثل <code>سرور اصلی</code>):'],
+                ['key' => 'host', 'prompt' => "آی‌پی یا آدرس سرور را بفرستید:\n\n<code>203.0.113.10</code>\n<code>srv1.example.com</code>"],
+                ['key' => 'port', 'prompt' => 'پورت SSH؟', 'optional' => true, 'default' => '22', 'choices' => [
+                    ['22 (پیش‌فرض)', '22'],
+                    ['2222', '2222'],
+                ]],
+                ['key' => 'user', 'prompt' => 'نام کاربری:', 'optional' => true, 'default' => 'root', 'choices' => [
+                    ['root', 'root'],
+                ]],
+                ['key' => 'password', 'prompt' => "رمز عبور این کاربر را بفرستید.\n\n🔒 پیام رمز بعد از ثبت از چت پاک می‌شود و رمز فقط روی خود سرورِ ربات (با دسترسی ۰۶۰۰) ذخیره می‌شود.\n\n💡 اگر به‌جای رمز کلید SSH دارید، مسیر فایل کلید را بفرستید (مثل <code>/root/.ssh/id_rsa</code>).", 'secret' => true],
+            ],
+        ],
+        'sys_service' => [
+            'title' => '♻️ ری‌استارت سرویس',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'confirm' => '⚠️ سرویس <code>{name}</code> ری‌استارت می‌شود؛ چند ثانیه قطعی طبیعی است.',
+            'steps' => [
+                ['key' => 'name', 'prompt' => 'کدام سرویس؟', 'picker' => 'sys_services'],
+            ],
+        ],
+        'sys_passwd' => [
+            'title' => '🔑 تغییر رمز کاربر سرور',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'confirm' => '⚠️ رمز کاربر <code>{user}</code> روی سرور عوض می‌شود.',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'رمز کدام کاربر عوض شود؟', 'picker' => 'sys_users'],
+                ['key' => 'password', 'prompt' => "رمز تازه را بفرستید (یا <code>/gen</code> برای ساخت رمز قوی):\n\n🔒 پیام رمز بعد از ثبت از چت پاک می‌شود و رمز از ورودی استاندارد به سرور می‌رود، پس در فهرست پردازش‌های سرور هم دیده نمی‌شود.", 'secret' => true],
+            ],
+        ],
+        'sys_lock' => [
+            'title' => '🔒 قفل یا بازکردن کاربر',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'confirm' => '⚠️ روی کاربر <code>{user}</code> اعمال می‌شود.',
+            'steps' => [
+                ['key' => 'user', 'prompt' => 'کدام کاربر؟', 'picker' => 'sys_users'],
+                ['key' => 'state', 'prompt' => 'چه کارش کنم؟', 'choices' => [
+                    ['🔒 قفل کن (نتواند وارد شود)', '1'],
+                    ['🔓 باز کن', '0'],
+                ]],
+            ],
+        ],
+        'sys_block' => [
+            'title' => '⛔️ مسدودکردن آی‌پی روی سرور',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'steps' => [
+                ['key' => 'ip', 'prompt' => "کدام آی‌پی؟\n\n<code>203.0.113.55</code>\n\n💡 این مسدودسازی روی فایروال خود سرور انجام می‌شود، پس روی همه‌ی سرویس‌ها (نه فقط وب) اثر دارد."],
+                ['key' => 'state', 'prompt' => 'مسدود شود یا آزاد؟', 'choices' => [
+                    ['⛔️ مسدود کن', '1'],
+                    ['✅ آزاد کن', '0'],
+                ]],
+            ],
+        ],
+        'sys_run' => [
+            'title' => '🧪 اجرای دستور روی سرور',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'confirm' => "⚠️ این دستور با دسترسی کاربر SSH روی سرور اجرا می‌شود:\n<code>{command}</code>",
+            'steps' => [
+                ['key' => 'command', 'prompt' => "دستور را بفرستید:\n\n<code>df -h</code>\n<code>systemctl status nginx</code>\n\n⚠️ هرچه بفرستید همان اجرا می‌شود؛ مواظب دستورهای مخرب باشید."],
+            ],
+        ],
+        'sys_upgrade' => [
+            'title' => '⬆️ نصب به‌روزرسانی‌های سیستم',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'confirm' => "⚠️ همه‌ی بسته‌های سیستم به‌روزرسانی می‌شوند. چند دقیقه طول می‌کشد و ممکن است بعضی سرویس‌ها لحظه‌ای ری‌استارت شوند.\n\nپیشنهاد: اول از سرور اسنپ‌شات بگیرید.",
+            'steps' => [
+                ['key' => 'confirm', 'prompt' => 'مطمئنید؟', 'choices' => [
+                    ['✅ بله، به‌روزرسانی کن', 'yes'],
+                ]],
+            ],
+        ],
+        'sys_reboot' => [
+            'title' => '🔄 ری‌استارت سرور',
+            'scope' => 'ssh',
+            'back' => 'srvmgr',
+            'confirm' => "⚠️ کل سرور ری‌استارت می‌شود و همه‌ی سایت‌ها تا بالا آمدنش (معمولاً کمتر از دو دقیقه) از دسترس خارج‌اند.\n\nبرای تأیید، عبارتی که خواستم را دقیقاً نوشتید: <code>{confirm}</code>",
+            'steps' => [
+                ['key' => 'confirm', 'prompt' => "اگر واقعاً می‌خواهید سرور ری‌استارت شود، کلمه‌ی <code>ری‌استارت</code> را دقیقاً بنویسید و بفرستید."],
+            ],
+        ],
         'srv_use' => [
             'title' => '🔀 انتخاب سرور فعال',
             'scope' => 'local',
@@ -2187,6 +2277,17 @@ final class UpdateHandler
                 [self::btn('🎯 انتخاب کاربر مقصد', 'f:whm_user')],
                 [self::btn('⬅️ بازگشت', 'menu')],
             ]],
+            'srvmgr' => ["🖧 <b>مدیریت سرور</b>\n\nاین سرور با SSH وصل است (آی‌پی و رمز)، پس کل ماشین در دسترس است: وضعیت، فشار، سرویس‌ها، کاربران و رمزهایشان.", [
+                [self::btn('📊 وضعیت کامل', 'a:sysinfo'), self::btn('📈 فشار سیستم', 'a:sysload')],
+                [self::btn('⚙️ سرویس‌ها', 'a:sysservices'), self::btn('♻️ ری‌استارت سرویس', 'f:sys_service')],
+                [self::btn('🔌 پورت‌های باز', 'a:sysports'), self::btn('👥 کاربران سرور', 'a:sysusers')],
+                [self::btn('🔑 تغییر رمز کاربر', 'f:sys_passwd'), self::btn('🔒 قفل/بازکردن کاربر', 'f:sys_lock')],
+                [self::btn('🔐 وضعیت امنیتی', 'a:syssec'), self::btn('⛔️ مسدودکردن آی‌پی', 'f:sys_block')],
+                [self::btn('📦 به‌روزرسانی‌ها', 'a:sysupdates'), self::btn('⬆️ نصب به‌روزرسانی‌ها', 'f:sys_upgrade')],
+                [self::btn('🧪 اجرای دستور', 'f:sys_run')],
+                [self::btn('🔄 ری‌استارت سرور', 'f:sys_reboot')],
+                [self::btn('⬅️ بازگشت', 'menu')],
+            ]],
             'howto' => ["🧭 <b>کارهای رایج</b>\n\nنمی‌دانید از کجا شروع کنید؟ کاری که می‌خواهید انجام دهید را بزنید تا قدم‌به‌قدم بگویم.", [
                 [self::btn('🌐 راه‌اندازی یک سایت جدید', 'h:site')],
                 [self::btn('📤 گذاشتن سورس روی هاست', 'h:upload')],
@@ -2228,6 +2329,7 @@ final class UpdateHandler
                 self::serverPickerRows(),
                 [
                     [self::btn('➕ افزودن سرور', 'f:srv_add'), self::btn('🗑 حذف سرور', 'f:srv_del')],
+                    [self::btn('🖧 افزودن سرور SSH (آی‌پی و رمز)', 'f:ssh_add')],
                     [self::btn('⚖️ مقایسه‌ی دو هاست', 'f:srv_compare')],
                     [self::btn('✏️ تغییر نام', 'f:srv_rename'), self::btn('🔑 تغییر توکن', 'f:srv_token')],
                     [self::btn('🧩 اجرای ربات با کران روی هاست', 'f:selfhost_cron')],
@@ -2264,6 +2366,11 @@ final class UpdateHandler
 
         $rows = [];
 
+        if ($context['state'] === 'ssh') {
+            $rows[] = [self::btn('🖧 مدیریت سرور', 'm:srvmgr'), self::btn('📊 وضعیت سرور', 'a:sysinfo')];
+            $rows[] = [self::btn('📈 فشار سیستم', 'a:sysload'), self::btn('⚙️ سرویس‌ها', 'a:sysservices')];
+        }
+
         if ($context['is_whm']) {
             $rows[] = [self::btn('🖥 مدیریت سرور (WHM)', 'm:whm'), self::btn('👥 حساب‌ها', 'a:whmaccts')];
             $rows[] = [self::btn(
@@ -2281,9 +2388,14 @@ final class UpdateHandler
         }
 
         $rows[] = [self::btn('⚙️ سرورها', 'm:srv'), self::btn('👮 ادمین‌ها', 'm:adm')];
-        $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('📤 خروجی CSV', 'f:export_csv')];
-        $rows[] = [self::btn('✨ قابلیت‌ها', 'a:features')];
-        $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('⭐ میان‌برها', 'm:fav')];
+        if ($context['state'] === 'ssh') {
+            // روی سرور SSH، کارهای سطح حساب cPanel معنا ندارند.
+            $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('✨ قابلیت‌ها', 'a:features')];
+        } else {
+            $rows[] = [self::btn('🧭 کارهای رایج', 'm:howto'), self::btn('📤 خروجی CSV', 'f:export_csv')];
+            $rows[] = [self::btn('✨ قابلیت‌ها', 'a:features')];
+            $rows[] = [self::btn('🔍 جست‌وجو', 'f:search'), self::btn('⭐ میان‌برها', 'm:fav')];
+        }
         $rows[] = [self::btn('🔔 هشدارها', 'm:alerts')];
         $rows[] = [self::btn('🧾 لاگ عملیات', 'a:log')];
         $rows[] = [self::btn('❓ راهنما', 'a:help')];
@@ -2315,8 +2427,17 @@ final class UpdateHandler
             return '⚠️ هنوز هیچ سروری تنظیم نشده — از «⚙️ سرورها → ➕ افزودن سرور» شروع کنید.';
         }
 
-        $type = $server['type'] === CpanelClient::TYPE_WHM ? 'WHM' : 'cPanel';
-        $line = '🖥 سرور فعال: <b>' . Format::escapeHtml((string) $server['label']) . "</b> ($type)";
+        $type = match ($server['type']) {
+            CpanelClient::TYPE_WHM => 'WHM',
+            SshClient::TYPE => 'SSH',
+            default => 'cPanel',
+        };
+        $icon = $server['type'] === SshClient::TYPE ? '🖧' : '🖥';
+        $line = $icon . ' سرور فعال: <b>' . Format::escapeHtml((string) $server['label']) . "</b> ($type)";
+        if ($server['type'] === SshClient::TYPE) {
+            $line .= "\n🔗 <code>" . Format::escapeHtml((string) $server['host']) . ':' . (int) $server['port']
+                . '</code>  👤 <code>' . Format::escapeHtml((string) $server['user']) . '</code>';
+        }
         if ($server['type'] === CpanelClient::TYPE_WHM) {
             $line .= ($server['as_user'] ?? '') !== ''
                 ? "\n🎯 کاربر مقصد: <code>" . Format::escapeHtml((string) $server['as_user']) . '</code>'
@@ -2450,15 +2571,17 @@ final class UpdateHandler
     {
         $server = ServerStore::active();
         if ($server === null) {
-            return ['state' => 'none', 'is_whm' => false, 'target' => '', 'server' => null];
+            return ['state' => 'none', 'is_whm' => false, 'is_ssh' => false, 'target' => '', 'server' => null];
         }
 
         $isWhm = ($server['type'] ?? '') === CpanelClient::TYPE_WHM;
+        $isSsh = ($server['type'] ?? '') === SshClient::TYPE;
         $target = trim((string) ($server['as_user'] ?? ''));
 
         return [
-            'state' => $isWhm ? ($target !== '' ? 'whm_ready' : 'whm') : 'cpanel',
+            'state' => $isSsh ? 'ssh' : ($isWhm ? ($target !== '' ? 'whm_ready' : 'whm') : 'cpanel'),
             'is_whm' => $isWhm,
+            'is_ssh' => $isSsh,
             'target' => $target,
             'server' => $server,
         ];
@@ -2683,12 +2806,78 @@ final class UpdateHandler
             return;
         }
 
+        if (str_starts_with($action, 'sys')) {
+            $api->sendChatAction($chatId);
+            try {
+                $client = self::sshClient();
+                [$text, $extra] = match ($action) {
+                    'sysinfo' => [
+                        Render::serverFacts(SshService::facts($client)),
+                        [[self::btn('📈 فشار سیستم', 'a:sysload'), self::btn('⚙️ سرویس‌ها', 'a:sysservices')]],
+                    ],
+                    'sysload' => [
+                        Render::serverPressure(SshService::pressure($client)),
+                        [[self::btn('🔄 تازه‌سازی', 'a:sysload'), self::btn('⚙️ سرویس‌ها', 'a:sysservices')]],
+                    ],
+                    'sysservices' => [
+                        Render::serverServices(SshService::services($client)),
+                        [[self::btn('♻️ ری‌استارت سرویس', 'f:sys_service'), self::btn('🔌 پورت‌ها', 'a:sysports')]],
+                    ],
+                    'sysports' => [
+                        Render::serverPorts(SshService::ports($client)),
+                        [[self::btn('⛔️ مسدودکردن آی‌پی', 'f:sys_block'), self::btn('🔐 وضعیت امنیتی', 'a:syssec')]],
+                    ],
+                    'sysusers' => [
+                        Render::serverUsers(SshService::users($client)),
+                        [[self::btn('🔑 تغییر رمز', 'f:sys_passwd'), self::btn('🔒 قفل/بازکردن', 'f:sys_lock')]],
+                    ],
+                    'syssec' => [
+                        Render::serverSecurity(SshService::security($client)),
+                        [[self::btn('📦 به‌روزرسانی‌ها', 'a:sysupdates'), self::btn('⛔️ مسدودکردن آی‌پی', 'f:sys_block')]],
+                    ],
+                    'sysupdates' => [
+                        Render::serverUpdates(SshService::updates($client)),
+                        [[self::btn('⬆️ نصب به‌روزرسانی‌ها', 'f:sys_upgrade')]],
+                    ],
+                    default => ['این گزینه را نمی‌شناسم.', []],
+                };
+            } catch (Throwable $e) {
+                $text = Render::error($e);
+                $extra = [];
+            }
+
+            self::respond($api, $chatId, $text, ['inline_keyboard' => array_merge(
+                $extra,
+                [[self::btn('⬅️ بازگشت', 'm:srvmgr'), self::btn('🏠 منوی اصلی', 'menu')]],
+            )]);
+
+            return;
+        }
+
         if ($action === 'dashboard') {
             $api->sendChatAction($chatId);
             $rows = [];
             foreach (ServerStore::all() as $id => $server) {
                 $label = (string) $server['label'] . ' (' . $id . ')';
                 try {
+                    if (($server['type'] ?? '') === SshClient::TYPE) {
+                        $facts = SshService::facts(ServerStore::ssh((string) $id));
+                        $worst = 0.0;
+                        foreach ($facts['disks'] as $disk) {
+                            $worst = max($worst, (float) ($disk['percent'] ?? 0));
+                        }
+                        $load = $facts['load'][0] ?? 0.0;
+                        $rows[] = [
+                            'id' => (string) $id,
+                            'label' => $label . ' — SSH',
+                            'state' => $worst >= 90 || $load > $facts['cpu']['cores'] * 2 ? 'bad' : ($worst >= 80 ? 'warn' : 'ok'),
+                            'detail' => 'بار ' . number_format($load, 2) . ' روی ' . $facts['cpu']['cores'] . ' هسته'
+                                . '   🧠 ' . Format::percent($facts['memory']['percent'])
+                                . '   💽 ' . Format::percent($worst > 0 ? $worst : null),
+                        ];
+                        continue;
+                    }
+
                     $client = ServerStore::client((string) $id);
                     if ($client->isWhm() && $client->targetUser() === '') {
                         $status = CpanelService::whmServerStatus($client);
@@ -2735,7 +2924,9 @@ final class UpdateHandler
             $lines = ['🔌 <b>تست اتصال همه‌ی سرورها</b>', ''];
             foreach (ServerStore::all() as $id => $server) {
                 try {
-                    $info = ServerStore::client((string) $id)->ping();
+                    $info = ($server['type'] ?? '') === SshClient::TYPE
+                        ? ServerStore::ssh((string) $id)->ping()
+                        : ServerStore::client((string) $id)->ping();
                     $lines[] = '✅ <b>' . Format::escapeHtml((string) $server['label']) . '</b> — <code>'
                         . Format::escapeHtml((string) ($info['user'] ?? '')) . '</code>';
                 } catch (Throwable $e) {
@@ -2954,7 +3145,9 @@ final class UpdateHandler
         $api->sendChatAction($chatId);
         try {
             $text = match ($action) {
-                'ping' => Render::ping(ServerStore::client()->ping()),
+                'ping' => self::context()['is_ssh']
+                    ? Render::ping(ServerStore::ssh()->ping() + ['type' => 'ssh'])
+                    : Render::ping(ServerStore::client()->ping()),
                 'summary' => self::summaryWithHistory(),
                 'emails' => self::emailsWithUsage(),
                 'dbs' => Render::databases(
@@ -3536,6 +3729,7 @@ final class UpdateHandler
             'inodes' => 'files',
             'sslcheck' => 'ssl',
             'dashboard', 'pingall', 'configexport' => 'srv',
+            'sysinfo', 'sysload', 'sysservices', 'sysports', 'sysusers', 'syssec', 'sysupdates' => 'srvmgr',
             'actors' => 'adm',
             'health' => null,
             'dbsizes' => 'db',
@@ -4034,6 +4228,25 @@ final class UpdateHandler
                 }
 
                 return $simple(CpanelService::importantFiles(self::accountClient(), $docroot));
+
+            case 'sys_services':
+                $options = [];
+                foreach (SshService::services(self::sshClient())['known'] as $service) {
+                    $options[] = ['label' => $service['name'] . ' — ' . $service['state'], 'value' => $service['name']];
+                }
+
+                return $options;
+
+            case 'sys_users':
+                $options = [];
+                foreach (SshService::users(self::sshClient())['users'] as $user) {
+                    $options[] = [
+                        'label' => $user['name'] . ($user['locked'] === true ? ' 🔒' : ''),
+                        'value' => $user['name'],
+                    ];
+                }
+
+                return $options;
 
             case 'cron_when':
                 $options = [];
@@ -5967,6 +6180,123 @@ final class UpdateHandler
             . $url . "\n\n⚠️ این لینک چند دقیقه معتبر است؛ بعدش دوباره بسازید.";
     }
 
+    /** @param array<string, mixed> $data */
+    private static function runSshAdd(array $data): string
+    {
+        $secret = trim((string) $data['password']);
+        $isKey = str_starts_with($secret, '/') && !str_contains($secret, ' ');
+
+        $server = [
+            'label' => (string) $data['label'],
+            'type' => SshClient::TYPE,
+            'host' => (string) $data['host'],
+            'port' => (string) ($data['port'] ?? '22'),
+            'user' => trim((string) ($data['user'] ?? 'root')) ?: 'root',
+            'password' => $isKey ? '' : $secret,
+            'key' => $isKey ? $secret : '',
+        ];
+
+        $check = SshClient::available(!$isKey);
+        if (!$check['ok']) {
+            return '⚠️ ' . $check['message'];
+        }
+
+        // اول تست می‌کنیم، بعد ذخیره — تا سرور خراب در فهرست نماند.
+        try {
+            $info = (new SshClient($server))->ping();
+        } catch (Throwable $e) {
+            return "⚠️ اتصال به سرور برقرار نشد، پس ذخیره‌اش نکردم:\n\n" . Render::error($e)
+                . "\n\n💡 آی‌پی، پورت، نام کاربری و رمز را دوباره بررسی کنید و مطمئن شوید فایروال سرور به آی‌پی همین ماشین اجازه‌ی SSH می‌دهد.";
+        }
+
+        $id = ServerStore::add($server);
+        ServerStore::setActive($id);
+
+        return "✅ سرور اضافه و فعال شد.\n\n"
+            . '👤 وارد شدیم به‌عنوان: <code>' . Format::escapeHtml($info['user']) . "</code>\n"
+            . '🏷 نام سرور: <code>' . Format::escapeHtml($info['host']) . "</code>\n"
+            . '🆔 شناسه: <code>' . Format::escapeHtml($id) . "</code>\n\n"
+            . 'حالا از «🖧 مدیریت سرور» همه‌چیزش در دسترس است.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysService(array $data): string
+    {
+        $name = (string) $data['name'];
+        $state = SshService::restartService(self::sshClient(), $name);
+
+        return '♻️ سرویس <code>' . Format::escapeHtml($name) . '</code> ری‌استارت شد — وضعیت فعلی: <code>'
+            . Format::escapeHtml($state !== '' ? $state : 'نامشخص') . '</code>';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysPasswd(array $data): string
+    {
+        $user = (string) $data['user'];
+        $password = (string) $data['password'];
+        SshService::changePassword(self::sshClient(), $user, $password);
+
+        return '🔑 رمز کاربر <code>' . Format::escapeHtml($user) . "</code> روی سرور عوض شد.\n\n"
+            . 'رمز تازه: <code>' . Format::escapeHtml($password) . "</code>\n\n"
+            . '⚠️ همین حالا جای امنی ذخیره‌اش کنید و این پیام را پاک کنید.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysLock(array $data): string
+    {
+        $lock = (string) ($data['state'] ?? '1') === '1';
+        $user = (string) $data['user'];
+        SshService::lockUser(self::sshClient(), $user, $lock);
+
+        return ($lock ? '🔒 کاربر ' : '🔓 کاربر ') . '<code>' . Format::escapeHtml($user) . '</code> '
+            . ($lock ? 'قفل شد و دیگر نمی‌تواند با رمز وارد شود.' : 'باز شد و دوباره می‌تواند وارد شود.');
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysBlock(array $data): string
+    {
+        $block = (string) ($data['state'] ?? '1') === '1';
+        $ip = trim((string) $data['ip']);
+        $tool = SshService::blockIp(self::sshClient(), $ip, $block);
+
+        return ($block ? '⛔️ آی‌پی ' : '✅ آی‌پی ') . '<code>' . Format::escapeHtml($ip) . '</code> '
+            . ($block ? 'روی فایروال سرور مسدود شد' : 'از فهرست مسدودها برداشته شد')
+            . ($tool !== '' ? ' (' . Format::escapeHtml($tool) . ')' : '') . '.';
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysRun(array $data): string
+    {
+        $command = (string) $data['command'];
+        $result = SshService::command(self::sshClient(), $command);
+
+        return Render::commandResult($command, $result);
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysUpgrade(array $data): string
+    {
+        $output = SshService::upgrade(self::sshClient());
+
+        return "⬆️ به‌روزرسانی انجام شد.\n\n<pre>"
+            . Format::escapeHtml(mb_substr($output !== '' ? $output : '(بدون خروجی)', 0, 2500))
+            . "</pre>\n\n💡 اگر «reboot required» دیدید، از «🔄 ری‌استارت سرور» استفاده کنید.";
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function runSysReboot(array $data): string
+    {
+        $confirm = trim((string) $data['confirm']);
+        if ($confirm !== 'ری‌استارت' && strtolower($confirm) !== 'reboot') {
+            throw CpanelError::config('عبارت تأیید درست نبود؛ برای ری‌استارت باید دقیقاً کلمه‌ی «ری‌استارت» را بنویسید.');
+        }
+
+        SshService::reboot(self::sshClient());
+
+        return "🔄 دستور ری‌استارت فرستاده شد.\n\n"
+            . 'یکی دو دقیقه دیگر «📊 وضعیت سرور» را بزنید؛ اگر بالا آمده باشد، مدت بالا بودنش صفر شده است.';
+    }
+
     /**
      * فایلی که بعد از پیام نتیجه در تلگرام فرستاده می‌شود.
      */
@@ -6468,8 +6798,28 @@ final class UpdateHandler
         return match (self::FLOWS[$flow]['scope'] ?? 'account') {
             'whm' => self::whmClient(),
             'local' => null,
+            // سرورهای SSH کلاینت سی‌پنل ندارند؛ فقط بررسی می‌کنیم اتصالش تعریف شده باشد.
+            'ssh' => self::sshCheck(),
             default => self::accountClient(),
         };
+    }
+
+    /**
+     * فقط برای اینکه جریان‌های SSH زودتر از پر کردن مرحله‌ها خطا بدهند.
+     */
+    private static function sshCheck(): ?CpanelClient
+    {
+        self::sshClient();
+
+        return null;
+    }
+
+    /**
+     * کلاینت SSH سرور فعال.
+     */
+    private static function sshClient(): SshClient
+    {
+        return ServerStore::ssh();
     }
 
     /**
@@ -6590,6 +6940,19 @@ final class UpdateHandler
             . "🔑 تغییر رمز حساب، 📦 تغییر پلن، 📊 تغییر سهمیه‌ی دیسک، 🔐 لینک ورود یک‌بارمصرف\n"
             . '📈 بار سیستم و سرویس‌ها، ♻️ ری‌استارت سرویس، 🖧 آی‌پی‌های سرور، ⛔️ فهرست حساب‌های معلق';
 
+        if ($context['state'] === 'ssh') {
+            return "✨ <b>قابلیت‌های این سرور (SSH)</b>\n\n"
+                . "این سرور با آی‌پی و رمز وصل شده، پس خود ماشین در دسترس است:\n\n"
+                . "📊 <b>وضعیت</b> — سیستم‌عامل، کرنل، آی‌پی‌ها، مدت بالا بودن، پردازنده، حافظه، سواپ و دیسک‌ها\n"
+                . "📈 <b>فشار</b> — بار سیستم روی تعداد هسته‌ها و سنگین‌ترین پردازش‌ها\n"
+                . "⚙️ <b>سرویس‌ها</b> — وضعیت و ری‌استارت (وب‌سرور، دیتابیس، PHP-FPM و ...)\n"
+                . "🔌 <b>پورت‌ها</b> — چه چیزی از بیرون باز است\n"
+                . "👥 <b>کاربران</b> — فهرست، تغییر رمز، قفل و بازکردن\n"
+                . "🔐 <b>امنیت</b> — فایروال، ورودهای ناموفق، ورود root و به‌روزرسانی‌های در انتظار\n"
+                . "🧪 <b>اجرای دستور</b> و 🔄 <b>ری‌استارت سرور</b>\n\n"
+                . '💡 کارهای سطح هاست (ایمیل، دیتابیس، فایل‌منیجر) نیاز به یک سرور cPanel دارند؛ می‌توانید هر دو را کنار هم داشته باشید و از «⚙️ سرورها» بینشان جابه‌جا شوید.';
+        }
+
         return match ($context['state']) {
             'cpanel' => "✨ <b>قابلیت‌های این هاست (cPanel)</b>\n\n" . $account
                 . "\n\n💡 کارهای سطح سرور (ساخت/تعلیق حساب، ری‌استارت سرویس) فقط با توکن WHM ممکن است؛ اگر دسترسی WHM دارید، یک سرور از نوع WHM اضافه کنید.",
@@ -6616,9 +6979,12 @@ final class UpdateHandler
         }
 
         $lines = ["🛠 <b>cPanel TeamKan</b>", ''];
-        $lines[] = $context['is_whm']
-            ? 'این سرور با توکن <b>WHM</b> وصل است، پس کارهای سطح سرور (حساب‌ها، پلن‌ها، سرویس‌ها) در دسترس است.'
-            : 'این هاست با توکن <b>cPanel</b> وصل است، پس کارهای همان حساب (ایمیل، دیتابیس، فایل، دامنه و ...) در دسترس است.';
+        $lines[] = match (true) {
+            $context['state'] === 'ssh' => 'این سرور با <b>SSH</b> (آی‌پی و رمز) وصل است، پس خود ماشین در دسترس است:'
+                . ' وضعیت، فشار، سرویس‌ها، کاربران و رمزهایشان.',
+            $context['is_whm'] => 'این سرور با توکن <b>WHM</b> وصل است، پس کارهای سطح سرور (حساب‌ها، پلن‌ها، سرویس‌ها) در دسترس است.',
+            default => 'این هاست با توکن <b>cPanel</b> وصل است، پس کارهای همان حساب (ایمیل، دیتابیس، فایل، دامنه و ...) در دسترس است.',
+        };
 
         if ($context['state'] === 'whm') {
             $lines[] = '';

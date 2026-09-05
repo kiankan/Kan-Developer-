@@ -204,6 +204,31 @@ final class Alerts
     }
 
     /**
+     * هشدارهای یک سرور SSH، با همان قاعده‌ی «تا شش ساعت تکرار نکن» بقیه‌ی
+     * هشدارها — وگرنه هر ربع ساعت همان پیام تکرار می‌شد.
+     *
+     * @return array<int, string>
+     */
+    public static function serverAlerts(SshClient $client): array
+    {
+        $state = self::loadState();
+        $now = time();
+        $messages = [];
+
+        foreach (SshService::alerts($client) as $message) {
+            // عددها از کلید حذف می‌شوند تا ۸۸٪ و ۸۹٪ یک هشدار حساب شوند.
+            $key = 'ssh:' . substr(sha1((string) preg_replace('/\d+/', '', $message)), 0, 12);
+            if (self::shouldNotify($state, $key, $now)) {
+                $messages[] = $message;
+            }
+        }
+
+        self::saveState($state);
+
+        return $messages;
+    }
+
+    /**
      * فایل‌هایی که کاربر زیر نظر گرفته: اگر محتوایشان عوض شود خبر می‌دهیم.
      *
      * تغییر ناگهانی <code>.htaccess</code> یا <code>wp-config.php</code>

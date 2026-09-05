@@ -1768,6 +1768,236 @@ if (is_resource($cpanelProcess)) {
         expect(in_array('f:harden', tg_last_buttons(), true), 'دکمه‌ی سخت‌سازی در راهنمای امنیت نبود');
     });
 
+// ---------------------------------------------------------------------------
+// بخش سوم: مدیریت سرور لینوکسی با SSH. به‌جای سرور واقعی، یک اجراکننده‌ی
+// ساختگی می‌نشیند تا همان مسیر منو → دستور → تفسیر خروجی تست شود.
+// ---------------------------------------------------------------------------
+
+$sshCommands = [];
+SshClient::setDefaultRunner(static function (string $command, array $server, string $stdin) use (&$sshCommands): array {
+    $sshCommands[] = ['command' => $command, 'stdin' => $stdin];
+
+    $reply = static function (array $sections): string {
+        $out = [];
+        foreach ($sections as $name => $body) {
+            $out[] = '###TEAMKAN:' . $name;
+            $out[] = $body;
+        }
+
+        return implode("\n", $out);
+    };
+
+    if (str_contains($command, 'id -un')) {
+        return ['code' => 0, 'out' => "root\nsrv1.example.com\n 10:00:00 up 4 days,  1:02,  1 user,  load average: 0.50\n", 'err' => ''];
+    }
+    if (str_contains($command, '/proc/uptime')) {
+        return ['code' => 0, 'out' => $reply([
+            'host' => 'srv1.example.com',
+            'os' => 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"',
+            'kernel' => '6.1.0-18-amd64',
+            'uptime' => '360000.42 700000.11',
+            'load' => '0.80 0.60 0.40 2/300 1234',
+            'cores' => '4',
+            'cpu' => ' AMD EPYC 7402P',
+            'mem' => "MemTotal:        8192000 kB\nMemFree: 1000000 kB\nMemAvailable:    4096000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB",
+            'disk' => "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vda1 51475068 20000000 31475068 40% /",
+            'ip' => '203.0.113.10',
+            'ps' => '180',
+        ]), 'err' => ''];
+    }
+    if (str_contains($command, 'cpu_top')) {
+        return ['code' => 0, 'out' => $reply([
+            'load' => '0.80 0.60 0.40 2/300 1234',
+            'cores' => '4',
+            'mem' => "MemTotal:        8192000 kB\nMemFree: 1000000 kB\nMemAvailable:    4096000 kB",
+            'cpu_top' => "%CPU %MEM   PID COMMAND\n12.0  8.0  900 mysqld",
+            'mem_top' => "%CPU %MEM   PID COMMAND\n12.0  8.0  900 mysqld",
+            'io' => '',
+        ]), 'err' => ''];
+    }
+    if (str_contains($command, 'systemctl is-active')) {
+        return ['code' => 0, 'out' => $reply([
+            'systemd' => 'yes',
+            'known' => "nginx active\nmysql active\napache2 missing",
+            'failed' => '',
+        ]), 'err' => ''];
+    }
+    if (str_contains($command, 'ss -tulpnH')) {
+        return ['code' => 0, 'out' => "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=1,fd=6))\n"
+            . "tcp LISTEN 0 70 127.0.0.1:3306 0.0.0.0:* users:((\"mysqld\",pid=2,fd=7))", 'err' => ''];
+    }
+    if (str_contains($command, '/etc/passwd')) {
+        return ['code' => 0, 'out' => $reply([
+            'passwd' => "root:0:/root:/bin/bash\nkian:1000:/home/kian:/bin/bash",
+            'locked' => "root:P\nkian:P",
+            'online' => 'root pts/0 2026-09-05 10:00',
+            'last' => 'root pts/0 203.0.113.55 Fri Sep 5 10:00',
+        ]), 'err' => ''];
+    }
+    if (str_contains($command, 'ufw status')) {
+        return ['code' => 0, 'out' => $reply([
+            'firewall' => 'Status: active',
+            'failed' => '17',
+            'root' => 'PermitRootLogin yes',
+            'updates' => '3',
+            'updater' => 'apt',
+            'reboot' => 'no',
+            'selinux' => '-',
+        ]), 'err' => ''];
+    }
+    if (str_contains($command, 'awk \'/^Inst/')) {
+        return ['code' => 0, 'out' => $reply([
+            'updater' => 'apt',
+            'list' => "openssl\ncurl\nlibc6",
+        ]), 'err' => ''];
+    }
+
+    return ['code' => 0, 'out' => 'ok', 'err' => ''];
+});
+
+scenario('افزودن سرور SSH با آی‌پی و رمز، اول تست می‌کند بعد ذخیره', function () use (&$sshCommands): void {
+    press('m:srv');
+    expect(in_array('f:ssh_add', tg_last_buttons(), true), 'دکمه‌ی افزودن سرور SSH در منوی سرورها نبود');
+
+    press('f:ssh_add');
+    send_text('سرور لینوکسی');
+    send_text('203.0.113.10');
+    press('c:0');                                   // پورت ۲۲
+    press('c:0');                                   // کاربر root
+    send_text('rmz-khodam-1234');
+
+    $text = tg_last_text();
+    expect(str_contains($text, 'اضافه و فعال شد'), 'سرور SSH اضافه نشد: ' . $text);
+    expect(str_contains($text, 'root'), 'کاربر واردشده گزارش نشد');
+
+    $active = ServerStore::active();
+    expect(($active['type'] ?? '') === 'ssh', 'سرور SSH باید فعال شود');
+    expect(($active['password'] ?? '') === 'rmz-khodam-1234', 'رمز ذخیره نشد');
+});
+
+scenario('روی سرور SSH، منوی اصلی کارهای همین سرور را نشان می‌دهد', function (): void {
+    press('menu');
+    $buttons = tg_last_buttons();
+    foreach (['m:srvmgr', 'a:sysinfo', 'a:sysload'] as $expected) {
+        expect(in_array($expected, $buttons, true), "دکمه‌ی $expected برای سرور SSH باید باشد");
+    }
+    foreach (['m:email', 'm:db', 'm:files', 'f:export_csv'] as $unexpected) {
+        expect(!in_array($unexpected, $buttons, true), "دکمه‌ی $unexpected روی سرور SSH نباید بیاید");
+    }
+});
+
+scenario('وضعیت کامل سرور: سیستم‌عامل، آی‌پی، حافظه و دیسک', function (): void {
+    press('a:sysinfo');
+    $text = tg_last_text();
+    expect(str_contains($text, 'Debian GNU/Linux 12'), 'سیستم‌عامل نیامد');
+    expect(str_contains($text, '203.0.113.10'), 'آی‌پی سرور نیامد');
+    expect(str_contains($text, '4 هسته'), 'تعداد هسته نیامد');
+    expect(str_contains($text, '💽'), 'دیسک‌ها نیامدند');
+    expect(str_contains($text, 'بالا بوده'), 'مدت بالا بودن نیامد');
+});
+
+scenario('فشار سیستم و سرویس‌ها', function (): void {
+    press('a:sysload');
+    expect(str_contains(tg_last_text(), 'mysqld'), 'سنگین‌ترین پردازش نیامد');
+    expect(str_contains(tg_last_text(), 'فشار'), 'عنوان فشار نیامد');
+
+    press('a:sysservices');
+    $text = tg_last_text();
+    expect(str_contains($text, 'nginx'), 'سرویس nginx نیامد');
+    expect(str_contains($text, 'در حال اجرا'), 'وضعیت سرویس ترجمه نشد');
+    expect(in_array('f:sys_service', tg_last_buttons(), true), 'دکمه‌ی ری‌استارت سرویس نبود');
+});
+
+scenario('پورت‌ها، کاربران و وضعیت امنیتی', function (): void {
+    press('a:sysports');
+    expect(str_contains(tg_last_text(), 'وب'), 'پورت ۸۰ ترجمه نشد');
+    expect(str_contains(tg_last_text(), 'MySQL'), 'پورت ۳۳۰۶ ترجمه نشد');
+
+    press('a:sysusers');
+    expect(str_contains(tg_last_text(), 'kian'), 'کاربر سرور نیامد');
+
+    press('a:syssec');
+    $text = tg_last_text();
+    expect(str_contains($text, 'Status: active'), 'وضعیت فایروال نیامد');
+    expect(str_contains($text, 'ورود مستقیم کاربر root'), 'هشدار ورود root نیامد');
+});
+
+scenario('به‌روزرسانی‌ها و ری‌استارت سرویس', function () use (&$sshCommands): void {
+    press('a:sysupdates');
+    expect(str_contains(tg_last_text(), 'openssl'), 'فهرست بسته‌ها نیامد');
+
+    press('f:sys_service');
+    press('c:0');                                   // nginx
+    press('ok');
+    expect(str_contains(tg_last_text(), 'ری‌استارت شد'), 'پیام ری‌استارت سرویس نیامد');
+    $last = implode(' ', array_column($sshCommands, 'command'));
+    expect(str_contains($last, "systemctl restart 'nginx'"), 'دستور ری‌استارت درست نرفت');
+});
+
+scenario('تغییر رمز کاربر سرور، رمز را از stdin می‌فرستد', function () use (&$sshCommands): void {
+    $before = count($sshCommands);
+
+    press('f:sys_passwd');
+    press('c:1');                                   // kian
+    send_text('rmz-taze-4321');
+    press('ok');
+
+    expect(str_contains(tg_last_text(), 'عوض شد'), 'پیام تغییر رمز نیامد');
+
+    $sent = array_slice($sshCommands, $before);
+    $chpasswd = array_values(array_filter($sent, static fn (array $c): bool => $c['command'] === 'chpasswd'));
+    expect($chpasswd !== [], 'دستور chpasswd اجرا نشد');
+    expect(str_contains((string) $chpasswd[0]['stdin'], 'kian:rmz-taze-4321'), 'رمز از stdin نرفت');
+    foreach ($sent as $call) {
+        expect(!str_contains($call['command'], 'rmz-taze-4321'), 'رمز نباید در خط فرمان بیاید!');
+    }
+});
+
+scenario('اجرای دستور دلخواه با تأیید انجام می‌شود', function (): void {
+    press('f:sys_run');
+    send_text('df -h');
+    expect(in_array('ok', tg_last_buttons(), true), 'اجرای دستور باید تأیید بگیرد');
+    press('ok');
+    expect(str_contains(tg_last_text(), 'df -h'), 'خود دستور در نتیجه نیامد');
+});
+
+scenario('ری‌استارت سرور بدون نوشتن عبارت تأیید انجام نمی‌شود', function (): void {
+    press('f:sys_reboot');
+    send_text('بله');
+    press('ok');
+    expect(str_contains(tg_last_text(), 'عبارت تأیید'), 'ری‌استارت با عبارت اشتباه نباید انجام شود');
+
+    press('f:sys_reboot');
+    send_text('ری‌استارت');
+    press('ok');
+    expect(str_contains(tg_last_text(), 'دستور ری‌استارت فرستاده شد'), 'ری‌استارت با عبارت درست انجام نشد');
+});
+
+scenario('مسدودکردن آی‌پی روی فایروال سرور', function () use (&$sshCommands): void {
+    press('f:sys_block');
+    send_text('203.0.113.55');
+    press('c:0');                                   // مسدود کن
+    expect(str_contains(tg_last_text(), '203.0.113.55'), 'نتیجه‌ی مسدودسازی نیامد');
+    $all = implode(' ', array_column($sshCommands, 'command'));
+    expect(str_contains($all, "ufw deny from '203.0.113.55'"), 'دستور فایروال درست نرفت');
+});
+
+scenario('لاگ عملیات سرور، رمز را ثبت نمی‌کند', function (): void {
+    press('a:log');
+    $text = tg_last_text();
+    expect(!str_contains($text, 'rmz-taze-4321'), 'رمز کاربر سرور نباید در لاگ باشد!');
+    expect(!str_contains($text, 'rmz-khodam-1234'), 'رمز سرور نباید در لاگ باشد!');
+});
+
+scenario('داشبورد چندسروری، سرور SSH را هم نشان می‌دهد', function (): void {
+    press('a:dashboard');
+    $text = tg_last_text();
+    expect(str_contains($text, 'SSH'), 'سرور SSH در داشبورد نیامد');
+    expect(str_contains($text, 'هسته'), 'بار سرور SSH در داشبورد نیامد');
+});
+
+SshClient::setDefaultRunner(null);
+
     proc_terminate($cpanelProcess);
     proc_close($cpanelProcess);
 } else {

@@ -57,13 +57,18 @@ need_root() {
 php_bin() { command -v php || echo /usr/bin/php; }
 
 install_deps_os() {
+  # openssh-client و sshpass فقط برای «مدیریت سرور با SSH» لازم‌اند؛ اگر نصب
+  # نشوند بقیه‌ی ربات مثل قبل کار می‌کند و خود ربات هم موقع نیاز راهنمایی می‌دهد.
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
     apt-get install -y php-cli php-curl php-mbstring git curl
+    apt-get install -y openssh-client sshpass || true
   elif command -v dnf >/dev/null 2>&1; then
     dnf install -y php-cli php-curl php-mbstring git curl
+    dnf install -y openssh-clients sshpass || true
   elif command -v yum >/dev/null 2>&1; then
     yum install -y php-cli php-curl php-mbstring git curl
+    yum install -y openssh-clients sshpass || true
   else
     echo "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد؛ php-cli (با curl و mbstring) و git را خودتان نصب کنید."
   fi
