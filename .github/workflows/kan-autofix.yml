@@ -99,14 +99,14 @@ jobs:
           tg_chat = os.environ.get("TELEGRAM_CHAT_ID")
           if tg_token and tg_chat:
               message = (
-                  "🚨 Kan GitHub AutoFix: workflow failed\\n"
-                  f"Repository: {repo}\\n"
-                  f"Workflow: {run.get('name') or 'GitHub Actions'}\\n"
-                  f"Branch: {run.get('head_branch')}\\n"
-                  f"Commit: {(run.get('head_sha') or '')[:12]}\\n"
-                  f"Run: {run.get('html_url')}\\n"
-                  f"Report: {issue.get('html_url')}\\n\\n"
-                  "AI diagnosis:\\n" + diagnosis
+                  "🚨 Kan GitHub AutoFix: workflow failed\n"
+                  f"Repository: {repo}\n"
+                  f"Workflow: {run.get('name') or 'GitHub Actions'}\n"
+                  f"Branch: {run.get('head_branch')}\n"
+                  f"Commit: {(run.get('head_sha') or '')[:12]}\n"
+                  f"Run: {run.get('html_url')}\n"
+                  f"Report: {issue.get('html_url')}\n\n"
+                  "AI diagnosis:\n" + diagnosis
               )
               message = message[:3900]
               tg_req = urllib.request.Request(
