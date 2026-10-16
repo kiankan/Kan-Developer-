@@ -30,6 +30,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python - <<'PY'
           import json, os, sys, urllib.request, urllib.error, zipfile, io
@@ -92,4 +94,35 @@ jobs:
               print("Could not create issue; check repository issue settings and token permissions.", e.code, e.read().decode("utf-8","replace")[:1000])
               raise
           print("Created automated report:", issue.get("html_url"))
+          # Send a plain-text alert to Telegram if both repository secrets are configured.
+          tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          tg_chat = os.environ.get("TELEGRAM_CHAT_ID")
+          if tg_token and tg_chat:
+              message = (
+                  "🚨 Kan GitHub AutoFix: workflow failed\\n"
+                  f"Repository: {repo}\\n"
+                  f"Workflow: {run.get('name') or 'GitHub Actions'}\\n"
+                  f"Branch: {run.get('head_branch')}\\n"
+                  f"Commit: {(run.get('head_sha') or '')[:12]}\\n"
+                  f"Run: {run.get('html_url')}\\n"
+                  f"Report: {issue.get('html_url')}\\n\\n"
+                  "AI diagnosis:\\n" + diagnosis
+              )
+              message = message[:3900]
+              tg_req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                  data=json.dumps({"chat_id": tg_chat, "text": message, "disable_web_page_preview": True}).encode(),
+                  headers={"Content-Type": "application/json"}
+              )
+              try:
+                  with urllib.request.urlopen(tg_req, timeout=30) as r:
+                      tg_result = json.loads(r.read())
+                  if not tg_result.get("ok"):
+                      print("Telegram API rejected the notification; check TELEGRAM_CHAT_ID and bot access.")
+                  else:
+                      print("Telegram failure alert sent.")
+              except Exception as e:
+                  print(f"Telegram notification failed ({type(e).__name__}); verify TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and bot access.")
+          else:
+              print("Telegram alert skipped: configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID repository secrets.")
           PY
